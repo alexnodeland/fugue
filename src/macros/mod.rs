@@ -1,1 +1,1 @@
-// Reserved for prob! macro or other syntactic sugar
+//! Macro module, reserved for future syntactic sugar like `prob!`.
