@@ -130,17 +130,21 @@ pub use runtime::interpreters::{PriorHandler, ReplayHandler, ScoreGivenTrace};
 pub use runtime::trace::{Choice, ChoiceValue, Trace};
 
 // Re-export key inference methods
+pub use core::numerical::{log1p_exp, log_sum_exp, normalize_log_probs, safe_ln};
+pub use error::{FugueError, FugueResult, Validate};
 pub use inference::abc::{
     abc_rejection, abc_scalar_summary, abc_smc, DistanceFunction, EuclideanDistance,
 };
 pub use inference::diagnostics::{print_diagnostics, r_hat, summarize_parameter, ParameterSummary};
+pub use inference::mcmc_utils::{
+    effective_sample_size_mcmc, geweke_diagnostic, DiminishingAdaptation,
+};
 pub use inference::mh::{adaptive_mcmc_chain, adaptive_single_site_mh, AdaptiveScales};
 pub use inference::smc::{
     adaptive_smc, effective_sample_size, Particle, ResamplingMethod, SMCConfig,
 };
+pub use inference::validation::{
+    ks_test_distribution, test_conjugate_normal_model, ValidationResult,
+};
 pub use inference::vi::{elbo_with_guide, optimize_meanfield_vi, MeanFieldGuide, VariationalParam};
-pub use inference::mcmc_utils::{DiminishingAdaptation, effective_sample_size_mcmc, geweke_diagnostic};
-pub use inference::validation::{ValidationResult, test_conjugate_normal_model, ks_test_distribution};
-pub use core::numerical::{log_sum_exp, normalize_log_probs, log1p_exp, safe_ln};
-pub use runtime::memory::{CowTrace, TraceBuilder, TracePool, PooledPriorHandler};
-pub use error::{FugueError, FugueResult, Validate};
+pub use runtime::memory::{CowTrace, PooledPriorHandler, TraceBuilder, TracePool};

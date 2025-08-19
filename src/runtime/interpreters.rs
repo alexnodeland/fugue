@@ -40,10 +40,10 @@
 /// let model = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 });
 /// let mut rng = StdRng::seed_from_u64(42);
 /// let (value, new_trace) = runtime::handler::run(
-///     ReplayHandler { 
-///         rng: &mut rng, 
-///         base: existing_trace, 
-///         trace: Trace::default() 
+///     ReplayHandler {
+///         rng: &mut rng,
+///         base: existing_trace,
+///         trace: Trace::default()
 ///     },
 ///     model
 /// );
@@ -67,9 +67,9 @@
 ///
 /// // Now score the same model with the trace
 /// let (value, score_trace) = runtime::handler::run(
-///     ScoreGivenTrace { 
-///         base: existing_trace, 
-///         trace: Trace::default() 
+///     ScoreGivenTrace {
+///         base: existing_trace,
+///         trace: Trace::default()
 ///     },
 ///     model_fn()
 /// );

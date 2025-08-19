@@ -39,7 +39,7 @@
 //! // Simple ABC example for illustration
 //! let mut rng = StdRng::seed_from_u64(42);
 //! let observed_data = vec![2.0];
-//! 
+//!
 //! let samples = abc_scalar_summary(
 //!     &mut rng,
 //!     || sample(addr!("mu"), Normal { mu: 0.0, sigma: 2.0 }),
@@ -54,7 +54,7 @@
 //!     0.5, // tolerance
 //!     10   // max samples
 //! );
-//! 
+//!
 //! assert!(!samples.is_empty());
 //! ```
 

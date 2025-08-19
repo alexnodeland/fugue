@@ -29,10 +29,10 @@
 //! // Create and use distributions in models
 //! let model = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 })
 //!     .bind(|x| {
-//!         let transformed = if x > 0.0 { 
-//!             Exponential { rate: x } 
-//!         } else { 
-//!             Exponential { rate: 0.1 } 
+//!         let transformed = if x > 0.0 {
+//!             Exponential { rate: x }
+//!         } else {
+//!             Exponential { rate: 0.1 }
 //!         };
 //!         sample(addr!("y"), transformed)
 //!     });
@@ -74,7 +74,7 @@ pub type LogF64 = f64;
 /// // Use trait methods directly
 /// let normal = Normal { mu: 0.0, sigma: 1.0 };
 /// let mut rng = StdRng::seed_from_u64(42);
-/// 
+///
 /// let sample = normal.sample(&mut rng);
 /// let log_prob = normal.log_prob(0.0); // Should be near -0.92 (for standard normal)
 /// ```
@@ -89,7 +89,7 @@ pub trait DistributionF64: Send + Sync {
     ///
     /// A sample from the distribution as an `f64`.
     fn sample(&self, rng: &mut dyn RngCore) -> f64;
-    
+
     /// Compute the log-probability density of a value under this distribution.
     ///
     /// # Arguments
@@ -101,7 +101,7 @@ pub trait DistributionF64: Send + Sync {
     /// The natural logarithm of the probability density at `x`.
     /// Returns negative infinity for values outside the distribution's support.
     fn log_prob(&self, x: f64) -> LogF64;
-    
+
     /// Clone this distribution into a boxed trait object.
     ///
     /// This method is required for the trait to be object-safe, allowing
@@ -160,15 +160,15 @@ impl DistributionF64 for Normal {
         if self.sigma <= 0.0 || !self.sigma.is_finite() || !self.mu.is_finite() || !x.is_finite() {
             return f64::NEG_INFINITY;
         }
-        
+
         // Numerically stable computation
         let z = (x - self.mu) / self.sigma;
-        
+
         // Prevent overflow for extreme values (|z| > 37 gives exp(-z²/2) < machine epsilon)
         if z.abs() > 37.0 {
             return f64::NEG_INFINITY;
         }
-        
+
         // Use precomputed constant for better precision
         const LN_2PI: f64 = 1.8378770664093454835606594728112; // ln(2π)
         -0.5 * z * z - self.sigma.ln() - 0.5 * LN_2PI
@@ -227,10 +227,14 @@ impl DistributionF64 for Uniform {
     }
     fn log_prob(&self, x: f64) -> LogF64 {
         // Parameter validation
-        if self.low >= self.high || !self.low.is_finite() || !self.high.is_finite() || !x.is_finite() {
+        if self.low >= self.high
+            || !self.low.is_finite()
+            || !self.high.is_finite()
+            || !x.is_finite()
+        {
             return f64::NEG_INFINITY;
         }
-        
+
         // Check support with proper boundary handling
         if x < self.low || x >= self.high {
             f64::NEG_INFINITY
@@ -305,16 +309,16 @@ impl DistributionF64 for LogNormal {
         if x <= 0.0 || !x.is_finite() {
             return f64::NEG_INFINITY;
         }
-        
+
         // Numerically stable computation
         let lx = x.ln();
         let z = (lx - self.mu) / self.sigma;
-        
+
         // Prevent overflow
         if z.abs() > 37.0 {
             return f64::NEG_INFINITY;
         }
-        
+
         // Stable computation: log_prob = -0.5*z² - ln(x) - ln(σ) - 0.5*ln(2π)
         const LN_2PI: f64 = 1.8378770664093454835606594728112; // ln(2π)
         -0.5 * z * z - lx - self.sigma.ln() - 0.5 * LN_2PI
@@ -373,7 +377,7 @@ impl DistributionF64 for Exponential {
         if self.rate <= 0.0 || !self.rate.is_finite() || !x.is_finite() {
             return f64::NEG_INFINITY;
         }
-        
+
         if x < 0.0 {
             f64::NEG_INFINITY
         } else {
@@ -445,10 +449,10 @@ impl DistributionF64 for Bernoulli {
         if self.p < 0.0 || self.p > 1.0 || !self.p.is_finite() || !x.is_finite() {
             return f64::NEG_INFINITY;
         }
-        
+
         // Use small tolerance for discrete values represented as f64
         const TOLERANCE: f64 = 1e-12;
-        
+
         if (x - 1.0).abs() < TOLERANCE {
             // Handle edge cases for p near 0 or 1
             if self.p <= 0.0 {
@@ -495,8 +499,8 @@ impl DistributionF64 for Bernoulli {
 /// use fugue::*;
 ///
 /// // Three-way choice
-/// let choice = Categorical { 
-///     probs: vec![0.5, 0.3, 0.2] 
+/// let choice = Categorical {
+///     probs: vec![0.5, 0.3, 0.2]
 /// };
 ///
 /// // Mixture component selection
@@ -520,12 +524,12 @@ impl DistributionF64 for Categorical {
         if self.probs.is_empty() {
             return f64::NAN;
         }
-        
+
         let prob_sum: f64 = self.probs.iter().sum();
         if (prob_sum - 1.0).abs() > 1e-6 || self.probs.iter().any(|&p| p < 0.0 || !p.is_finite()) {
             return f64::NAN;
         }
-        
+
         let u: f64 = rng.gen();
         let mut cum = 0.0;
         for (i, &p) in self.probs.iter().enumerate() {
@@ -541,18 +545,18 @@ impl DistributionF64 for Categorical {
         if self.probs.is_empty() || !x.is_finite() {
             return f64::NEG_INFINITY;
         }
-        
+
         let prob_sum: f64 = self.probs.iter().sum();
         if (prob_sum - 1.0).abs() > 1e-6 || self.probs.iter().any(|&p| p < 0.0 || !p.is_finite()) {
             return f64::NEG_INFINITY;
         }
-        
+
         // Check if x represents a valid category index
         let idx = x.round() as i64;
         if idx < 0 || idx >= self.probs.len() as i64 || (x - idx as f64).abs() > 1e-12 {
             return f64::NEG_INFINITY;
         }
-        
+
         let idx = idx as usize;
         if self.probs[idx] <= 0.0 {
             f64::NEG_INFINITY
@@ -616,33 +620,38 @@ impl DistributionF64 for Beta {
     }
     fn log_prob(&self, x: f64) -> LogF64 {
         // Parameter validation
-        if self.alpha <= 0.0 || self.beta <= 0.0 || !self.alpha.is_finite() || !self.beta.is_finite() || !x.is_finite() {
+        if self.alpha <= 0.0
+            || self.beta <= 0.0
+            || !self.alpha.is_finite()
+            || !self.beta.is_finite()
+            || !x.is_finite()
+        {
             return f64::NEG_INFINITY;
         }
-        
+
         // Support validation
         if x <= 0.0 || x >= 1.0 {
             return f64::NEG_INFINITY;
         }
-        
+
         // Handle edge cases near boundaries
         if x < 1e-100 || x > 1.0 - 1e-100 {
             return f64::NEG_INFINITY;
         }
-        
+
         // Numerically stable computation using log-gamma
         // log Beta(x; α, β) = (α-1)ln(x) + (β-1)ln(1-x) - log B(α,β)
         let log_beta_fn = libm::lgamma(self.alpha) + libm::lgamma(self.beta)
             - libm::lgamma(self.alpha + self.beta);
-        
+
         let ln_x = x.ln();
         let ln_1_minus_x = (1.0 - x).ln();
-        
+
         // Check for extreme log values
         if ln_x < -700.0 || ln_1_minus_x < -700.0 {
             return f64::NEG_INFINITY;
         }
-        
+
         (self.alpha - 1.0) * ln_x + (self.beta - 1.0) * ln_1_minus_x - log_beta_fn
     }
     fn clone_box(&self) -> Box<dyn DistributionF64> {
@@ -703,25 +712,30 @@ impl DistributionF64 for Gamma {
     }
     fn log_prob(&self, x: f64) -> LogF64 {
         // Parameter validation
-        if self.shape <= 0.0 || self.rate <= 0.0 || !self.shape.is_finite() || !self.rate.is_finite() || !x.is_finite() {
+        if self.shape <= 0.0
+            || self.rate <= 0.0
+            || !self.shape.is_finite()
+            || !self.rate.is_finite()
+            || !x.is_finite()
+        {
             return f64::NEG_INFINITY;
         }
-        
+
         if x <= 0.0 {
             return f64::NEG_INFINITY;
         }
-        
+
         // Check for overflow conditions
         if self.rate * x > 700.0 || x.ln() * (self.shape - 1.0) < -700.0 {
             return f64::NEG_INFINITY;
         }
-        
+
         // Numerically stable computation
         // log Gamma(x; k, λ) = k*ln(λ) + (k-1)*ln(x) - λ*x - ln Γ(k)
         let log_rate = self.rate.ln();
         let log_x = x.ln();
         let log_gamma_shape = libm::lgamma(self.shape);
-        
+
         self.shape * log_rate + (self.shape - 1.0) * log_x - self.rate * x - log_gamma_shape
     }
     fn clone_box(&self) -> Box<dyn DistributionF64> {
@@ -839,28 +853,28 @@ impl DistributionF64 for Poisson {
         if self.lambda <= 0.0 || !self.lambda.is_finite() || !x.is_finite() {
             return f64::NEG_INFINITY;
         }
-        
+
         // Check for valid non-negative integer
         if x < 0.0 {
             return f64::NEG_INFINITY;
         }
-        
+
         let k = x.round() as u64;
         if (x - k as f64).abs() > 1e-12 {
             return f64::NEG_INFINITY;
         }
-        
+
         // Handle extreme cases
         if self.lambda > 700.0 && k == 0 {
             return -self.lambda; // Direct computation to avoid lgamma issues
         }
-        
+
         // Numerically stable computation
         // log Poisson(k; λ) = k*ln(λ) - λ - ln(k!)
         let k_f64 = k as f64;
         let log_lambda = self.lambda.ln();
         let log_factorial = libm::lgamma(k_f64 + 1.0);
-        
+
         k_f64 * log_lambda - self.lambda - log_factorial
     }
     fn clone_box(&self) -> Box<dyn DistributionF64> {

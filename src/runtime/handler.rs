@@ -91,7 +91,7 @@ pub trait Handler {
     ///
     /// The value to use for this sampling site.
     fn on_sample(&mut self, addr: &Address, dist: &dyn DistributionF64) -> f64;
-    
+
     /// Handle an observation operation.
     ///
     /// This method is called when the model encounters an `observe` operation.
@@ -103,7 +103,7 @@ pub trait Handler {
     /// * `dist` - Distribution that generated the observed value
     /// * `value` - The observed value
     fn on_observe(&mut self, addr: &Address, dist: &dyn DistributionF64, value: f64);
-    
+
     /// Handle a factor operation.
     ///
     /// This method is called when the model encounters a `factor` operation.
@@ -113,7 +113,7 @@ pub trait Handler {
     ///
     /// * `logw` - Log-weight to add to the model's total weight
     fn on_factor(&mut self, logw: f64);
-    
+
     /// Finalize the handler and return the accumulated trace.
     ///
     /// This method is called after model execution completes to retrieve

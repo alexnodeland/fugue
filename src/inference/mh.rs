@@ -69,7 +69,10 @@ use std::collections::HashMap;
 ///
 /// This legacy struct is maintained for backward compatibility but users
 /// should migrate to DiminishingAdaptation which provides proper ergodicity guarantees.
-#[deprecated(since = "0.2.1", note = "Use DiminishingAdaptation for better theoretical properties")]
+#[deprecated(
+    since = "0.2.1",
+    note = "Use DiminishingAdaptation for better theoretical properties"
+)]
 #[derive(Debug, Clone)]
 pub struct AdaptiveScales {
     /// Current proposal scale for each site.
@@ -159,9 +162,17 @@ fn propose_new_value_stable<R: Rng>(rng: &mut R, choice: &Choice, scale: f64) ->
         ChoiceValue::Bool(current_val) => {
             // Symmetric flip proposal for boolean
             if rng.gen::<f64>() < 0.5 {
-                if current_val { 0.0 } else { 1.0 }
+                if current_val {
+                    0.0
+                } else {
+                    1.0
+                }
             } else {
-                if current_val { 1.0 } else { 0.0 }
+                if current_val {
+                    1.0
+                } else {
+                    0.0
+                }
             }
         }
         ChoiceValue::I64(current_val) => {

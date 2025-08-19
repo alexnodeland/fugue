@@ -56,8 +56,8 @@
 //! assert!(ess > 0.0);
 //! ```
 use crate::core::model::Model;
-use crate::inference::mh::adaptive_single_site_mh;
 use crate::inference::mcmc_utils::DiminishingAdaptation;
+use crate::inference::mh::adaptive_single_site_mh;
 use crate::runtime::handler::run;
 use crate::runtime::interpreters::PriorHandler;
 use crate::runtime::trace::Trace;
@@ -422,17 +422,17 @@ pub fn adaptive_smc<A, R: Rng>(
 /// which is critical for reliable SMC performance.
 pub fn normalize_particles(particles: &mut [Particle]) {
     use crate::core::numerical::log_sum_exp;
-    
+
     if particles.is_empty() {
         return;
     }
-    
+
     // Collect log weights
     let log_weights: Vec<f64> = particles.iter().map(|p| p.log_weight).collect();
-    
+
     // Compute log normalizing constant stably
     let log_norm = log_sum_exp(&log_weights);
-    
+
     // Handle degenerate case where all weights are -∞
     if log_norm.is_infinite() && log_norm < 0.0 {
         let n = particles.len();
@@ -441,12 +441,12 @@ pub fn normalize_particles(particles: &mut [Particle]) {
         }
         return;
     }
-    
+
     // Normalize weights stably
     for (p, &log_w) in particles.iter_mut().zip(&log_weights) {
         p.weight = (log_w - log_norm).exp();
     }
-    
+
     // Ensure weights sum to 1.0 (handle small numerical errors)
     let weight_sum: f64 = particles.iter().map(|p| p.weight).sum();
     if weight_sum > 0.0 {

@@ -31,21 +31,20 @@ pub fn log_sum_exp(log_values: &[f64]) -> f64 {
     if log_values.is_empty() {
         return f64::NEG_INFINITY;
     }
-    
+
     // Find maximum value
-    let max_val = log_values.iter()
+    let max_val = log_values
+        .iter()
         .fold(f64::NEG_INFINITY, |acc, &x| acc.max(x));
-    
+
     // Handle case where all values are -∞
     if max_val.is_infinite() && max_val < 0.0 {
         return f64::NEG_INFINITY;
     }
-    
+
     // Compute sum(exp(x_i - max)) stably
-    let sum_exp: f64 = log_values.iter()
-        .map(|&x| (x - max_val).exp())
-        .sum();
-    
+    let sum_exp: f64 = log_values.iter().map(|&x| (x - max_val).exp()).sum();
+
     if sum_exp == 0.0 {
         f64::NEG_INFINITY
     } else {
@@ -68,23 +67,25 @@ pub fn log_sum_exp(log_values: &[f64]) -> f64 {
 /// log(Σᵢ wᵢ exp(xᵢ)) computed stably
 pub fn weighted_log_sum_exp(log_values: &[f64], weights: &[f64]) -> f64 {
     assert_eq!(log_values.len(), weights.len());
-    
+
     if log_values.is_empty() {
         return f64::NEG_INFINITY;
     }
-    
-    let max_val = log_values.iter()
+
+    let max_val = log_values
+        .iter()
         .fold(f64::NEG_INFINITY, |acc, &x| acc.max(x));
-    
+
     if max_val.is_infinite() && max_val < 0.0 {
         return f64::NEG_INFINITY;
     }
-    
-    let weighted_sum: f64 = log_values.iter()
+
+    let weighted_sum: f64 = log_values
+        .iter()
         .zip(weights.iter())
         .map(|(&x, &w)| w * (x - max_val).exp())
         .sum();
-    
+
     if weighted_sum == 0.0 {
         f64::NEG_INFINITY
     } else {
@@ -106,9 +107,7 @@ pub fn weighted_log_sum_exp(log_values: &[f64], weights: &[f64]) -> f64 {
 /// Vector of normalized linear probabilities that sum to 1.0
 pub fn normalize_log_probs(log_probs: &[f64]) -> Vec<f64> {
     let log_sum = log_sum_exp(log_probs);
-    log_probs.iter()
-        .map(|&lp| (lp - log_sum).exp())
-        .collect()
+    log_probs.iter().map(|&lp| (lp - log_sum).exp()).collect()
 }
 
 /// Compute log(1 + exp(x)) stably to avoid overflow.
@@ -153,39 +152,42 @@ pub fn log_gamma(x: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_log_sum_exp_stability() {
         // Test with extreme values
         let large_vals = vec![700.0, 701.0, 699.0];
         let result = log_sum_exp(&large_vals);
         assert!(result.is_finite());
-        
+
         // Test with small values
         let small_vals = vec![-700.0, -701.0, -699.0];
         let result = log_sum_exp(&small_vals);
         assert!(result.is_finite());
-        
+
         // Test empty case
         assert_eq!(log_sum_exp(&[]), f64::NEG_INFINITY);
-        
+
         // Test all -∞
-        assert_eq!(log_sum_exp(&[f64::NEG_INFINITY, f64::NEG_INFINITY]), f64::NEG_INFINITY);
+        assert_eq!(
+            log_sum_exp(&[f64::NEG_INFINITY, f64::NEG_INFINITY]),
+            f64::NEG_INFINITY
+        );
     }
-    
+
     #[test]
     fn test_normalize_log_probs() {
         let log_probs = vec![-1.0, -2.0, -3.0];
         let probs = normalize_log_probs(&log_probs);
-        
+
         // Should sum to 1.0
         assert!((probs.iter().sum::<f64>() - 1.0).abs() < 1e-10);
-        
+
         // Should be in correct ratios
         assert!(probs[0] > probs[1]);
         assert!(probs[1] > probs[2]);
     }
-    
+
     #[test]
     fn test_log1p_exp_stability() {
         // Test extreme cases

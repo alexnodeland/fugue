@@ -317,7 +317,7 @@ pub trait ModelExt<A>: Sized {
     ///     .bind(|x| sample(addr!("y"), Normal { mu: x, sigma: 0.1 }));
     /// ```
     fn bind<B>(self, k: impl FnOnce(A) -> Model<B> + Send + 'static) -> Model<B>;
-    
+
     /// Apply a function to transform the result of this model.
     ///
     /// This is the functor map operation - it transforms the output of a model without
@@ -339,7 +339,7 @@ pub trait ModelExt<A>: Sized {
     fn map<B>(self, f: impl FnOnce(A) -> B + Send + 'static) -> Model<B> {
         self.bind(|a| pure(f(a)))
     }
-    
+
     /// Alias for `bind` - chains dependent probabilistic computations.
     ///
     /// This method provides a more familiar interface for Rust developers used to

@@ -46,11 +46,11 @@
 //! };
 //!
 //! // Create mean-field guide manually
-//! let mut guide = MeanFieldGuide { 
-//!     params: HashMap::new() 
+//! let mut guide = MeanFieldGuide {
+//!     params: HashMap::new()
 //! };
 //! guide.params.insert(
-//!     addr!("mu"), 
+//!     addr!("mu"),
 //!     VariationalParam::Normal { mu: 0.0, log_sigma: 0.0 }
 //! );
 //!
@@ -67,8 +67,6 @@ use crate::runtime::interpreters::{PriorHandler, ScoreGivenTrace};
 use crate::runtime::trace::{Choice, ChoiceValue, Trace};
 use rand::Rng;
 use std::collections::HashMap;
-
-
 
 /// Variational distribution parameters for a single random variable.
 ///
@@ -90,8 +88,8 @@ use std::collections::HashMap;
 /// use rand::SeedableRng;
 ///
 /// // Create variational parameters
-/// let normal_param = VariationalParam::Normal { 
-///     mu: 1.5, 
+/// let normal_param = VariationalParam::Normal {
+///     mu: 1.5,
 ///     log_sigma: -0.693  // sigma = 0.5
 /// };
 ///
@@ -108,25 +106,25 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 pub enum VariationalParam {
     /// Normal/Gaussian variational distribution.
-    Normal { 
+    Normal {
         /// Mean parameter.
-        mu: f64, 
+        mu: f64,
         /// Log of standard deviation (for positivity).
-        log_sigma: f64 
+        log_sigma: f64,
     },
     /// Log-normal variational distribution for positive variables.
-    LogNormal { 
+    LogNormal {
         /// Mean of underlying normal.
-        mu: f64, 
+        mu: f64,
         /// Log of standard deviation of underlying normal.
-        log_sigma: f64 
+        log_sigma: f64,
     },
     /// Beta variational distribution for variables in \[0,1\].
-    Beta { 
+    Beta {
         /// Log of first shape parameter (for positivity).
-        log_alpha: f64, 
+        log_alpha: f64,
         /// Log of second shape parameter (for positivity).
-        log_beta: f64 
+        log_beta: f64,
     },
 }
 
@@ -159,7 +157,10 @@ impl VariationalParam {
                 }
                 LogNormal { mu: *mu, sigma }.sample(rng)
             }
-            VariationalParam::Beta { log_alpha, log_beta } => {
+            VariationalParam::Beta {
+                log_alpha,
+                log_beta,
+            } => {
                 let alpha = log_alpha.exp();
                 let beta = log_beta.exp();
                 if !alpha.is_finite() || !beta.is_finite() || alpha <= 0.0 || beta <= 0.0 {
@@ -169,7 +170,7 @@ impl VariationalParam {
             }
         }
     }
-    
+
     /// Sample with reparameterization for gradient computation (experimental).
     ///
     /// Returns both the sample and auxiliary information needed for
@@ -201,14 +202,17 @@ impl VariationalParam {
                 let log_prob = -0.5 * z * z - log_sigma - 0.5 * LN_2PI - log_value;
                 (value, z)
             }
-            VariationalParam::Beta { log_alpha, log_beta } => {
+            VariationalParam::Beta {
+                log_alpha,
+                log_beta,
+            } => {
                 // Use normal approximation for Beta (stable fallback)
                 let alpha = log_alpha.exp();
                 let beta = log_beta.exp();
                 let approx_mu = alpha / (alpha + beta);
                 let approx_var = (alpha * beta) / ((alpha + beta).powi(2) * (alpha + beta + 1.0));
                 let approx_sigma = approx_var.sqrt();
-                
+
                 let eps: f64 = rng.gen::<f64>() * 2.0 - 1.0;
                 // Simple standard normal sampling
                 let u1: f64 = rng.gen::<f64>().max(1e-10);
@@ -216,13 +220,13 @@ impl VariationalParam {
                 let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
                 let raw_value = approx_mu + approx_sigma * z;
                 let value = raw_value.clamp(0.001, 0.999);
-                
+
                 let log_prob = Beta { alpha, beta }.log_prob(value);
                 (value, z)
             }
         }
-        }
-    
+    }
+
     /// Compute log-probability of a value under this variational distribution.
     ///
     /// This is used for computing entropy terms in the ELBO and for evaluating
@@ -279,11 +283,11 @@ impl VariationalParam {
 /// // Create a guide for a two-parameter model
 /// let mut guide = MeanFieldGuide::new();
 /// guide.params.insert(
-///     addr!("mu"), 
+///     addr!("mu"),
 ///     VariationalParam::Normal { mu: 0.0, log_sigma: 0.0 }
 /// );
 /// guide.params.insert(
-///     addr!("sigma"), 
+///     addr!("sigma"),
 ///     VariationalParam::Normal { mu: 0.0, log_sigma: -1.0 }
 /// );
 ///
@@ -474,8 +478,6 @@ pub fn optimize_meanfield_vi<A, R: Rng>(
 
     guide
 }
-
-
 
 // Keep the original simple function for backward compatibility
 pub fn estimate_elbo<A, R: Rng>(

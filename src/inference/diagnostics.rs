@@ -45,13 +45,13 @@
 //! let mut chain1 = Vec::new();
 //! let mut chain2 = Vec::new();
 //! for (i, trace) in all_traces.iter().enumerate() {
-//!     if i % 2 == 0 { 
-//!         chain1.push(trace.clone()); 
-//!     } else { 
-//!         chain2.push(trace.clone()); 
+//!     if i % 2 == 0 {
+//!         chain1.push(trace.clone());
+//!     } else {
+//!         chain2.push(trace.clone());
 //!     }
 //! }
-//! 
+//!
 //! // Compute diagnostics
 //! let r_hat_val = r_hat(&[chain1.clone(), chain2.clone()], &addr!("mu"));
 //! let summary = summarize_parameter(&[chain1, chain2], &addr!("mu"));

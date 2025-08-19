@@ -16,20 +16,14 @@ pub enum FugueError {
         reason: String,
     },
     /// Numerical computation failed
-    NumericalError {
-        operation: String,
-        details: String,
-    },
+    NumericalError { operation: String, details: String },
     /// Model execution failed
     ModelError {
         address: Option<Address>,
         reason: String,
     },
     /// Inference algorithm failed
-    InferenceError {
-        algorithm: String,
-        reason: String,
-    },
+    InferenceError { algorithm: String, reason: String },
     /// Trace manipulation error
     TraceError {
         operation: String,
@@ -41,7 +35,10 @@ pub enum FugueError {
 impl fmt::Display for FugueError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            FugueError::InvalidParameters { distribution, reason } => {
+            FugueError::InvalidParameters {
+                distribution,
+                reason,
+            } => {
                 write!(f, "Invalid parameters for {}: {}", distribution, reason)
             }
             FugueError::NumericalError { operation, details } => {
@@ -57,7 +54,11 @@ impl fmt::Display for FugueError {
             FugueError::InferenceError { algorithm, reason } => {
                 write!(f, "Inference error in {}: {}", algorithm, reason)
             }
-            FugueError::TraceError { operation, address, reason } => {
+            FugueError::TraceError {
+                operation,
+                address,
+                reason,
+            } => {
                 if let Some(addr) = address {
                     write!(f, "Trace error in {} at {}: {}", operation, addr, reason)
                 } else {
@@ -182,7 +183,7 @@ impl Validate for Categorical {
                 reason: "Probability vector cannot be empty".to_string(),
             });
         }
-        
+
         let sum: f64 = self.probs.iter().sum();
         if (sum - 1.0).abs() > 1e-6 {
             return Err(FugueError::InvalidParameters {
@@ -190,16 +191,19 @@ impl Validate for Categorical {
                 reason: format!("Probabilities must sum to 1.0, got {:.6}", sum),
             });
         }
-        
+
         for (i, &p) in self.probs.iter().enumerate() {
             if !p.is_finite() || p < 0.0 {
                 return Err(FugueError::InvalidParameters {
                     distribution: "Categorical".to_string(),
-                    reason: format!("Probability at index {} must be non-negative and finite, got {}", i, p),
+                    reason: format!(
+                        "Probability at index {} must be non-negative and finite, got {}",
+                        i, p
+                    ),
                 });
             }
         }
-        
+
         Ok(())
     }
 }
@@ -266,7 +270,7 @@ impl Categorical {
         categorical.validate()?;
         Ok(categorical)
     }
-    
+
     /// Create a uniform categorical distribution over k categories.
     pub fn uniform(k: usize) -> FugueResult<Self> {
         if k == 0 {
@@ -275,7 +279,7 @@ impl Categorical {
                 reason: "Number of categories must be positive".to_string(),
             });
         }
-        
+
         let prob = 1.0 / k as f64;
         let probs = vec![prob; k];
         Ok(Categorical { probs })
