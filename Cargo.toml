@@ -1,0 +1,13 @@
+[package]
+name = "monadic_ppl"
+version = "0.2.0"
+edition = "2021"
+license = "MIT"
+description = "Monadic-style PPL with effects/handlers, traces, and pluggable inference."
+readme = "README.md"
+keywords = ["probabilistic-programming", "ppl", "monad", "effects", "traces"]
+categories = ["science", "mathematics"]
+
+[dependencies]
+rand = "0.8"
+rand_distr = "0.4"
