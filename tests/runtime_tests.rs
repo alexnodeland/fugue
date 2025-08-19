@@ -35,7 +35,7 @@ fn replay_handler_reuses_choice() {
         },
         gm(0.0),
     );
-    let base_mu = base.choices.get(&addr!("mu")).unwrap().value;
+    let base_mu = &base.choices.get(&addr!("mu")).unwrap().value;
     let (_mu2, t2) = runtime::handler::run(
         runtime::interpreters::ReplayHandler {
             rng: &mut rng,
@@ -44,7 +44,7 @@ fn replay_handler_reuses_choice() {
         },
         gm(1.0),
     );
-    assert_eq!(base_mu, t2.choices.get(&addr!("mu")).unwrap().value);
+    assert_eq!(base_mu, &t2.choices.get(&addr!("mu")).unwrap().value);
 }
 
 #[test]

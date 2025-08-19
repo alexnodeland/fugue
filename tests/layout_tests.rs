@@ -35,7 +35,7 @@ fn replay_reuses() {
         },
         m,
     );
-    let base_mu = base.choices.get(&addr!("mu")).unwrap().value;
+    let base_mu = &base.choices.get(&addr!("mu")).unwrap().value;
     let m2 = gaussian_mean(3.14);
     let (_mu2, t2) = runtime::handler::run(
         ReplayHandler {
@@ -45,7 +45,7 @@ fn replay_reuses() {
         },
         m2,
     );
-    assert_eq!(base_mu, t2.choices.get(&addr!("mu")).unwrap().value);
+    assert_eq!(base_mu, &t2.choices.get(&addr!("mu")).unwrap().value);
 }
 #[test]
 fn factor_adds_weight() {

@@ -5,16 +5,23 @@
 use crate::core::address::Address;
 use std::collections::BTreeMap;
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum ChoiceValue {
+    F64(f64),
+    I64(i64),
+    Bool(bool),
+}
+
 #[derive(Clone, Debug)]
-pub struct ChoiceF64 {
+pub struct Choice {
     pub addr: Address,
-    pub value: f64,
+    pub value: ChoiceValue,
     pub logp: f64,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct Trace {
-    pub choices: BTreeMap<Address, ChoiceF64>,
+    pub choices: BTreeMap<Address, Choice>,
     pub log_prior: f64,
     pub log_likelihood: f64,
     pub log_factors: f64,
