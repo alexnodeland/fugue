@@ -5,8 +5,9 @@
 //! dyn-object safe to allow storage in trait objects within the `Model`.
 use rand::{Rng, RngCore};
 use rand_distr::{
-    Distribution as RandDistr, Exp as RDExp, LogNormal as RDLogNormal, Normal as RDNormal,
-    Bernoulli as RDBernoulli, Beta as RDBeta, Gamma as RDGamma, Binomial as RDBinomial, Poisson as RDPoisson,
+    Bernoulli as RDBernoulli, Beta as RDBeta, Binomial as RDBinomial, Distribution as RandDistr,
+    Exp as RDExp, Gamma as RDGamma, LogNormal as RDLogNormal, Normal as RDNormal,
+    Poisson as RDPoisson,
 };
 pub type LogF64 = f64;
 
@@ -103,7 +104,11 @@ pub struct Bernoulli {
 }
 impl DistributionF64 for Bernoulli {
     fn sample(&self, rng: &mut dyn RngCore) -> f64 {
-        if RDBernoulli::new(self.p).unwrap().sample(rng) { 1.0 } else { 0.0 }
+        if RDBernoulli::new(self.p).unwrap().sample(rng) {
+            1.0
+        } else {
+            0.0
+        }
     }
     fn log_prob(&self, x: f64) -> LogF64 {
         if x == 1.0 {
@@ -162,7 +167,8 @@ impl DistributionF64 for Beta {
             return f64::NEG_INFINITY;
         }
         // log Beta(x; α, β) = (α-1)ln(x) + (β-1)ln(1-x) - log B(α,β)
-        let log_beta_fn = libm::lgamma(self.alpha) + libm::lgamma(self.beta) - libm::lgamma(self.alpha + self.beta);
+        let log_beta_fn = libm::lgamma(self.alpha) + libm::lgamma(self.beta)
+            - libm::lgamma(self.alpha + self.beta);
         (self.alpha - 1.0) * x.ln() + (self.beta - 1.0) * (1.0 - x).ln() - log_beta_fn
     }
     fn clone_box(&self) -> Box<dyn DistributionF64> {
@@ -177,14 +183,18 @@ pub struct Gamma {
 }
 impl DistributionF64 for Gamma {
     fn sample(&self, rng: &mut dyn RngCore) -> f64 {
-        RDGamma::new(self.shape, 1.0 / self.rate).unwrap().sample(rng)
+        RDGamma::new(self.shape, 1.0 / self.rate)
+            .unwrap()
+            .sample(rng)
     }
     fn log_prob(&self, x: f64) -> LogF64 {
         if x <= 0.0 {
             return f64::NEG_INFINITY;
         }
         // log Gamma(x; k, λ) = k*ln(λ) + (k-1)*ln(x) - λ*x - ln Γ(k)
-        self.shape * self.rate.ln() + (self.shape - 1.0) * x.ln() - self.rate * x - libm::lgamma(self.shape)
+        self.shape * self.rate.ln() + (self.shape - 1.0) * x.ln()
+            - self.rate * x
+            - libm::lgamma(self.shape)
     }
     fn clone_box(&self) -> Box<dyn DistributionF64> {
         Box::new(*self)
@@ -206,7 +216,9 @@ impl DistributionF64 for Binomial {
             return f64::NEG_INFINITY;
         }
         // log Binomial(k; n, p) = log C(n,k) + k*ln(p) + (n-k)*ln(1-p)
-        let log_binom_coeff = libm::lgamma(self.n as f64 + 1.0) - libm::lgamma(k as f64 + 1.0) - libm::lgamma((self.n - k) as f64 + 1.0);
+        let log_binom_coeff = libm::lgamma(self.n as f64 + 1.0)
+            - libm::lgamma(k as f64 + 1.0)
+            - libm::lgamma((self.n - k) as f64 + 1.0);
         log_binom_coeff + (k as f64) * self.p.ln() + ((self.n - k) as f64) * (1.0 - self.p).ln()
     }
     fn clone_box(&self) -> Box<dyn DistributionF64> {

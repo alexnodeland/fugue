@@ -61,7 +61,9 @@ pub trait ModelExt<A>: Sized {
     fn map<B>(self, f: impl FnOnce(A) -> B + Send + 'static) -> Model<B> {
         self.bind(|a| pure(f(a)))
     }
-    fn and_then<B>(self, k: impl FnOnce(A) -> Model<B> + Send + 'static) -> Model<B> { self.bind(k) }
+    fn and_then<B>(self, k: impl FnOnce(A) -> Model<B> + Send + 'static) -> Model<B> {
+        self.bind(k)
+    }
 }
 
 impl<A: 'static> ModelExt<A> for Model<A> {
@@ -98,17 +100,27 @@ pub fn zip<A: Send + 'static, B: Send + 'static>(ma: Model<A>, mb: Model<B>) -> 
 
 /// Sequence a vector of models into a model of vector.
 pub fn sequence_vec<A: Send + 'static>(models: Vec<Model<A>>) -> Model<Vec<A>> {
-    models
-        .into_iter()
-        .fold(pure(Vec::new()), |acc, m| zip(acc, m).map(|(mut v, a)| { v.push(a); v }))
+    models.into_iter().fold(pure(Vec::new()), |acc, m| {
+        zip(acc, m).map(|(mut v, a)| {
+            v.push(a);
+            v
+        })
+    })
 }
 
 /// Traverse a vector with a function producing models.
-pub fn traverse_vec<T, A: Send + 'static>(items: Vec<T>, f: impl Fn(T) -> Model<A> + Send + Sync + 'static) -> Model<Vec<A>> {
+pub fn traverse_vec<T, A: Send + 'static>(
+    items: Vec<T>,
+    f: impl Fn(T) -> Model<A> + Send + Sync + 'static,
+) -> Model<Vec<A>> {
     sequence_vec(items.into_iter().map(|t| f(t)).collect())
 }
 
 /// Guard: fail with -inf weight when predicate is false.
 pub fn guard(pred: bool) -> Model<()> {
-    if pred { pure(()) } else { factor(f64::NEG_INFINITY) }
+    if pred {
+        pure(())
+    } else {
+        factor(f64::NEG_INFINITY)
+    }
 }

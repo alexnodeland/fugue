@@ -9,7 +9,7 @@
 ///
 /// ```rust
 /// use fugue::*;
-/// 
+///
 /// let model = prob! {
 ///     let mu <- sample(addr!("mu"), Normal{mu: 0.0, sigma: 1.0});
 ///     let sigma <- sample(addr!("sigma"), LogNormal{mu: 0.0, sigma: 1.0});
@@ -21,17 +21,17 @@
 macro_rules! prob {
     // Simple cases first
     ($e:expr) => { $e };
-    
+
     // let var <- expr; rest
     (let $var:ident <- $expr:expr; $($rest:tt)*) => {
         $expr.bind(move |$var| prob!($($rest)*))
     };
-    
-    // let var = expr; rest  
+
+    // let var = expr; rest
     (let $var:ident = $expr:expr; $($rest:tt)*) => {
         { let $var = $expr; prob!($($rest)*) }
     };
-    
+
     // expr; rest
     ($expr:expr; $($rest:tt)*) => {
         $expr.bind(move |_| prob!($($rest)*))
@@ -42,7 +42,7 @@ macro_rules! prob {
 ///
 /// ```rust
 /// use fugue::*;
-/// 
+///
 /// let model = plate!(i in 0..10 => {
 ///     sample(addr!("x", i), Normal{mu: 0.0, sigma: 1.0})
 /// });
@@ -50,10 +50,7 @@ macro_rules! prob {
 #[macro_export]
 macro_rules! plate {
     ($var:ident in $range:expr => $body:expr) => {
-        $crate::core::model::traverse_vec(
-            $range.collect::<Vec<_>>(), 
-            move |$var| $body
-        )
+        $crate::core::model::traverse_vec($range.collect::<Vec<_>>(), move |$var| $body)
     };
 }
 

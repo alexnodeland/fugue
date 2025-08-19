@@ -18,9 +18,14 @@ impl<'r, R: RngCore> Handler for PriorHandler<'r, R> {
         let x = dist.sample(self.rng);
         let lp = dist.log_prob(x);
         self.trace.log_prior += lp;
-        self.trace
-            .choices
-            .insert(addr.clone(), Choice { addr: addr.clone(), value: ChoiceValue::F64(x), logp: lp });
+        self.trace.choices.insert(
+            addr.clone(),
+            Choice {
+                addr: addr.clone(),
+                value: ChoiceValue::F64(x),
+                logp: lp,
+            },
+        );
         x
     }
 
@@ -46,15 +51,23 @@ pub struct ReplayHandler<'r, R: RngCore> {
 impl<'r, R: RngCore> Handler for ReplayHandler<'r, R> {
     fn on_sample(&mut self, addr: &Address, dist: &dyn DistributionF64) -> f64 {
         let x = if let Some(c) = self.base.choices.get(addr) {
-            match c.value { ChoiceValue::F64(v) => v, _ => panic!("expected f64 at {}", addr) }
+            match c.value {
+                ChoiceValue::F64(v) => v,
+                _ => panic!("expected f64 at {}", addr),
+            }
         } else {
             dist.sample(self.rng)
         };
         let lp = dist.log_prob(x);
         self.trace.log_prior += lp;
-        self.trace
-            .choices
-            .insert(addr.clone(), Choice { addr: addr.clone(), value: ChoiceValue::F64(x), logp: lp });
+        self.trace.choices.insert(
+            addr.clone(),
+            Choice {
+                addr: addr.clone(),
+                value: ChoiceValue::F64(x),
+                logp: lp,
+            },
+        );
         x
     }
 
@@ -83,7 +96,10 @@ impl Handler for ScoreGivenTrace {
             .choices
             .get(addr)
             .unwrap_or_else(|| panic!("missing value for site {} in base trace", addr));
-        let x = match c.value { ChoiceValue::F64(v) => v, _ => panic!("expected f64 at {}", addr) };
+        let x = match c.value {
+            ChoiceValue::F64(v) => v,
+            _ => panic!("expected f64 at {}", addr),
+        };
         let lp = dist.log_prob(x);
         self.trace.log_prior += lp;
         self.trace.choices.insert(addr.clone(), c.clone());

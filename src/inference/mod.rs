@@ -4,6 +4,8 @@
 //! The `inference` module provides a unified interface for running inference
 //! methods on models.
 
+pub mod abc;
+pub mod diagnostics;
 pub mod mh;
 pub mod smc;
 pub mod vi;
