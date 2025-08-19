@@ -56,50 +56,20 @@
 //! assert!(!mu_samples.is_empty());
 //! ```
 use crate::core::address::Address;
-
 use crate::core::model::Model;
+use crate::inference::mcmc_utils::DiminishingAdaptation;
+// All proposal logic is now integrated in this module
 use crate::runtime::handler::run;
 use crate::runtime::interpreters::{PriorHandler, ScoreGivenTrace};
 use crate::runtime::trace::{Choice, ChoiceValue, Trace};
 use rand::Rng;
 use std::collections::HashMap;
 
-/// Adaptive proposal scaling system for MCMC sites.
+/// Deprecated: Use DiminishingAdaptation for theoretically sound adaptation.
 ///
-/// This struct tracks acceptance rates for each random variable site and automatically
-/// adjusts proposal step sizes to maintain optimal acceptance rates. The adaptive
-/// mechanism helps achieve good MCMC mixing without manual tuning.
-///
-/// ## Adaptation Strategy
-///
-/// - **Target rate**: 44% acceptance (optimal for random-walk Metropolis)
-/// - **Update frequency**: Every 50 proposals per site
-/// - **Scale adjustment**: Multiplicative updates based on acceptance rate
-/// - **Per-site tracking**: Each address gets independent tuning
-///
-/// # Fields
-///
-/// * `scales` - Current proposal scale for each site
-/// * `accept_counts` - Number of accepted proposals per site
-/// * `total_counts` - Total number of proposals per site
-/// * `target_accept_rate` - Desired acceptance rate (default: 0.44)
-///
-/// # Examples
-///
-/// ```rust
-/// use fugue::*;
-///
-/// let mut scales = AdaptiveScales::new();
-/// let addr = addr!("mu");
-///
-/// // Get current scale (starts at 1.0)
-/// let scale = scales.get_scale(&addr);
-/// assert_eq!(scale, 1.0);
-///
-/// // Update with acceptance outcome
-/// scales.update(&addr, true);  // Accepted
-/// scales.update(&addr, false); // Rejected
-/// ```
+/// This legacy struct is maintained for backward compatibility but users
+/// should migrate to DiminishingAdaptation which provides proper ergodicity guarantees.
+#[deprecated(since = "0.2.1", note = "Use DiminishingAdaptation for better theoretical properties")]
 #[derive(Debug, Clone)]
 pub struct AdaptiveScales {
     /// Current proposal scale for each site.
@@ -173,32 +143,33 @@ impl AdaptiveScales {
     }
 }
 
-/// Propose a new value for a choice based on its current value and distribution type.
-fn propose_new_value<R: Rng>(rng: &mut R, choice: &Choice, scale: f64) -> f64 {
+/// Generate numerically stable proposal values for MCMC.
+///
+/// This function creates proposal values using proper random walk distributions
+/// with improved numerical stability and boundary handling.
+fn propose_new_value_stable<R: Rng>(rng: &mut R, choice: &Choice, scale: f64) -> f64 {
     match choice.value {
         ChoiceValue::F64(current_val) => {
-            // Simple random walk proposal
-            current_val + rng.gen::<f64>() * scale * 2.0 - scale
+            // Gaussian random walk proposal using Box-Muller
+            let u1: f64 = rng.gen::<f64>().max(1e-10); // Avoid log(0)
+            let u2: f64 = rng.gen();
+            let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+            current_val + scale * z
         }
         ChoiceValue::Bool(current_val) => {
-            // Flip proposal for boolean
+            // Symmetric flip proposal for boolean
             if rng.gen::<f64>() < 0.5 {
-                if current_val {
-                    0.0
-                } else {
-                    1.0
-                }
+                if current_val { 0.0 } else { 1.0 }
             } else {
-                if current_val {
-                    1.0
-                } else {
-                    0.0
-                }
+                if current_val { 1.0 } else { 0.0 }
             }
         }
         ChoiceValue::I64(current_val) => {
-            // Integer random walk
-            let delta = ((rng.gen::<f64>() * 2.0 - 1.0) * scale).round() as i64;
+            // Gaussian random walk for integers with proper rounding
+            let u1: f64 = rng.gen::<f64>().max(1e-10);
+            let u2: f64 = rng.gen();
+            let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+            let delta = (scale * z).round() as i64;
             (current_val + delta) as f64
         }
     }
@@ -206,24 +177,25 @@ fn propose_new_value<R: Rng>(rng: &mut R, choice: &Choice, scale: f64) -> f64 {
 
 /// Perform a single adaptive Metropolis-Hastings update step.
 ///
-/// This function implements a single iteration of the MH algorithm with adaptive
-/// proposal scaling. It randomly selects one site to update, proposes a new value,
-/// and accepts or rejects based on the Metropolis-Hastings acceptance criterion.
+/// This function implements a single iteration of the MH algorithm with proper
+/// diminishing adaptation that preserves ergodicity. It randomly selects one site
+/// to update, proposes a new value using adaptive scaling, and accepts or rejects
+/// based on the Metropolis-Hastings criterion.
 ///
 /// # Algorithm
 ///
 /// 1. Randomly select a site from the current trace
-/// 2. Propose a new value using adaptive scaling
-/// 3. Score both current and proposed traces
+/// 2. Propose a new value using diminishing adaptive scaling
+/// 3. Score both current and proposed traces with numerical stability
 /// 4. Accept with probability min(1, exp(log_prob_new - log_prob_old))
-/// 5. Update adaptive scales based on acceptance outcome
+/// 5. Update adaptive scales using diminishing step sizes
 ///
 /// # Arguments
 ///
 /// * `rng` - Random number generator
 /// * `model_fn` - Function that creates the model
 /// * `current` - Current trace (state of the Markov chain)
-/// * `scales` - Adaptive scaling system (modified in-place)
+/// * `adaptation` - Diminishing adaptation system (modified in-place)
 ///
 /// # Returns
 ///
@@ -246,12 +218,12 @@ fn propose_new_value<R: Rng>(rng: &mut R, choice: &Choice, scale: f64) -> f64 {
 /// );
 ///
 /// // Perform one MH step
-/// let mut scales = AdaptiveScales::new();
+/// let mut adaptation = DiminishingAdaptation::new(0.44, 0.7);
 /// let (result, new_trace) = adaptive_single_site_mh(
 ///     &mut rng,
 ///     model_fn,
 ///     &initial_trace,
-///     &mut scales,
+///     &mut adaptation,
 /// );
 /// assert!(new_trace.choices.len() > 0);
 /// ```
@@ -259,7 +231,7 @@ pub fn adaptive_single_site_mh<A, R: Rng>(
     rng: &mut R,
     model_fn: impl Fn() -> Model<A>,
     current: &Trace,
-    scales: &mut AdaptiveScales,
+    adaptation: &mut DiminishingAdaptation,
 ) -> (A, Trace) {
     if current.choices.is_empty() {
         // No choices to update, return current
@@ -280,8 +252,8 @@ pub fn adaptive_single_site_mh<A, R: Rng>(
 
     // Get current choice and propose new value
     let current_choice = &current.choices[&selected_site];
-    let scale = scales.get_scale(&selected_site);
-    let proposed_val = propose_new_value(rng, current_choice, scale);
+    let scale = adaptation.get_scale(&selected_site);
+    let proposed_val = propose_new_value_stable(rng, current_choice, scale);
 
     // Create proposed trace
     let mut proposed_trace = current.clone();
@@ -311,8 +283,8 @@ pub fn adaptive_single_site_mh<A, R: Rng>(
     let log_alpha = prop_scored.total_log_weight() - cur_scored.total_log_weight();
     let accept = log_alpha >= 0.0 || rng.gen::<f64>() < log_alpha.exp();
 
-    // Update adaptive scales
-    scales.update(&selected_site, accept);
+    // Update adaptation
+    adaptation.update(&selected_site, accept);
 
     if accept {
         (a_prop, proposed_trace)
@@ -385,7 +357,7 @@ pub fn adaptive_mcmc_chain<A, R: Rng>(
     n_warmup: usize,
 ) -> Vec<(A, Trace)> {
     let mut samples = Vec::with_capacity(n_samples);
-    let mut scales = AdaptiveScales::new();
+    let mut adaptation = DiminishingAdaptation::new(0.44, 0.7);
 
     // Initialize with prior sample
     let (_, mut current_trace) = run(
@@ -398,13 +370,13 @@ pub fn adaptive_mcmc_chain<A, R: Rng>(
 
     // Warmup phase
     for _ in 0..n_warmup {
-        let (_, trace) = adaptive_single_site_mh(rng, &model_fn, &current_trace, &mut scales);
+        let (_, trace) = adaptive_single_site_mh(rng, &model_fn, &current_trace, &mut adaptation);
         current_trace = trace;
     }
 
     // Sampling phase
     for _ in 0..n_samples {
-        let (val, trace) = adaptive_single_site_mh(rng, &model_fn, &current_trace, &mut scales);
+        let (val, trace) = adaptive_single_site_mh(rng, &model_fn, &current_trace, &mut adaptation);
         current_trace = trace;
         samples.push((val, current_trace.clone()));
     }
@@ -419,6 +391,6 @@ pub fn single_site_random_walk_mh<A, R: Rng>(
     model_fn: impl Fn() -> Model<A>,
     current: &Trace,
 ) -> (A, Trace) {
-    let mut scales = AdaptiveScales::new();
-    adaptive_single_site_mh(rng, model_fn, current, &mut scales)
+    let mut adaptation = DiminishingAdaptation::new(0.44, 0.7);
+    adaptive_single_site_mh(rng, model_fn, current, &mut adaptation)
 }

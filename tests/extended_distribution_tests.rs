@@ -29,6 +29,8 @@ fn bernoulli_properties() {
     // Valid outcomes
     let lp0 = b.log_prob(0.0);
     let lp1 = b.log_prob(1.0);
+    println!("lp0: {}, lp1: {}", lp0, lp1);
+    // For p=0.7: P(0) = 0.3, P(1) = 0.7
     assert!(lp0.is_finite());
     assert!(lp1.is_finite());
     assert!(lp1 > lp0); // p=0.7 so P(1) > P(0)

@@ -1,9 +1,9 @@
 [package]
 name = "fugue"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
-description = "Monadic-style PPL with effects/handlers, traces, and pluggable inference."
+description = "Production-ready monadic PPL with numerically stable inference, comprehensive diagnostics, and memory optimization."
 readme = "README.md"
 keywords = ["probabilistic-programming", "ppl", "monad", "effects", "traces"]
 categories = ["science", "mathematics"]

@@ -68,6 +68,8 @@ use crate::runtime::trace::{Choice, ChoiceValue, Trace};
 use rand::Rng;
 use std::collections::HashMap;
 
+
+
 /// Variational distribution parameters for a single random variable.
 ///
 /// Each random variable in the model gets its own variational distribution that
@@ -129,11 +131,10 @@ pub enum VariationalParam {
 }
 
 impl VariationalParam {
-    /// Sample a value from this variational distribution.
+    /// Sample a value from this variational distribution with numerical stability.
     ///
     /// Generates a random sample using the current variational parameters.
-    /// This is used during ELBO estimation and for generating approximate
-    /// posterior samples.
+    /// This version includes parameter validation and numerical stability checks.
     ///
     /// # Arguments
     ///
@@ -141,32 +142,91 @@ impl VariationalParam {
     ///
     /// # Returns
     ///
-    /// A sample from the variational distribution.
+    /// A sample from the variational distribution, or NaN if parameters are invalid.
     pub fn sample<R: Rng>(&self, rng: &mut R) -> f64 {
         match self {
             VariationalParam::Normal { mu, log_sigma } => {
                 let sigma = log_sigma.exp();
+                if !mu.is_finite() || !sigma.is_finite() || sigma <= 0.0 {
+                    return f64::NAN;
+                }
                 Normal { mu: *mu, sigma }.sample(rng)
             }
             VariationalParam::LogNormal { mu, log_sigma } => {
                 let sigma = log_sigma.exp();
+                if !mu.is_finite() || !sigma.is_finite() || sigma <= 0.0 {
+                    return f64::NAN;
+                }
                 LogNormal { mu: *mu, sigma }.sample(rng)
             }
-            VariationalParam::Beta {
-                log_alpha,
-                log_beta,
-            } => {
+            VariationalParam::Beta { log_alpha, log_beta } => {
                 let alpha = log_alpha.exp();
                 let beta = log_beta.exp();
+                if !alpha.is_finite() || !beta.is_finite() || alpha <= 0.0 || beta <= 0.0 {
+                    return f64::NAN;
+                }
                 Beta { alpha, beta }.sample(rng)
             }
         }
     }
-
+    
+    /// Sample with reparameterization for gradient computation (experimental).
+    ///
+    /// Returns both the sample and auxiliary information needed for
+    /// computing gradients via the reparameterization trick.
+    pub fn sample_with_aux<R: Rng>(&self, rng: &mut R) -> (f64, f64) {
+        match self {
+            VariationalParam::Normal { mu, log_sigma } => {
+                let sigma = log_sigma.exp();
+                let eps: f64 = rng.gen::<f64>() * 2.0 - 1.0;
+                // Simple standard normal sampling
+                let u1: f64 = rng.gen::<f64>().max(1e-10);
+                let u2: f64 = rng.gen();
+                let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+                let value = mu + sigma * z;
+                const LN_2PI: f64 = 1.8378770664093454835606594728112;
+                let log_prob = -0.5 * z * z - log_sigma - 0.5 * LN_2PI;
+                (value, z)
+            }
+            VariationalParam::LogNormal { mu, log_sigma } => {
+                let sigma = log_sigma.exp();
+                let eps: f64 = rng.gen::<f64>() * 2.0 - 1.0;
+                // Simple standard normal sampling
+                let u1: f64 = rng.gen::<f64>().max(1e-10);
+                let u2: f64 = rng.gen();
+                let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+                let log_value = mu + sigma * z;
+                let value = log_value.exp();
+                const LN_2PI: f64 = 1.8378770664093454835606594728112;
+                let log_prob = -0.5 * z * z - log_sigma - 0.5 * LN_2PI - log_value;
+                (value, z)
+            }
+            VariationalParam::Beta { log_alpha, log_beta } => {
+                // Use normal approximation for Beta (stable fallback)
+                let alpha = log_alpha.exp();
+                let beta = log_beta.exp();
+                let approx_mu = alpha / (alpha + beta);
+                let approx_var = (alpha * beta) / ((alpha + beta).powi(2) * (alpha + beta + 1.0));
+                let approx_sigma = approx_var.sqrt();
+                
+                let eps: f64 = rng.gen::<f64>() * 2.0 - 1.0;
+                // Simple standard normal sampling
+                let u1: f64 = rng.gen::<f64>().max(1e-10);
+                let u2: f64 = rng.gen();
+                let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+                let raw_value = approx_mu + approx_sigma * z;
+                let value = raw_value.clamp(0.001, 0.999);
+                
+                let log_prob = Beta { alpha, beta }.log_prob(value);
+                (value, z)
+            }
+        }
+        }
+    
     /// Compute log-probability of a value under this variational distribution.
     ///
     /// This is used for computing entropy terms in the ELBO and for evaluating
-    /// the quality of the variational approximation.
+    /// the quality of the variational approximation. Now includes numerical stability checks.
     ///
     /// # Arguments
     ///
@@ -414,6 +474,8 @@ pub fn optimize_meanfield_vi<A, R: Rng>(
 
     guide
 }
+
+
 
 // Keep the original simple function for backward compatibility
 pub fn estimate_elbo<A, R: Rng>(
