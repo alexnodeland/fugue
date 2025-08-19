@@ -5,7 +5,7 @@
 
 use crate::addr;
 use crate::core::distribution::*;
-use crate::core::model::*;
+
 use crate::inference::mcmc_utils::effective_sample_size_mcmc;
 use crate::runtime::trace::{ChoiceValue, Trace};
 use rand::Rng;

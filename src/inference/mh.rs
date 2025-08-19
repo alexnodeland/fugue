@@ -55,7 +55,6 @@
 //!
 //! assert!(!mu_samples.is_empty());
 //! ```
-use crate::core::address::Address;
 use crate::core::model::Model;
 use crate::inference::mcmc_utils::DiminishingAdaptation;
 // All proposal logic is now integrated in this module
@@ -63,88 +62,6 @@ use crate::runtime::handler::run;
 use crate::runtime::interpreters::{PriorHandler, ScoreGivenTrace};
 use crate::runtime::trace::{Choice, ChoiceValue, Trace};
 use rand::Rng;
-use std::collections::HashMap;
-
-/// Deprecated: Use DiminishingAdaptation for theoretically sound adaptation.
-///
-/// This legacy struct is maintained for backward compatibility but users
-/// should migrate to DiminishingAdaptation which provides proper ergodicity guarantees.
-#[deprecated(
-    since = "0.2.1",
-    note = "Use DiminishingAdaptation for better theoretical properties"
-)]
-#[derive(Debug, Clone)]
-pub struct AdaptiveScales {
-    /// Current proposal scale for each site.
-    pub scales: HashMap<Address, f64>,
-    /// Number of accepted proposals per site.
-    pub accept_counts: HashMap<Address, usize>,
-    /// Total number of proposals per site.
-    pub total_counts: HashMap<Address, usize>,
-    /// Target acceptance rate for adaptation.
-    pub target_accept_rate: f64,
-}
-
-impl AdaptiveScales {
-    /// Create a new adaptive scaling system with default settings.
-    ///
-    /// Initializes empty tracking maps and sets the target acceptance rate to 0.44,
-    /// which is optimal for random-walk Metropolis on continuous distributions.
-    pub fn new() -> Self {
-        Self {
-            scales: HashMap::new(),
-            accept_counts: HashMap::new(),
-            total_counts: HashMap::new(),
-            target_accept_rate: 0.44, // Optimal for random walk MH
-        }
-    }
-
-    /// Get the current proposal scale for a site, initializing to 1.0 if new.
-    ///
-    /// # Arguments
-    ///
-    /// * `addr` - Address of the site to get scale for
-    ///
-    /// # Returns
-    ///
-    /// Current scale factor for proposals at this site.
-    pub fn get_scale(&mut self, addr: &Address) -> f64 {
-        *self.scales.entry(addr.clone()).or_insert(1.0)
-    }
-
-    /// Update acceptance statistics and potentially adjust the proposal scale.
-    ///
-    /// Records the outcome of a proposal and periodically adjusts the scale
-    /// based on the running acceptance rate. Updates occur every 50 proposals.
-    ///
-    /// # Arguments
-    ///
-    /// * `addr` - Address of the site that was updated
-    /// * `accepted` - Whether the proposal was accepted
-    pub fn update(&mut self, addr: &Address, accepted: bool) {
-        *self.total_counts.entry(addr.clone()).or_insert(0) += 1;
-        if accepted {
-            *self.accept_counts.entry(addr.clone()).or_insert(0) += 1;
-        }
-
-        let total = *self.total_counts.get(addr).unwrap_or(&0);
-        let accepts = *self.accept_counts.get(addr).unwrap_or(&0);
-
-        if total >= 50 && total % 50 == 0 {
-            let accept_rate = accepts as f64 / total as f64;
-            let scale = self.scales.entry(addr.clone()).or_insert(1.0);
-
-            if accept_rate > self.target_accept_rate + 0.05 {
-                *scale *= 1.1; // Increase proposal scale
-            } else if accept_rate < self.target_accept_rate - 0.05 {
-                *scale *= 0.9; // Decrease proposal scale
-            }
-
-            // Keep scale in reasonable bounds
-            *scale = scale.clamp(0.01, 10.0);
-        }
-    }
-}
 
 /// Generate numerically stable proposal values for MCMC.
 ///

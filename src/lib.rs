@@ -139,7 +139,7 @@ pub use inference::diagnostics::{print_diagnostics, r_hat, summarize_parameter, 
 pub use inference::mcmc_utils::{
     effective_sample_size_mcmc, geweke_diagnostic, DiminishingAdaptation,
 };
-pub use inference::mh::{adaptive_mcmc_chain, adaptive_single_site_mh, AdaptiveScales};
+pub use inference::mh::{adaptive_mcmc_chain, adaptive_single_site_mh};
 pub use inference::smc::{
     adaptive_smc, effective_sample_size, Particle, ResamplingMethod, SMCConfig,
 };

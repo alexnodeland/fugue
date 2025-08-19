@@ -179,19 +179,19 @@ impl VariationalParam {
         match self {
             VariationalParam::Normal { mu, log_sigma } => {
                 let sigma = log_sigma.exp();
-                let eps: f64 = rng.gen::<f64>() * 2.0 - 1.0;
+                let _eps: f64 = rng.gen::<f64>() * 2.0 - 1.0;
                 // Simple standard normal sampling
                 let u1: f64 = rng.gen::<f64>().max(1e-10);
                 let u2: f64 = rng.gen();
                 let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
                 let value = mu + sigma * z;
                 const LN_2PI: f64 = 1.8378770664093454835606594728112;
-                let log_prob = -0.5 * z * z - log_sigma - 0.5 * LN_2PI;
+                let _log_prob = -0.5 * z * z - log_sigma - 0.5 * LN_2PI;
                 (value, z)
             }
             VariationalParam::LogNormal { mu, log_sigma } => {
                 let sigma = log_sigma.exp();
-                let eps: f64 = rng.gen::<f64>() * 2.0 - 1.0;
+                let _eps: f64 = rng.gen::<f64>() * 2.0 - 1.0;
                 // Simple standard normal sampling
                 let u1: f64 = rng.gen::<f64>().max(1e-10);
                 let u2: f64 = rng.gen();
@@ -199,7 +199,7 @@ impl VariationalParam {
                 let log_value = mu + sigma * z;
                 let value = log_value.exp();
                 const LN_2PI: f64 = 1.8378770664093454835606594728112;
-                let log_prob = -0.5 * z * z - log_sigma - 0.5 * LN_2PI - log_value;
+                let _log_prob = -0.5 * z * z - log_sigma - 0.5 * LN_2PI - log_value;
                 (value, z)
             }
             VariationalParam::Beta {
@@ -213,7 +213,7 @@ impl VariationalParam {
                 let approx_var = (alpha * beta) / ((alpha + beta).powi(2) * (alpha + beta + 1.0));
                 let approx_sigma = approx_var.sqrt();
 
-                let eps: f64 = rng.gen::<f64>() * 2.0 - 1.0;
+                let _eps: f64 = rng.gen::<f64>() * 2.0 - 1.0;
                 // Simple standard normal sampling
                 let u1: f64 = rng.gen::<f64>().max(1e-10);
                 let u2: f64 = rng.gen();
@@ -221,7 +221,7 @@ impl VariationalParam {
                 let raw_value = approx_mu + approx_sigma * z;
                 let value = raw_value.clamp(0.001, 0.999);
 
-                let log_prob = Beta { alpha, beta }.log_prob(value);
+                let _log_prob = Beta { alpha, beta }.log_prob(value);
                 (value, z)
             }
         }

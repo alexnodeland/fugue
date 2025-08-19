@@ -19,8 +19,7 @@ pub struct CowTrace {
     log_prior: f64,
     log_likelihood: f64,
     log_factors: f64,
-    // Track if we need to copy on next modification
-    is_shared: bool,
+
 }
 
 impl CowTrace {
@@ -31,7 +30,6 @@ impl CowTrace {
             log_prior: 0.0,
             log_likelihood: 0.0,
             log_factors: 0.0,
-            is_shared: false,
         }
     }
 
@@ -42,7 +40,6 @@ impl CowTrace {
             log_prior: trace.log_prior,
             log_likelihood: trace.log_likelihood,
             log_factors: trace.log_factors,
-            is_shared: false,
         }
     }
 
@@ -99,7 +96,7 @@ impl TraceBuilder {
         }
     }
 
-    pub fn with_capacity(capacity: usize) -> Self {
+    pub fn with_capacity(_capacity: usize) -> Self {
         // BTreeMap doesn't have with_capacity, but we can pre-allocate differently
         Self::new()
     }
@@ -199,8 +196,7 @@ impl<'a, R: rand::RngCore> crate::runtime::handler::Handler for PooledPriorHandl
 mod memory_tests {
     use super::*;
     use crate::addr;
-    use rand::rngs::StdRng;
-    use rand::SeedableRng;
+
 
     #[test]
     fn test_cow_trace_efficiency() {
