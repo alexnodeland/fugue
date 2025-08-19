@@ -1,4 +1,4 @@
-use monadic_ppl::*;
+use fugue::*;
 use rand::{SeedableRng, rngs::StdRng};
 use clap::Parser;
 

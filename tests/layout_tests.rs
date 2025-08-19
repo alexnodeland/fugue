@@ -1,4 +1,4 @@
-use monadic_ppl::*;
+use fugue::*;
 use rand::thread_rng;
 fn gaussian_mean(obs: f64) -> Model<f64> {
     sample(

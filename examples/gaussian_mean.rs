@@ -1,5 +1,5 @@
 use clap::Parser;
-use monadic_ppl::*;
+use fugue::*;
 use rand::thread_rng;
 use rand::{rngs::StdRng, SeedableRng};
 fn gaussian_mean(obs: f64) -> Model<f64> {

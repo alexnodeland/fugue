@@ -8,7 +8,7 @@
 /// Allows writing probabilistic programs in a more imperative style:
 ///
 /// ```rust
-/// use monadic_ppl::*;
+/// use fugue::*;
 /// 
 /// let model = prob! {
 ///     let mu <- sample(addr!("mu"), Normal{mu: 0.0, sigma: 1.0});
@@ -41,7 +41,7 @@ macro_rules! prob {
 /// Plate notation for replicating models over ranges.
 ///
 /// ```rust
-/// use monadic_ppl::*;
+/// use fugue::*;
 /// 
 /// let model = plate!(i in 0..10 => {
 ///     sample(addr!("x", i), Normal{mu: 0.0, sigma: 1.0})

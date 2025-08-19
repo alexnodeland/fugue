@@ -1,4 +1,4 @@
-use monadic_ppl::*;
+use fugue::*;
 use proptest::prelude::*;
 use rand::{SeedableRng, rngs::StdRng};
 

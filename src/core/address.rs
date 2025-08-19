@@ -7,7 +7,7 @@
 //! Example:
 //!
 //! ```rust
-//! use monadic_ppl::*;
+//! use fugue::*;
 //! let a = addr!("mu");
 //! let b = addr!("mu", 0);
 //! assert_ne!(a, b);

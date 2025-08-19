@@ -5,6 +5,7 @@ The runtime module provides interpretation and execution of probabilistic models
 ## Components
 
 ### `handler.rs` - Handler Interface
+
 - `Handler` trait: Defines how to interpret model effects (sample, observe, factor)
 - `run` function: Executes a model with a handler, returning value and trace
 
@@ -20,6 +21,7 @@ let (result, trace) = run(handler, model);
 ```
 
 ### `interpreters.rs` - Built-in Handlers
+
 - `PriorHandler`: Samples from priors, accumulates log-densities
 - `ReplayHandler`: Reuses values from a base trace, falls back to sampling
 - `ScoreGivenTrace`: Scores a fixed trace under the model
@@ -36,6 +38,7 @@ let (value3, trace3) = run(ScoreGivenTrace{base: trace, trace: Trace::default()}
 ```
 
 ### `trace.rs` - Execution Traces
+
 - `Trace`: Records choices and accumulated log-weights
 - `Choice`: Individual random choice with address, value, and log-probability
 - `ChoiceValue`: Supports F64, I64, Bool values
@@ -45,7 +48,7 @@ let (value3, trace3) = run(ScoreGivenTrace{base: trace, trace: Trace::default()}
 pub struct Trace {
     pub choices: BTreeMap<Address, Choice>,
     pub log_prior: f64,
-    pub log_likelihood: f64, 
+    pub log_likelihood: f64,
     pub log_factors: f64,
 }
 
@@ -59,6 +62,7 @@ impl Trace {
 ## Usage Patterns
 
 ### Basic Execution
+
 ```rust
 let model = sample(addr!("x"), Normal{mu: 0.0, sigma: 1.0});
 let mut rng = thread_rng();
@@ -66,6 +70,7 @@ let (x, trace) = run(PriorHandler{rng: &mut rng, trace: Trace::default()}, model
 ```
 
 ### Trace Manipulation
+
 ```rust
 // Generate base trace
 let (_, base_trace) = run(PriorHandler{rng: &mut rng, trace: Trace::default()}, model);

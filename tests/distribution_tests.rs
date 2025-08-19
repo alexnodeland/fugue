@@ -1,4 +1,4 @@
-use monadic_ppl::*;
+use fugue::*;
 use rand::{rngs::StdRng, SeedableRng};
 
 #[test]

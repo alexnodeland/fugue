@@ -154,6 +154,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
+name = "fugue"
+version = "0.2.0"
+dependencies = [
+ "clap",
+ "libm",
+ "proptest",
+ "rand 0.8.5",
+ "rand_distr",
+]
+
+[[package]]
 name = "getrandom"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -211,17 +222,6 @@ name = "linux-raw-sys"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cd945864f07fe9f5371a27ad7b52a172b4b499999f1d97574c9fa68373937e12"
-
-[[package]]
-name = "monadic_ppl"
-version = "0.2.0"
-dependencies = [
- "clap",
- "libm",
- "proptest",
- "rand 0.8.5",
- "rand_distr",
-]
 
 [[package]]
 name = "num-traits"

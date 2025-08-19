@@ -1,5 +1,5 @@
 use clap::Parser;
-use monadic_ppl::*;
+use fugue::*;
 use rand::{rngs::StdRng, SeedableRng};
 
 fn mixture_model(obs: f64) -> Model<(f64, f64)> {
