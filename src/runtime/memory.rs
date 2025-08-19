@@ -19,7 +19,6 @@ pub struct CowTrace {
     log_prior: f64,
     log_likelihood: f64,
     log_factors: f64,
-
 }
 
 impl CowTrace {
@@ -196,7 +195,6 @@ impl<'a, R: rand::RngCore> crate::runtime::handler::Handler for PooledPriorHandl
 mod memory_tests {
     use super::*;
     use crate::addr;
-
 
     #[test]
     fn test_cow_trace_efficiency() {
