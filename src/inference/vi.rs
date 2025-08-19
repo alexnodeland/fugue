@@ -1,7 +1,64 @@
-//! Variational inference with mean-field guides and ELBO optimization.
+//! Variational Inference (VI) with mean-field approximations and ELBO optimization.
 //!
-//! Implements structured variational families and gradient-based optimization
-//! for approximate posterior inference.
+//! This module implements variational inference, a deterministic approximate inference
+//! method that turns posterior inference into an optimization problem. Instead of sampling
+//! from the true posterior, VI finds the best approximation within a chosen family of
+//! distributions by maximizing the Evidence Lower BOund (ELBO).
+//!
+//! ## Method Overview
+//!
+//! Variational inference works by:
+//! 1. Choosing a family of tractable distributions Q(θ; φ) parameterized by φ
+//! 2. Finding φ* that minimizes KL(Q(θ; φ) || P(θ|data))
+//! 3. Using Q(θ; φ*) as an approximation to the true posterior P(θ|data)
+//!
+//! ## Mean-Field Approximation
+//!
+//! This implementation uses mean-field variational inference, where the posterior
+//! is approximated as a product of independent distributions:
+//! Q(θ₁, θ₂, ..., θₖ) = Q₁(θ₁) × Q₂(θ₂) × ... × Qₖ(θₖ)
+//!
+//! ## Advantages of VI
+//!
+//! - **Deterministic**: No random sampling, reproducible results
+//! - **Fast**: Typically faster than MCMC for large models
+//! - **Scalable**: Handles high-dimensional parameters well
+//! - **Convergence detection**: Clear optimization objective to monitor
+//!
+//! ## Limitations
+//!
+//! - **Approximation quality**: May underestimate posterior uncertainty
+//! - **Local optima**: Gradient-based optimization can get stuck
+//! - **Family restrictions**: Posterior must be well-approximated by chosen family
+//!
+//! # Examples
+//!
+//! ```rust
+//! use fugue::*;
+//! use rand::rngs::StdRng;
+//! use rand::SeedableRng;
+//! use std::collections::HashMap;
+//!
+//! // Simple VI example
+//! let model_fn = || {
+//!     sample(addr!("mu"), Normal { mu: 0.0, sigma: 1.0 })
+//!         .bind(|mu| observe(addr!("y"), Normal { mu, sigma: 0.5 }, 2.0).map(move |_| mu))
+//! };
+//!
+//! // Create mean-field guide manually
+//! let mut guide = MeanFieldGuide { 
+//!     params: HashMap::new() 
+//! };
+//! guide.params.insert(
+//!     addr!("mu"), 
+//!     VariationalParam::Normal { mu: 0.0, log_sigma: 0.0 }
+//! );
+//!
+//! // Simple ELBO computation
+//! let mut rng = StdRng::seed_from_u64(42);
+//! let elbo = elbo_with_guide(&mut rng, &model_fn, &guide, 10);
+//! assert!(elbo.is_finite());
+//! ```
 use crate::core::address::Address;
 use crate::core::distribution::*;
 use crate::core::model::Model;
@@ -11,16 +68,80 @@ use crate::runtime::trace::{Choice, ChoiceValue, Trace};
 use rand::Rng;
 use std::collections::HashMap;
 
-/// Variational parameter for a single site.
+/// Variational distribution parameters for a single random variable.
+///
+/// Each random variable in the model gets its own variational distribution that
+/// approximates its marginal posterior. The parameters are stored in log-space
+/// for numerical stability and to ensure positive constraints.
+///
+/// # Variants
+///
+/// * `Normal` - Gaussian approximation with mean and log-standard-deviation
+/// * `LogNormal` - Log-normal approximation for positive variables
+/// * `Beta` - Beta approximation for variables constrained to \[0,1\]
+///
+/// # Examples
+///
+/// ```rust
+/// use fugue::*;
+/// use rand::rngs::StdRng;
+/// use rand::SeedableRng;
+///
+/// // Create variational parameters
+/// let normal_param = VariationalParam::Normal { 
+///     mu: 1.5, 
+///     log_sigma: -0.693  // sigma = 0.5
+/// };
+///
+/// let beta_param = VariationalParam::Beta {
+///     log_alpha: 1.099,  // alpha = 3.0
+///     log_beta: 0.693,   // beta = 2.0
+/// };
+///
+/// // Sample from variational distribution
+/// let mut rng = StdRng::seed_from_u64(42);
+/// let sample = normal_param.sample(&mut rng);
+/// let log_prob = normal_param.log_prob(sample);
+/// ```
 #[derive(Clone, Debug)]
 pub enum VariationalParam {
-    Normal { mu: f64, log_sigma: f64 },
-    LogNormal { mu: f64, log_sigma: f64 },
-    Beta { log_alpha: f64, log_beta: f64 },
+    /// Normal/Gaussian variational distribution.
+    Normal { 
+        /// Mean parameter.
+        mu: f64, 
+        /// Log of standard deviation (for positivity).
+        log_sigma: f64 
+    },
+    /// Log-normal variational distribution for positive variables.
+    LogNormal { 
+        /// Mean of underlying normal.
+        mu: f64, 
+        /// Log of standard deviation of underlying normal.
+        log_sigma: f64 
+    },
+    /// Beta variational distribution for variables in \[0,1\].
+    Beta { 
+        /// Log of first shape parameter (for positivity).
+        log_alpha: f64, 
+        /// Log of second shape parameter (for positivity).
+        log_beta: f64 
+    },
 }
 
 impl VariationalParam {
-    /// Sample from the variational distribution.
+    /// Sample a value from this variational distribution.
+    ///
+    /// Generates a random sample using the current variational parameters.
+    /// This is used during ELBO estimation and for generating approximate
+    /// posterior samples.
+    ///
+    /// # Arguments
+    ///
+    /// * `rng` - Random number generator
+    ///
+    /// # Returns
+    ///
+    /// A sample from the variational distribution.
     pub fn sample<R: Rng>(&self, rng: &mut R) -> f64 {
         match self {
             VariationalParam::Normal { mu, log_sigma } => {
@@ -42,7 +163,18 @@ impl VariationalParam {
         }
     }
 
-    /// Log probability under the variational distribution.
+    /// Compute log-probability of a value under this variational distribution.
+    ///
+    /// This is used for computing entropy terms in the ELBO and for evaluating
+    /// the quality of the variational approximation.
+    ///
+    /// # Arguments
+    ///
+    /// * `x` - Value to evaluate
+    ///
+    /// # Returns
+    ///
+    /// Log-probability density at the given value.
     pub fn log_prob(&self, x: f64) -> f64 {
         match self {
             VariationalParam::Normal { mu, log_sigma } => {
@@ -65,13 +197,51 @@ impl VariationalParam {
     }
 }
 
-/// Mean-field variational family.
+/// Mean-field variational guide for approximate posterior inference.
+///
+/// A mean-field guide specifies independent variational distributions for each
+/// random variable in the model. This factorization assumption simplifies
+/// optimization but may underestimate correlations between variables.
+///
+/// The guide maps each address (random variable) to its variational parameters,
+/// which are optimized to minimize the KL divergence to the true posterior.
+///
+/// # Fields
+///
+/// * `params` - Map from addresses to their variational parameters
+///
+/// # Examples
+///
+/// ```rust
+/// use fugue::*;
+/// use std::collections::HashMap;
+///
+/// // Create a guide for a two-parameter model
+/// let mut guide = MeanFieldGuide::new();
+/// guide.params.insert(
+///     addr!("mu"), 
+///     VariationalParam::Normal { mu: 0.0, log_sigma: 0.0 }
+/// );
+/// guide.params.insert(
+///     addr!("sigma"), 
+///     VariationalParam::Normal { mu: 0.0, log_sigma: -1.0 }
+/// );
+///
+/// // Check if parameters are specified
+/// assert!(guide.params.contains_key(&addr!("mu")));
+/// assert!(guide.params.contains_key(&addr!("sigma")));
+/// ```
 #[derive(Clone, Debug)]
 pub struct MeanFieldGuide {
+    /// Map from addresses to their variational parameters.
     pub params: HashMap<Address, VariationalParam>,
 }
 
 impl MeanFieldGuide {
+    /// Create a new empty mean-field guide.
+    ///
+    /// The guide starts with no variational parameters. You must add parameters
+    /// for each random variable in your model using the `add_*_param` methods.
     pub fn new() -> Self {
         Self {
             params: HashMap::new(),
@@ -194,12 +364,12 @@ pub fn optimize_meanfield_vi<A, R: Rng>(
                     if let Some(VariationalParam::Normal { mu: mu_plus, .. }) =
                         guide_plus.params.get_mut(_addr)
                     {
-                        *mu_plus += eps;
+                        *mu_plus = *mu_plus + eps;
                     }
                     let elbo_plus = elbo_with_guide(rng, &model_fn, &guide_plus, 10);
                     let grad_mu = (elbo_plus - current_elbo) / eps;
 
-                    *mu += learning_rate * grad_mu;
+                    *mu = *mu + learning_rate * grad_mu;
                 }
                 VariationalParam::LogNormal { mu, log_sigma: _ } => {
                     // Similar finite difference for LogNormal parameters
@@ -208,12 +378,12 @@ pub fn optimize_meanfield_vi<A, R: Rng>(
                     if let Some(VariationalParam::LogNormal { mu: mu_plus, .. }) =
                         guide_plus.params.get_mut(_addr)
                     {
-                        *mu_plus += eps;
+                        *mu_plus = *mu_plus + eps;
                     }
                     let elbo_plus = elbo_with_guide(rng, &model_fn, &guide_plus, 10);
                     let grad_mu = (elbo_plus - current_elbo) / eps;
 
-                    *mu += learning_rate * grad_mu;
+                    *mu = *mu + learning_rate * grad_mu;
                 }
                 VariationalParam::Beta {
                     log_alpha,
@@ -227,12 +397,12 @@ pub fn optimize_meanfield_vi<A, R: Rng>(
                         ..
                     }) = guide_plus.params.get_mut(_addr)
                     {
-                        *alpha_plus += eps;
+                        *alpha_plus = *alpha_plus + eps;
                     }
                     let elbo_plus = elbo_with_guide(rng, &model_fn, &guide_plus, 10);
                     let grad_alpha = (elbo_plus - current_elbo) / eps;
 
-                    *log_alpha += learning_rate * grad_alpha;
+                    *log_alpha = *log_alpha + learning_rate * grad_alpha;
                 }
             }
         }

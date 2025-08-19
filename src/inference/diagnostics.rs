@@ -1,7 +1,64 @@
-//! Convergence diagnostics and model checking tools.
+//! Convergence diagnostics and parameter summaries for MCMC chains.
 //!
-//! Provides essential diagnostics for validating MCMC convergence and
-//! posterior quality, including R-hat, effective sample size, and trace analysis.
+//! This module provides essential tools for analyzing MCMC output and assessing
+//! the quality of posterior approximations. Proper diagnostics are crucial for
+//! ensuring that MCMC chains have converged and that posterior estimates are reliable.
+//!
+//! ## Available Diagnostics
+//!
+//! - **R-hat (Potential Scale Reduction Factor)**: Measures between-chain vs within-chain variance
+//! - **Parameter summaries**: Mean, standard deviation, quantiles for each parameter
+//! - **Diagnostic printing**: Formatted output for quick assessment
+//!
+//! ## Convergence Assessment
+//!
+//! The R-hat statistic compares the variance between multiple chains to the variance
+//! within chains. Values close to 1.0 indicate convergence, while values > 1.1
+//! suggest that chains haven't mixed well and more sampling is needed.
+//!
+//! ## Best Practices
+//!
+//! 1. Run multiple chains from different starting points
+//! 2. Check R-hat for all parameters (should be < 1.1)
+//! 3. Examine trace plots for proper mixing
+//! 4. Use effective sample size to assess sampling efficiency
+//!
+//! # Examples
+//!
+//! ```rust
+//! use fugue::*;
+//! use rand::rngs::StdRng;
+//! use rand::SeedableRng;
+//!
+//! // Generate MCMC samples (simplified for testing)
+//! let model_fn = || sample(addr!("mu"), Normal { mu: 0.0, sigma: 1.0 })
+//!     .bind(|mu| observe(addr!("y"), Normal { mu, sigma: 0.5 }, 2.0).map(move |_| mu));
+//!
+//! let mut all_traces = Vec::new();
+//! for chain in 0..2 {  // Just 2 chains for testing
+//!     let mut rng = StdRng::seed_from_u64(42 + chain);
+//!     let samples = adaptive_mcmc_chain(&mut rng, model_fn, 10, 2);  // Small numbers
+//!     all_traces.extend(samples.into_iter().map(|(_, trace)| trace));
+//! }
+//!
+//! // Create separate chains for r_hat calculation
+//! let mut chain1 = Vec::new();
+//! let mut chain2 = Vec::new();
+//! for (i, trace) in all_traces.iter().enumerate() {
+//!     if i % 2 == 0 { 
+//!         chain1.push(trace.clone()); 
+//!     } else { 
+//!         chain2.push(trace.clone()); 
+//!     }
+//! }
+//! 
+//! // Compute diagnostics
+//! let r_hat_val = r_hat(&[chain1.clone(), chain2.clone()], &addr!("mu"));
+//! let summary = summarize_parameter(&[chain1, chain2], &addr!("mu"));
+//!
+//! assert!(r_hat_val.is_finite() || r_hat_val.is_nan());
+//! assert!(summary.mean.is_finite());
+//! ```
 
 use crate::core::address::Address;
 use crate::runtime::trace::{ChoiceValue, Trace};

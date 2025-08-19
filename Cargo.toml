@@ -7,6 +7,14 @@ description = "Monadic-style PPL with effects/handlers, traces, and pluggable in
 readme = "README.md"
 keywords = ["probabilistic-programming", "ppl", "monad", "effects", "traces"]
 categories = ["science", "mathematics"]
+documentation = "https://docs.rs/.../fugue"
+repository = "https://github.com/alexandernodeland/fugue"
+
+[package.metadata.docs.rs]
+# Enable all features for documentation
+all-features = true
+# Use nightly for better documentation features
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 rand = "0.8"
