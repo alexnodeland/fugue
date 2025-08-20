@@ -2,14 +2,9 @@ use fugue::*;
 use rand::{rngs::StdRng, SeedableRng};
 
 fn gm(obs: f64) -> Model<f64> {
-    sample(
-        addr!("mu"),
-        Normal {
-            mu: 0.0,
-            sigma: 1.0,
-        },
-    )
-    .bind(move |mu| observe(addr!("y"), Normal { mu, sigma: 1.0 }, obs).bind(move |_| pure(mu)))
+    sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap()).bind(move |mu| {
+        observe(addr!("y"), Normal::new(mu, 1.0).unwrap(), obs).bind(move |_| pure(mu))
+    })
 }
 
 #[test]
@@ -50,14 +45,7 @@ fn replay_handler_reuses_choice() {
 #[test]
 fn score_given_trace_matches_prior_when_no_observes() {
     // Model with only prior choices
-    let m = sample(
-        addr!("x"),
-        Normal {
-            mu: 0.0,
-            sigma: 1.0,
-        },
-    )
-    .bind(|_x| pure(()));
+    let m = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap()).bind(|_x| pure(()));
     let mut rng = StdRng::seed_from_u64(55);
     let (_a, base) = runtime::handler::run(
         runtime::interpreters::PriorHandler {
@@ -71,14 +59,7 @@ fn score_given_trace_matches_prior_when_no_observes() {
             base: base.clone(),
             trace: Trace::default(),
         },
-        sample(
-            addr!("x"),
-            Normal {
-                mu: 0.0,
-                sigma: 1.0,
-            },
-        )
-        .bind(|_x| pure(())),
+        sample(addr!("x"), Normal::new(0.0, 1.0).unwrap()).bind(|_x| pure(())),
     );
     assert!((base.total_log_weight() - scored.total_log_weight()).abs() < 1e-9);
 }

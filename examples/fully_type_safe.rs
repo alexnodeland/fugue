@@ -12,34 +12,13 @@ use rand::{rngs::StdRng, SeedableRng};
 
 /// Type-safe mixture model using natural types
 fn type_safe_mixture_model(obs: f64) -> Model<(f64, f64)> {
-    sample(
-        addr!("weight"),
-        Beta {
-            alpha: 1.0,
-            beta: 1.0,
-        },
-    )
-    .bind(move |weight| {
-        sample(
-            addr!("mu1"),
-            Normal {
-                mu: -2.0,
-                sigma: 1.0,
-            },
-        )
-        .bind(move |mu1| {
-            sample(
-                addr!("mu2"),
-                Normal {
-                    mu: 2.0,
-                    sigma: 1.0,
-                },
-            )
-            .bind(move |mu2| {
+    sample(addr!("weight"), Beta::new(1.0, 1.0).unwrap()).bind(move |weight| {
+        sample(addr!("mu1"), Normal::new(-2.0, 1.0).unwrap()).bind(move |mu1| {
+            sample(addr!("mu2"), Normal::new(2.0, 1.0).unwrap()).bind(move |mu2| {
                 // ✅ Type-safe: Bernoulli now returns bool directly!
-                sample(addr!("component"), Bernoulli { p: weight }).bind(move |comp| {
+                sample(addr!("component"), Bernoulli::new(weight).unwrap()).bind(move |comp| {
                     let mu = if comp { mu2 } else { mu1 }; // Natural boolean usage!
-                    observe(addr!("y"), Normal { mu, sigma: 1.0 }, obs)
+                    observe(addr!("y"), Normal::new(mu, 1.0).unwrap(), obs)
                         .bind(move |_| pure((mu1, mu2)))
                 })
             })
@@ -50,7 +29,7 @@ fn type_safe_mixture_model(obs: f64) -> Model<(f64, f64)> {
 /// Example showing type-safe counting with Poisson
 fn count_model_example() -> Model<String> {
     // ✅ Type-safe: Poisson returns u64 directly!
-    sample(addr!("count"), Poisson { lambda: 3.0 }).bind(|count| {
+    sample(addr!("count"), Poisson::new(3.0).unwrap()).bind(|count| {
         // count is naturally u64, can be used directly with integer operations
         let message = match count {
             0 => "No events occurred".to_string(),
@@ -69,9 +48,7 @@ fn choice_model_example() -> Model<String> {
     // ✅ Type-safe: Categorical returns usize directly!
     sample(
         addr!("color_choice"),
-        Categorical {
-            probs: vec![0.5, 0.3, 0.2],
-        },
+        Categorical::new(vec![0.5, 0.3, 0.2]).unwrap(),
     )
     .bind(move |choice_idx| {
         // choice_idx is naturally usize, can be used safely as array index
@@ -84,15 +61,13 @@ fn choice_model_example() -> Model<String> {
 /// Example of type-safe observations
 fn observation_example() -> Model<()> {
     // Observe boolean outcome directly
-    observe(addr!("coin_result"), Bernoulli { p: 0.6 }, true).bind(|_| {
+    observe(addr!("coin_result"), Bernoulli::new(0.6).unwrap(), true).bind(|_| {
         // Observe integer count directly
-        observe(addr!("event_count"), Poisson { lambda: 4.0 }, 7u64).bind(|_| {
+        observe(addr!("event_count"), Poisson::new(4.0).unwrap(), 7u64).bind(|_| {
             // Observe categorical choice directly
             observe(
                 addr!("user_choice"),
-                Categorical {
-                    probs: vec![0.2, 0.3, 0.5],
-                },
+                Categorical::new(vec![0.2, 0.3, 0.5]).unwrap(),
                 2usize,
             )
         })
@@ -102,7 +77,7 @@ fn observation_example() -> Model<()> {
 /// Example using direct distribution access outside the Model system
 fn direct_distributions_example() -> Model<String> {
     // All distributions work both inside and outside the Model system
-    let coin = Bernoulli { p: 0.7 };
+    let coin = Bernoulli::new(0.7).unwrap();
     let mut rng = StdRng::seed_from_u64(42);
 
     // Direct sampling - returns bool

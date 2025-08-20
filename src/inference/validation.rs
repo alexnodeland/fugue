@@ -234,10 +234,7 @@ mod validation_tests {
     #[test]
     fn test_normal_distribution() {
         let mut rng = StdRng::seed_from_u64(42);
-        let normal = Normal {
-            mu: 0.0,
-            sigma: 1.0,
-        };
+        let normal = Normal::new(0.0, 1.0).unwrap();
 
         // Generate reference samples using a different method
         let reference: Vec<f64> = (0..1000)

@@ -31,8 +31,8 @@
 //!
 //! // Define a simple Bayesian model
 //! let model_fn = || {
-//!     sample(addr!("mu"), Normal { mu: 0.0, sigma: 2.0 })
-//!         .bind(|mu| observe(addr!("y"), Normal { mu, sigma: 1.0 }, 2.5))
+//!     sample(addr!("mu"), Normal::new(0.0, 2.0).unwrap())
+//!         .bind(|mu| observe(addr!("y"), Normal::new(mu, 1.0).unwrap(), 2.5))
 //! };
 //!
 //! // Run adaptive MCMC (small numbers for testing)
@@ -61,7 +61,84 @@ use crate::inference::mcmc_utils::DiminishingAdaptation;
 use crate::runtime::handler::run;
 use crate::runtime::interpreters::{PriorHandler, ScoreGivenTrace};
 use crate::runtime::trace::{Choice, ChoiceValue, Trace};
-use rand::Rng;
+use rand::{Rng, RngCore};
+
+/// Trait for distribution-aware proposal strategies.
+///
+/// This enables more intelligent proposals that take advantage of the distribution
+/// structure rather than using generic random walks.
+pub trait ProposalStrategy<T> {
+    /// Generate a proposal given the current value and scale.
+    fn propose(&self, current: T, scale: f64, rng: &mut dyn RngCore) -> T;
+
+    /// Compute the log probability of proposing `to` given `from` (for asymmetric proposals).
+    fn log_proposal_prob(&self, from: T, to: T, scale: f64) -> f64 {
+        let _ = (from, to, scale);
+        0.0 // Default: symmetric proposal
+    }
+}
+
+/// Gaussian random walk proposal for continuous distributions.
+pub struct GaussianWalkProposal;
+
+impl ProposalStrategy<f64> for GaussianWalkProposal {
+    fn propose(&self, current: f64, scale: f64, rng: &mut dyn RngCore) -> f64 {
+        // Use Box-Muller for better numerical stability
+        let u1: f64 = rng.gen::<f64>().max(1e-10); // Avoid log(0)
+        let u2: f64 = rng.gen();
+        let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+        current + scale * z
+    }
+}
+
+/// Flip proposal for boolean distributions.
+pub struct FlipProposal;
+
+impl ProposalStrategy<bool> for FlipProposal {
+    fn propose(&self, current: bool, _scale: f64, rng: &mut dyn RngCore) -> bool {
+        // For Bernoulli, always propose the opposite value for good mixing
+        if rng.gen::<f64>() < 0.5 {
+            !current
+        } else {
+            current
+        }
+    }
+}
+
+/// Discrete random walk proposal for count distributions.
+pub struct DiscreteWalkProposal;
+
+impl ProposalStrategy<u64> for DiscreteWalkProposal {
+    fn propose(&self, current: u64, scale: f64, rng: &mut dyn RngCore) -> u64 {
+        let u1: f64 = rng.gen::<f64>().max(1e-10);
+        let u2: f64 = rng.gen();
+        let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+        let delta = (scale * z).round() as i64;
+        (current as i64 + delta).max(0) as u64
+    }
+}
+
+/// Uniform proposal for categorical distributions.
+///
+/// This proposal strategy is distribution-aware and uses the actual size
+/// of the categorical distribution when available.
+pub struct UniformCategoricalProposal {
+    /// Number of categories in the distribution.
+    pub n_categories: Option<usize>,
+}
+
+impl ProposalStrategy<usize> for UniformCategoricalProposal {
+    fn propose(&self, current: usize, _scale: f64, rng: &mut dyn RngCore) -> usize {
+        match self.n_categories {
+            Some(n) => rng.gen_range(0..n),
+            None => {
+                // Fallback heuristic if we don't know the true size
+                let max_val = (current + 5).max(10);
+                rng.gen_range(0..max_val)
+            }
+        }
+    }
+}
 
 /// Generate numerically stable proposal values for MCMC.
 ///
@@ -109,11 +186,10 @@ fn propose_new_value_stable<R: Rng>(rng: &mut R, choice: &Choice, scale: f64) ->
             let proposed = (current_val as i64 + delta).max(0) as u64;
             proposed as f64
         }
-        ChoiceValue::Usize(_current_val) => {
-            // For categorical variables, use discrete uniform proposal over valid indices
-            // This is a placeholder - in practice, categorical variables often need
-            // specialized proposal mechanisms
-            let max_val = 10; // This should be based on the categorical distribution size
+        ChoiceValue::Usize(current_val) => {
+            // For categorical variables, propose uniform over reasonable range
+            // In practice, this should use the actual distribution size
+            let max_val = (current_val + 5).max(10); // Heuristic: assume at least 10 categories
             let proposed = rng.gen_range(0..max_val);
             proposed as f64
         }
@@ -154,7 +230,7 @@ fn propose_new_value_stable<R: Rng>(rng: &mut R, choice: &Choice, scale: f64) ->
 /// use rand::SeedableRng;
 ///
 /// // Set up initial state with simple model
-/// let model_fn = || sample(addr!("mu"), Normal { mu: 0.0, sigma: 1.0 });
+/// let model_fn = || sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap());
 ///
 /// let mut rng = StdRng::seed_from_u64(42);
 /// let (_, initial_trace) = runtime::handler::run(
@@ -278,7 +354,7 @@ pub fn adaptive_single_site_mh<A, R: Rng>(
 ///
 /// // Very simple model for testing
 /// let model_fn = || {
-///     sample(addr!("mu"), Normal { mu: 0.0, sigma: 1.0 })
+///     sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
 /// };
 ///
 /// let mut rng = StdRng::seed_from_u64(42);

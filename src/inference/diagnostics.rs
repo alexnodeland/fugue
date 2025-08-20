@@ -31,8 +31,8 @@
 //! use rand::SeedableRng;
 //!
 //! // Generate MCMC samples (simplified for testing)
-//! let model_fn = || sample(addr!("mu"), Normal { mu: 0.0, sigma: 1.0 })
-//!     .bind(|mu| observe(addr!("y"), Normal { mu, sigma: 0.5 }, 2.0).map(move |_| mu));
+//! let model_fn = || sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
+//!     .bind(|mu| observe(addr!("y"), Normal::new(mu, 0.5).unwrap(), 2.0).map(move |_| mu));
 //!
 //! let mut all_traces = Vec::new();
 //! for chain in 0..2 {  // Just 2 chains for testing
@@ -53,48 +53,172 @@
 //! }
 //!
 //! // Compute diagnostics
-//! let r_hat_val = r_hat(&[chain1.clone(), chain2.clone()], &addr!("mu"));
-//! let summary = summarize_parameter(&[chain1, chain2], &addr!("mu"));
+//! let r_hat_val = r_hat_f64(&[chain1.clone(), chain2.clone()], &addr!("mu"));
+//! let summary = summarize_f64_parameter(&[chain1, chain2], &addr!("mu"));
 //!
 //! assert!(r_hat_val.is_finite() || r_hat_val.is_nan());
 //! assert!(summary.mean.is_finite());
 //! ```
 
 use crate::core::address::Address;
-use crate::runtime::trace::{ChoiceValue, Trace};
+use crate::runtime::trace::Trace;
 use std::collections::HashMap;
 
-/// Extract scalar values from traces for a specific address.
-pub fn extract_values(traces: &[Trace], addr: &Address) -> Vec<f64> {
-    traces
-        .iter()
-        .filter_map(|t| t.choices.get(addr))
-        .filter_map(|choice| match choice.value {
-            ChoiceValue::F64(v) => Some(v),
-            ChoiceValue::I64(v) => Some(v as f64),
-            ChoiceValue::U64(v) => Some(v as f64),
-            ChoiceValue::Usize(v) => Some(v as f64),
-            ChoiceValue::Bool(v) => Some(if v { 1.0 } else { 0.0 }),
-        })
-        .collect()
+/// Type-safe extraction of f64 values from traces.
+///
+/// Only extracts values that are actually stored as f64, avoiding lossy conversions.
+pub fn extract_f64_values(traces: &[Trace], addr: &Address) -> Vec<f64> {
+    traces.iter().filter_map(|t| t.get_f64(addr)).collect()
 }
 
-/// Compute R-hat convergence diagnostic for multiple chains.
-pub fn r_hat(chains: &[Vec<Trace>], addr: &Address) -> f64 {
-    if chains.len() < 2 {
-        return 1.0; // Can't compute R-hat with single chain
+/// Type-safe extraction of bool values from traces.
+pub fn extract_bool_values(traces: &[Trace], addr: &Address) -> Vec<bool> {
+    traces.iter().filter_map(|t| t.get_bool(addr)).collect()
+}
+
+/// Type-safe extraction of u64 values from traces.
+pub fn extract_u64_values(traces: &[Trace], addr: &Address) -> Vec<u64> {
+    traces.iter().filter_map(|t| t.get_u64(addr)).collect()
+}
+
+/// Type-safe extraction of usize values from traces.
+pub fn extract_usize_values(traces: &[Trace], addr: &Address) -> Vec<usize> {
+    traces.iter().filter_map(|t| t.get_usize(addr)).collect()
+}
+
+/// Type-safe extraction of i64 values from traces.
+pub fn extract_i64_values(traces: &[Trace], addr: &Address) -> Vec<i64> {
+    traces.iter().filter_map(|t| t.get_i64(addr)).collect()
+}
+
+/// Trait for type-specific diagnostics.
+///
+/// This trait enables computing diagnostics for different value types without
+/// forcing everything to f64, preserving type safety and avoiding lossy conversions.
+pub trait Diagnostics<T> {
+    /// Extract values of type T from traces at the given address.
+    fn extract_values(traces: &[Trace], addr: &Address) -> Vec<T>;
+
+    /// Compute R-hat for this type (if applicable).
+    fn r_hat(chains: &[Vec<Trace>], addr: &Address) -> Option<f64>;
+
+    /// Compute effective sample size (if applicable).
+    fn effective_sample_size(values: &[T]) -> Option<f64>;
+}
+
+impl Diagnostics<f64> for f64 {
+    fn extract_values(traces: &[Trace], addr: &Address) -> Vec<f64> {
+        extract_f64_values(traces, addr)
     }
 
+    fn r_hat(chains: &[Vec<Trace>], addr: &Address) -> Option<f64> {
+        let r_hat_val = r_hat_f64(chains, addr);
+        if r_hat_val.is_finite() {
+            Some(r_hat_val)
+        } else {
+            None
+        }
+    }
+
+    fn effective_sample_size(values: &[f64]) -> Option<f64> {
+        if values.len() < 4 {
+            return Some(values.len() as f64);
+        }
+        Some(effective_sample_size(values))
+    }
+}
+
+impl Diagnostics<bool> for bool {
+    fn extract_values(traces: &[Trace], addr: &Address) -> Vec<bool> {
+        extract_bool_values(traces, addr)
+    }
+
+    fn r_hat(_chains: &[Vec<Trace>], _addr: &Address) -> Option<f64> {
+        // R-hat doesn't make sense for boolean variables
+        None
+    }
+
+    fn effective_sample_size(_values: &[bool]) -> Option<f64> {
+        // ESS computed differently for discrete variables
+        None
+    }
+}
+
+impl Diagnostics<u64> for u64 {
+    fn extract_values(traces: &[Trace], addr: &Address) -> Vec<u64> {
+        extract_u64_values(traces, addr)
+    }
+
+    fn r_hat(chains: &[Vec<Trace>], addr: &Address) -> Option<f64> {
+        // For count data, we can convert to f64 for R-hat
+        let f64_chains: Vec<Vec<f64>> = chains
+            .iter()
+            .map(|chain| {
+                extract_u64_values(chain, addr)
+                    .into_iter()
+                    .map(|x| x as f64)
+                    .collect()
+            })
+            .collect();
+
+        if f64_chains.iter().any(|v| v.is_empty()) {
+            return None;
+        }
+
+        let r_hat_val = r_hat_from_f64_chains(&f64_chains);
+        if r_hat_val.is_finite() {
+            Some(r_hat_val)
+        } else {
+            None
+        }
+    }
+
+    fn effective_sample_size(values: &[u64]) -> Option<f64> {
+        if values.len() < 4 {
+            return Some(values.len() as f64);
+        }
+        // Convert to f64 for ESS computation
+        let f64_values: Vec<f64> = values.iter().map(|&x| x as f64).collect();
+        Some(effective_sample_size(&f64_values))
+    }
+}
+
+impl Diagnostics<usize> for usize {
+    fn extract_values(traces: &[Trace], addr: &Address) -> Vec<usize> {
+        extract_usize_values(traces, addr)
+    }
+
+    fn r_hat(_chains: &[Vec<Trace>], _addr: &Address) -> Option<f64> {
+        // R-hat for categorical variables needs special treatment
+        None
+    }
+
+    fn effective_sample_size(_values: &[usize]) -> Option<f64> {
+        // ESS for categorical variables is complex
+        None
+    }
+}
+
+/// Compute R-hat convergence diagnostic for f64 values.
+pub fn r_hat_f64(chains: &[Vec<Trace>], addr: &Address) -> f64 {
     let chain_values: Vec<Vec<f64>> = chains
         .iter()
-        .map(|chain| extract_values(chain, addr))
+        .map(|chain| extract_f64_values(chain, addr))
         .collect();
+    r_hat_from_f64_chains(&chain_values)
+}
+
+/// Helper function to compute R-hat from pre-extracted f64 chains.
+fn r_hat_from_f64_chains(chain_values: &[Vec<f64>]) -> f64 {
+    if chain_values.len() < 2 {
+        return 1.0; // Can't compute R-hat with single chain
+    }
 
     if chain_values.iter().any(|v| v.is_empty()) {
         return f64::NAN; // Missing data
     }
 
-    let m = chains.len() as f64; // number of chains
+    let m = chain_values.len() as f64; // number of chains
     let n = chain_values[0].len() as f64; // samples per chain
 
     // Chain means
@@ -196,11 +320,12 @@ pub struct ParameterSummary {
     pub ess: f64,
 }
 
-pub fn summarize_parameter(chains: &[Vec<Trace>], addr: &Address) -> ParameterSummary {
+/// Type-safe parameter summary for f64 values.
+pub fn summarize_f64_parameter(chains: &[Vec<Trace>], addr: &Address) -> ParameterSummary {
     // Combine all chains
     let all_values: Vec<f64> = chains
         .iter()
-        .flat_map(|chain| extract_values(chain, addr))
+        .flat_map(|chain| extract_f64_values(chain, addr))
         .collect();
 
     if all_values.is_empty() {
@@ -238,9 +363,9 @@ pub fn summarize_parameter(chains: &[Vec<Trace>], addr: &Address) -> ParameterSu
     }
 
     // Diagnostics
-    let r_hat_val = r_hat(chains, addr);
+    let r_hat_val = r_hat_f64(chains, addr);
     let ess_val = if !chains.is_empty() {
-        effective_sample_size(&extract_values(&chains[0], addr))
+        effective_sample_size(&extract_f64_values(&chains[0], addr))
     } else {
         0.0
     };
@@ -279,7 +404,7 @@ pub fn print_diagnostics(chains: &[Vec<Trace>]) {
     println!("{}", "-".repeat(80));
 
     for addr in &all_addresses {
-        let summary = summarize_parameter(chains, &addr);
+        let summary = summarize_f64_parameter(chains, &addr);
         println!(
             "{:<15} {:>8.3} {:>8.3} {:>8.3} {:>8.3} {:>8.3} {:>8.3} {:>8.0}",
             addr.to_string(),
@@ -296,7 +421,7 @@ pub fn print_diagnostics(chains: &[Vec<Trace>]) {
     // Overall convergence assessment
     let all_r_hats: Vec<f64> = all_addresses
         .iter()
-        .map(|addr| summarize_parameter(chains, addr).r_hat)
+        .map(|addr| summarize_f64_parameter(chains, addr).r_hat)
         .filter(|&x| x.is_finite())
         .collect();
 

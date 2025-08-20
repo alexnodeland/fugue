@@ -34,21 +34,21 @@ use fugue::*;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
-fn bayesian_regression(x_data: &[f64], y_data: &[f64]) -> Model<(f64, f64)> {
-    prob! {
-        // Priors
-        let slope <- sample(addr!("slope"), Normal { mu: 0.0, sigma: 1.0 });
-        let intercept <- sample(addr!("intercept"), Normal { mu: 0.0, sigma: 1.0 });
-        let noise <- sample(addr!("noise"), LogNormal { mu: 0.0, sigma: 0.5 });
+fn bayesian_regression(x_data: &[f64], y_data: &[f64]) -> FugueResult<Model<(f64, f64)>> {
+    Ok(prob! {
+        // Priors - using safe constructors
+        let slope <- sample(addr!("slope"), Normal::new(0.0, 1.0)?);
+        let intercept <- sample(addr!("intercept"), Normal::new(0.0, 1.0)?);
+        let noise <- sample(addr!("noise"), LogNormal::new(0.0, 0.5)?);
         
         // Likelihood
         for (i, (&x, &y)) in x_data.iter().zip(y_data.iter()).enumerate() {
             let y_pred = slope * x + intercept;
-            observe(addr!("y", i), Normal { mu: y_pred, sigma: noise }, y);
+            observe(addr!("y", i), Normal::new(y_pred, noise)?, y);
         }
         
         pure((slope, intercept))
-    }
+    })
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -60,12 +60,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Run adaptive MCMC
     let samples = adaptive_mcmc_chain(
         &mut rng,
-        || bayesian_regression(&x_data, &y_data),
+        || bayesian_regression(&x_data, &y_data).unwrap(),
         1000,  // samples
         500,   // warmup
     );
     
-    // Extract results
+    // Extract results using type-safe accessors
     let slopes: Vec<f64> = samples.iter()
         .filter_map(|(_, trace)| trace.get_f64(&addr!("slope")))
         .collect();
@@ -129,19 +129,19 @@ use fugue::*;
 // Pure deterministic computation
 let model1 = pure(42.0);
 
-// Type-safe probabilistic sampling
-let normal_sample: Model<f64> = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 });
-let coin_flip: Model<bool> = sample(addr!("coin"), Bernoulli { p: 0.5 });
-let event_count: Model<u64> = sample(addr!("count"), Poisson { lambda: 3.0 });
-let category_choice: Model<usize> = sample(addr!("choice"), Categorical { 
-    probs: vec![0.3, 0.5, 0.2] 
-});
+// Type-safe probabilistic sampling with safe constructors
+let normal_sample: Model<f64> = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
+let coin_flip: Model<bool> = sample(addr!("coin"), Bernoulli::new(0.5).unwrap());
+let event_count: Model<u64> = sample(addr!("count"), Poisson::new(3.0).unwrap());
+let category_choice: Model<usize> = sample(addr!("choice"), Categorical::new(
+    vec![0.3, 0.5, 0.2]
+).unwrap());
 
-// Type-safe observations
-let obs1 = observe(addr!("y"), Normal { mu: 0.0, sigma: 1.0 }, 2.5);       // f64
-let obs2 = observe(addr!("success"), Bernoulli { p: 0.7 }, true);          // bool
-let obs3 = observe(addr!("events"), Poisson { lambda: 4.0 }, 7u64);        // u64
-let obs4 = observe(addr!("pick"), Categorical { probs: vec![0.4, 0.6] }, 1usize); // usize
+// Type-safe observations  
+let obs1 = observe(addr!("y"), Normal::new(0.0, 1.0).unwrap(), 2.5);       // f64
+let obs2 = observe(addr!("success"), Bernoulli::new(0.7).unwrap(), true);   // bool
+let obs3 = observe(addr!("events"), Poisson::new(4.0).unwrap(), 7u64);      // u64
+let obs4 = observe(addr!("pick"), Categorical::new(vec![0.4, 0.6]).unwrap(), 1usize); // usize
 
 // Monadic composition with type safety
 let composed = coin_flip.bind(|is_heads| {
@@ -160,10 +160,10 @@ Write probabilistic programs in an imperative style:
 
 ```rust
 let mixture_model = prob! {
-    let z <- sample(addr!("component"), Bernoulli { p: 0.3 });  // Returns bool!
+    let z <- sample(addr!("component"), Bernoulli::new(0.3).unwrap());  // Returns bool!
     let mu = if z { -2.0 } else { 2.0 };  // Natural boolean usage
-    let x <- sample(addr!("x"), Normal { mu, sigma: 1.0 });
-    observe(addr!("y"), Normal { mu: x, sigma: 0.1 }, observed_value);
+    let x <- sample(addr!("x"), Normal::new(mu, 1.0).unwrap());
+    observe(addr!("y"), Normal::new(x, 0.1).unwrap(), observed_value);
     pure(x)
 };
 ```
@@ -175,14 +175,14 @@ Efficiently handle collections of random variables:
 ```rust
 // Generate 100 independent samples
 let samples = plate!(i in 0..100 => {
-    sample(addr!("x", i), Normal { mu: 0.0, sigma: 1.0 })
+    sample(addr!("x", i), Normal::new(0.0, 1.0).unwrap())
 });
 
 // Hierarchical model with shared parameters
 let hierarchical = prob! {
-    let global_mu <- sample(addr!("global_mu"), Normal { mu: 0.0, sigma: 1.0 });
+    let global_mu <- sample(addr!("global_mu"), Normal::new(0.0, 1.0).unwrap());
     let local_effects <- plate!(i in 0..10 => {
-        sample(addr!("local", i), Normal { mu: global_mu, sigma: 0.1 })
+        sample(addr!("local", i), Normal::new(global_mu, 0.1).unwrap())
     });
     pure((global_mu, local_effects))
 };

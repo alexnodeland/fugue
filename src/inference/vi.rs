@@ -41,8 +41,8 @@
 //!
 //! // Simple VI example
 //! let model_fn = || {
-//!     sample(addr!("mu"), Normal { mu: 0.0, sigma: 1.0 })
-//!         .bind(|mu| observe(addr!("y"), Normal { mu, sigma: 0.5 }, 2.0).map(move |_| mu))
+//!     sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
+//!         .bind(|mu| observe(addr!("y"), Normal::new(mu, 0.5).unwrap(), 2.0).map(move |_| mu))
 //! };
 //!
 //! // Create mean-field guide manually
@@ -148,14 +148,14 @@ impl VariationalParam {
                 if !mu.is_finite() || !sigma.is_finite() || sigma <= 0.0 {
                     return f64::NAN;
                 }
-                Normal { mu: *mu, sigma }.sample(rng)
+                Normal::new(*mu, sigma).unwrap().sample(rng)
             }
             VariationalParam::LogNormal { mu, log_sigma } => {
                 let sigma = log_sigma.exp();
                 if !mu.is_finite() || !sigma.is_finite() || sigma <= 0.0 {
                     return f64::NAN;
                 }
-                LogNormal { mu: *mu, sigma }.sample(rng)
+                LogNormal::new(*mu, sigma).unwrap().sample(rng)
             }
             VariationalParam::Beta {
                 log_alpha,
@@ -166,7 +166,7 @@ impl VariationalParam {
                 if !alpha.is_finite() || !beta.is_finite() || alpha <= 0.0 || beta <= 0.0 {
                     return f64::NAN;
                 }
-                Beta { alpha, beta }.sample(rng)
+                Beta::new(alpha, beta).unwrap().sample(rng)
             }
         }
     }
@@ -221,7 +221,7 @@ impl VariationalParam {
                 let raw_value = approx_mu + approx_sigma * z;
                 let value = raw_value.clamp(0.001, 0.999);
 
-                let _log_prob = Beta { alpha, beta }.log_prob(&value);
+                let _log_prob = Beta::new(alpha, beta).unwrap().log_prob(&value);
                 (value, z)
             }
         }
@@ -243,11 +243,11 @@ impl VariationalParam {
         match self {
             VariationalParam::Normal { mu, log_sigma } => {
                 let sigma = log_sigma.exp();
-                Normal { mu: *mu, sigma }.log_prob(&x)
+                Normal::new(*mu, sigma).unwrap().log_prob(&x)
             }
             VariationalParam::LogNormal { mu, log_sigma } => {
                 let sigma = log_sigma.exp();
-                LogNormal { mu: *mu, sigma }.log_prob(&x)
+                LogNormal::new(*mu, sigma).unwrap().log_prob(&x)
             }
             VariationalParam::Beta {
                 log_alpha,
@@ -255,7 +255,7 @@ impl VariationalParam {
             } => {
                 let alpha = log_alpha.exp();
                 let beta = log_beta.exp();
-                Beta { alpha, beta }.log_prob(&x)
+                Beta::new(alpha, beta).unwrap().log_prob(&x)
             }
         }
     }

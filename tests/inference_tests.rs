@@ -2,14 +2,9 @@ use fugue::*;
 use rand::{rngs::StdRng, SeedableRng};
 
 fn gm(obs: f64) -> Model<f64> {
-    sample(
-        addr!("mu"),
-        Normal {
-            mu: 0.0,
-            sigma: 1.0,
-        },
-    )
-    .bind(move |mu| observe(addr!("y"), Normal { mu, sigma: 1.0 }, obs).bind(move |_| pure(mu)))
+    sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap()).bind(move |mu| {
+        observe(addr!("y"), Normal::new(mu, 1.0).unwrap(), obs).bind(move |_| pure(mu))
+    })
 }
 
 #[test]

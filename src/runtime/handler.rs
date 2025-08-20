@@ -37,9 +37,9 @@
 //! use rand::SeedableRng;
 //!
 //! // Run type-safe models with prior sampling
-//! let normal_model: Model<f64> = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 });
-//! let coin_model: Model<bool> = sample(addr!("coin"), Bernoulli { p: 0.5 });
-//! let count_model: Model<u64> = sample(addr!("events"), Poisson { lambda: 3.0 });
+//! let normal_model: Model<f64> = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
+//! let coin_model: Model<bool> = sample(addr!("coin"), Bernoulli::new(0.5).unwrap());
+//! let count_model: Model<u64> = sample(addr!("events"), Poisson::new(3.0).unwrap());
 //!
 //! let mut rng = StdRng::seed_from_u64(42);
 //!
@@ -57,6 +57,7 @@ use crate::core::address::Address;
 use crate::core::distribution::Distribution;
 use crate::core::model::Model;
 use crate::runtime::trace::Trace;
+
 /// Trait for handling probabilistic effects during model execution.
 ///
 /// Handlers define the interpretation of the three fundamental effects in probabilistic
@@ -97,7 +98,7 @@ use crate::runtime::trace::Trace;
 ///     trace: Trace::default(),
 /// };
 ///
-/// let model = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 });
+/// let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
 /// let (result, trace) = runtime::handler::run(handler, model);
 /// ```
 pub trait Handler {
@@ -181,7 +182,7 @@ pub trait Handler {
 /// use rand::SeedableRng;
 ///
 /// // Execute a simple model
-/// let model = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 })
+/// let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
 ///     .map(|x| x * 2.0);
 ///
 /// let mut rng = StdRng::seed_from_u64(42);

@@ -4,23 +4,10 @@ use rand::{rngs::StdRng, SeedableRng};
 
 /// Simple model for trace manipulation demonstration.
 fn simple_model(obs: f64) -> Model<(f64, f64)> {
-    sample(
-        addr!("mu"),
-        Normal {
-            mu: 0.0,
-            sigma: 2.0,
-        },
-    )
-    .bind(move |mu| {
-        sample(
-            addr!("sigma"),
-            LogNormal {
-                mu: 0.0,
-                sigma: 0.5,
-            },
-        )
-        .bind(move |sigma| {
-            observe(addr!("y"), Normal { mu, sigma }, obs).bind(move |_| pure((mu, sigma)))
+    sample(addr!("mu"), Normal::new(0.0, 2.0).unwrap()).bind(move |mu| {
+        sample(addr!("sigma"), LogNormal::new(0.0, 0.5).unwrap()).bind(move |sigma| {
+            observe(addr!("y"), Normal::new(mu, sigma).unwrap(), obs)
+                .bind(move |_| pure((mu, sigma)))
         })
     })
 }
@@ -110,11 +97,7 @@ fn demonstrate_trace_utilities(seed: u64) {
         };
         let new_mu = 2.0;
         mu_choice.value = ChoiceValue::F64(new_mu);
-        mu_choice.logp = Normal {
-            mu: 0.0,
-            sigma: 2.0,
-        }
-        .log_prob(&new_mu);
+        mu_choice.logp = Normal::new(0.0, 2.0).unwrap().log_prob(&new_mu);
         println!("  Modified mu from {:.4} to {:.4}", old_mu, new_mu);
     }
 

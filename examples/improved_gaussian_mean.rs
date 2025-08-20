@@ -10,14 +10,9 @@ use rand::{rngs::StdRng, SeedableRng};
 
 /// Model for Gaussian mean estimation with known variance.
 fn gaussian_mean_model(obs: f64) -> Model<f64> {
-    sample(
-        addr!("mu"),
-        Normal {
-            mu: 0.0,
-            sigma: 5.0,
-        },
-    )
-    .bind(move |mu| observe(addr!("y"), Normal { mu, sigma: 1.0 }, obs).bind(move |_| pure(mu)))
+    sample(addr!("mu"), Normal::new(0.0, 5.0).unwrap()).bind(move |mu| {
+        observe(addr!("y"), Normal::new(mu, 1.0).unwrap(), obs).bind(move |_| pure(mu))
+    })
 }
 
 #[derive(Parser, Debug)]
@@ -55,14 +50,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
     // Validate model parameters
-    let prior = Normal {
-        mu: 0.0,
-        sigma: 5.0,
-    };
-    let likelihood = Normal {
-        mu: args.obs,
-        sigma: 1.0,
-    };
+    let prior = Normal::new(0.0, 5.0).unwrap();
+    let likelihood = Normal::new(args.obs, 1.0).unwrap();
     prior.validate()?;
     likelihood.validate()?;
 
@@ -170,7 +159,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Convergence diagnostics
     if chains.len() >= 2 {
-        let r_hat = r_hat(&chains, &addr!("mu"));
+        let r_hat = r_hat_f64(&chains, &addr!("mu"));
         println!("\n=== Convergence Diagnostics ===");
         println!("R-hat: {:.4} (should be < 1.1)", r_hat);
 

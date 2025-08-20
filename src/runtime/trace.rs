@@ -28,8 +28,8 @@
 //! use rand::SeedableRng;
 //!
 //! // Execute a model and examine its trace
-//! let model = sample(addr!("mu"), Normal { mu: 0.0, sigma: 1.0 })
-//!     .bind(|mu| observe(addr!("y"), Normal { mu, sigma: 0.5 }, 2.0));
+//! let model = sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
+//!     .bind(|mu| observe(addr!("y"), Normal::new(mu, 0.5).unwrap(), 2.0));
 //!
 //! let mut rng = StdRng::seed_from_u64(42);
 //! let (_, trace) = runtime::handler::run(
@@ -47,6 +47,7 @@
 //! }
 //! ```
 use crate::core::address::Address;
+use crate::error::{FugueError, FugueResult};
 use std::collections::BTreeMap;
 
 /// Value stored at a choice site in an execution trace.
@@ -86,6 +87,59 @@ pub enum ChoiceValue {
     Usize(usize),
     /// Boolean value (Bernoulli outcomes).
     Bool(bool),
+}
+
+impl ChoiceValue {
+    /// Try to extract an f64 value, returning None if the type doesn't match.
+    pub fn as_f64(&self) -> Option<f64> {
+        match self {
+            ChoiceValue::F64(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    /// Try to extract a bool value, returning None if the type doesn't match.
+    pub fn as_bool(&self) -> Option<bool> {
+        match self {
+            ChoiceValue::Bool(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    /// Try to extract a u64 value, returning None if the type doesn't match.
+    pub fn as_u64(&self) -> Option<u64> {
+        match self {
+            ChoiceValue::U64(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    /// Try to extract a usize value, returning None if the type doesn't match.
+    pub fn as_usize(&self) -> Option<usize> {
+        match self {
+            ChoiceValue::Usize(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    /// Try to extract an i64 value, returning None if the type doesn't match.
+    pub fn as_i64(&self) -> Option<i64> {
+        match self {
+            ChoiceValue::I64(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    /// Get the type name as a string for error messages.
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            ChoiceValue::F64(_) => "f64",
+            ChoiceValue::Bool(_) => "bool",
+            ChoiceValue::U64(_) => "u64",
+            ChoiceValue::Usize(_) => "usize",
+            ChoiceValue::I64(_) => "i64",
+        }
+    }
 }
 
 /// A recorded choice made during model execution.
@@ -157,9 +211,9 @@ pub struct Choice {
 /// use rand::SeedableRng;
 ///
 /// // Create a model with different weight sources
-/// let model = sample(addr!("theta"), Normal { mu: 0.0, sigma: 1.0 })
+/// let model = sample(addr!("theta"), Normal::new(0.0, 1.0).unwrap())
 ///     .bind(|theta| {
-///         observe(addr!("y"), Normal { mu: theta, sigma: 0.5 }, 1.5)
+///         observe(addr!("y"), Normal::new(theta, 0.5).unwrap(), 1.5)
 ///             .bind(move |_| factor(-0.1).bind(move |_| pure(theta)))
 ///     });
 ///
@@ -219,5 +273,166 @@ impl Trace {
     /// ```
     pub fn total_log_weight(&self) -> f64 {
         self.log_prior + self.log_likelihood + self.log_factors
+    }
+
+    /// Type-safe accessor for f64 values in the trace.
+    ///
+    /// Returns the f64 value at the given address, or None if the address
+    /// doesn't exist or contains a different type.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use fugue::*;
+    ///
+    /// let mut trace = Trace::default();
+    /// // ... populate trace through model execution ...
+    ///
+    /// if let Some(mu_value) = trace.get_f64(&addr!("mu")) {
+    ///     println!("Sampled mu: {}", mu_value);
+    /// }
+    /// ```
+    pub fn get_f64(&self, addr: &Address) -> Option<f64> {
+        self.choices.get(addr)?.value.as_f64()
+    }
+
+    /// Type-safe accessor for bool values in the trace.
+    pub fn get_bool(&self, addr: &Address) -> Option<bool> {
+        self.choices.get(addr)?.value.as_bool()
+    }
+
+    /// Type-safe accessor for u64 values in the trace.
+    pub fn get_u64(&self, addr: &Address) -> Option<u64> {
+        self.choices.get(addr)?.value.as_u64()
+    }
+
+    /// Type-safe accessor for usize values in the trace.
+    pub fn get_usize(&self, addr: &Address) -> Option<usize> {
+        self.choices.get(addr)?.value.as_usize()
+    }
+
+    /// Type-safe accessor for i64 values in the trace.
+    pub fn get_i64(&self, addr: &Address) -> Option<i64> {
+        self.choices.get(addr)?.value.as_i64()
+    }
+
+    /// Type-safe accessor that returns a Result for better error handling.
+    ///
+    /// This method returns a detailed error if the address is missing or
+    /// contains a different type than expected.
+    pub fn get_f64_result(&self, addr: &Address) -> FugueResult<f64> {
+        let choice = self
+            .choices
+            .get(addr)
+            .ok_or_else(|| FugueError::TraceError {
+                operation: "get_f64".to_string(),
+                address: Some(addr.clone()),
+                reason: "Address not found in trace".to_string(),
+            })?;
+
+        choice
+            .value
+            .as_f64()
+            .ok_or_else(|| FugueError::TypeMismatch {
+                address: addr.clone(),
+                expected: "f64".to_string(),
+                found: choice.value.type_name().to_string(),
+            })
+    }
+
+    /// Type-safe accessor that returns a Result for better error handling.
+    pub fn get_bool_result(&self, addr: &Address) -> FugueResult<bool> {
+        let choice = self
+            .choices
+            .get(addr)
+            .ok_or_else(|| FugueError::TraceError {
+                operation: "get_bool".to_string(),
+                address: Some(addr.clone()),
+                reason: "Address not found in trace".to_string(),
+            })?;
+
+        choice
+            .value
+            .as_bool()
+            .ok_or_else(|| FugueError::TypeMismatch {
+                address: addr.clone(),
+                expected: "bool".to_string(),
+                found: choice.value.type_name().to_string(),
+            })
+    }
+
+    /// Type-safe accessor that returns a Result for better error handling.
+    pub fn get_u64_result(&self, addr: &Address) -> FugueResult<u64> {
+        let choice = self
+            .choices
+            .get(addr)
+            .ok_or_else(|| FugueError::TraceError {
+                operation: "get_u64".to_string(),
+                address: Some(addr.clone()),
+                reason: "Address not found in trace".to_string(),
+            })?;
+
+        choice
+            .value
+            .as_u64()
+            .ok_or_else(|| FugueError::TypeMismatch {
+                address: addr.clone(),
+                expected: "u64".to_string(),
+                found: choice.value.type_name().to_string(),
+            })
+    }
+
+    /// Type-safe accessor that returns a Result for better error handling.
+    pub fn get_usize_result(&self, addr: &Address) -> FugueResult<usize> {
+        let choice = self
+            .choices
+            .get(addr)
+            .ok_or_else(|| FugueError::TraceError {
+                operation: "get_usize".to_string(),
+                address: Some(addr.clone()),
+                reason: "Address not found in trace".to_string(),
+            })?;
+
+        choice
+            .value
+            .as_usize()
+            .ok_or_else(|| FugueError::TypeMismatch {
+                address: addr.clone(),
+                expected: "usize".to_string(),
+                found: choice.value.type_name().to_string(),
+            })
+    }
+
+    /// Type-safe accessor that returns a Result for better error handling.
+    pub fn get_i64_result(&self, addr: &Address) -> FugueResult<i64> {
+        let choice = self
+            .choices
+            .get(addr)
+            .ok_or_else(|| FugueError::TraceError {
+                operation: "get_i64".to_string(),
+                address: Some(addr.clone()),
+                reason: "Address not found in trace".to_string(),
+            })?;
+
+        choice
+            .value
+            .as_i64()
+            .ok_or_else(|| FugueError::TypeMismatch {
+                address: addr.clone(),
+                expected: "i64".to_string(),
+                found: choice.value.type_name().to_string(),
+            })
+    }
+
+    /// Insert a typed choice into the trace.
+    ///
+    /// This is a convenience method for manually constructing traces with type safety.
+    pub fn insert_choice(&mut self, addr: Address, value: ChoiceValue, logp: f64) {
+        let choice = Choice {
+            addr: addr.clone(),
+            value,
+            logp,
+        };
+        self.choices.insert(addr, choice);
     }
 }

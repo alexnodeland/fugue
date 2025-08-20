@@ -39,9 +39,9 @@
 //!
 //! // Define a simple model
 //! let model_fn = || {
-//!     sample(addr!("mu"), Normal { mu: 0.0, sigma: 1.0 })
+//!     sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
 //!         .bind(|mu| {
-//!             observe(addr!("y"), Normal { mu, sigma: 0.5 }, 2.0)
+//!             observe(addr!("y"), Normal::new(mu, 0.5).unwrap(), 2.0)
 //!                 .map(move |_| mu)
 //!         })
 //! };
@@ -352,9 +352,9 @@ pub fn resample_particles<R: Rng>(
 ///
 /// // Simple model for testing
 /// let model_fn = || {
-///     sample(addr!("mu"), Normal { mu: 0.0, sigma: 1.0 })
+///     sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
 ///         .bind(|mu| {
-///             observe(addr!("y"), Normal { mu, sigma: 0.5 }, 1.8)
+///             observe(addr!("y"), Normal::new(mu, 0.5).unwrap(), 1.8)
 ///                 .map(move |_| mu)
 ///         })
 /// };

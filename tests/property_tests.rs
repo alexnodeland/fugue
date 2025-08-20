@@ -8,13 +8,7 @@ fn make_simple_model(x: f64) -> Model<f64> {
 }
 
 fn make_sample_model() -> Model<f64> {
-    sample(
-        addr!("x"),
-        Normal {
-            mu: 0.0,
-            sigma: 1.0,
-        },
-    )
+    sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
 }
 
 proptest! {
@@ -138,7 +132,7 @@ proptest! {
 
     #[test]
     fn score_matches_prior_for_no_observations(seed in any::<u64>()) {
-        let model = sample(addr!("x"), Normal{mu: 0.0, sigma: 1.0});
+        let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
 
         // Generate trace from prior
         let mut rng = StdRng::seed_from_u64(seed);
@@ -150,7 +144,7 @@ proptest! {
         // Score the same trace
         let (_, scored_trace) = runtime::handler::run(
             runtime::interpreters::ScoreGivenTrace{base: base_trace.clone(), trace: Trace::default()},
-            sample(addr!("x"), Normal{mu: 0.0, sigma: 1.0})
+            sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
         );
 
         // Log weights should match (no observations = only prior terms)
@@ -163,7 +157,7 @@ proptest! {
     // Test distribution properties
     #[test]
     fn normal_symmetry(mu in -5.0..5.0f64, sigma in 0.1..5.0f64, offset in 0.1..2.0f64) {
-        let dist = Normal{mu, sigma};
+        let dist = Normal::new(mu, sigma).unwrap();
         let lp1 = dist.log_prob(&(mu + offset));
         let lp2 = dist.log_prob(&(mu - offset));
 
@@ -173,7 +167,7 @@ proptest! {
     #[test]
     fn uniform_support(low in -10.0..0.0f64, high in 1.0..10.0f64) {
         prop_assume!(low < high);
-        let dist = Uniform{low, high};
+        let dist = Uniform::new(low, high).unwrap();
 
         // Inside support should have finite log prob
         let inside = (low + high) / 2.0;
@@ -189,7 +183,7 @@ proptest! {
 
     #[test]
     fn bernoulli_support(p in 0.01..0.99f64) {
-        let dist = Bernoulli{p};
+        let dist = Bernoulli::new(p).unwrap();
 
         // Valid outcomes
         let lp0 = dist.log_prob(&false);  // Use natural bool values

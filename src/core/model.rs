@@ -23,10 +23,10 @@
 //! let model = pure(42.0);
 //!
 //! // Sample from a distribution
-//! let model = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 });
+//! let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
 //!
 //! // Observe/condition on data
-//! let model = observe(addr!("y"), Normal { mu: 0.0, sigma: 1.0 }, 2.5);
+//! let model = observe(addr!("y"), Normal::new(0.0, 1.0).unwrap(), 2.5);
 //!
 //! // Add log-weight factor
 //! let model = factor(0.5); // log(exp(0.5)) weight
@@ -39,9 +39,9 @@
 //! ```rust
 //! use fugue::*;
 //!
-//! let composed_model = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 })
+//! let composed_model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
 //!     .bind(|x| {
-//!         sample(addr!("y"), Normal { mu: x, sigma: 0.5 })
+//!         sample(addr!("y"), Normal::new(x, 0.5).unwrap())
 //!             .map(move |y| x + y)
 //!     });
 //! ```
@@ -53,15 +53,15 @@
 //!
 //! // Create multiple independent samples
 //! let models = vec![
-//!     sample(addr!("x", 0), Normal { mu: 0.0, sigma: 1.0 }),
-//!     sample(addr!("x", 1), Normal { mu: 0.0, sigma: 1.0 }),
+//!     sample(addr!("x", 0), Normal::new(0.0, 1.0).unwrap()),
+//!     sample(addr!("x", 1), Normal::new(0.0, 1.0).unwrap()),
 //! ];
 //! let combined = sequence_vec(models); // Model<Vec<f64>>
 //!
 //! // Apply a function to each item
 //! let data = vec![1.0, 2.0, 3.0];
 //! let model = traverse_vec(data, |x| {
-//!     sample(addr!("noise", x as usize), Normal { mu: 0.0, sigma: 0.1 })
+//!     sample(addr!("noise", x as usize), Normal::new(0.0, 0.1).unwrap())
 //!         .map(move |noise| x + noise)
 //! });
 //! ```
@@ -89,10 +89,10 @@ use crate::core::distribution::{Distribution, LogF64};
 /// let model = pure(42.0);
 ///
 /// // Probabilistic model with sampling
-/// let model = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 });
+/// let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
 ///
 /// // Composed model
-/// let model = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 })
+/// let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
 ///     .bind(|x| pure(x * 2.0));
 /// ```
 pub enum Model<A> {
@@ -215,10 +215,10 @@ pub fn pure<A>(a: A) -> Model<A> {
 /// use fugue::*;
 ///
 /// // Sample from a standard normal distribution
-/// let model = sample_f64(addr!("x"), Normal { mu: 0.0, sigma: 1.0 });
+/// let model = sample_f64(addr!("x"), Normal::new(0.0, 1.0).unwrap());
 ///
 /// // Sample from a uniform distribution
-/// let model = sample_f64(addr!("u"), Uniform { low: 0.0, high: 1.0 });
+/// let model = sample_f64(addr!("u"), Uniform::new(0.0, 1.0).unwrap());
 /// ```
 pub fn sample_f64(addr: Address, dist: impl Distribution<f64> + 'static) -> Model<f64> {
     Model::SampleF64 {
@@ -236,7 +236,7 @@ pub fn sample_f64(addr: Address, dist: impl Distribution<f64> + 'static) -> Mode
 /// use fugue::*;
 ///
 /// // Type-safe boolean sampling
-/// let model = sample_bool(addr!("coin"), Bernoulli { p: 0.5 });
+/// let model = sample_bool(addr!("coin"), Bernoulli::new(0.5).unwrap());
 /// let result = model.bind(|heads| {
 ///     if heads {
 ///         pure("Heads!".to_string())
@@ -261,7 +261,7 @@ pub fn sample_bool(addr: Address, dist: impl Distribution<bool> + 'static) -> Mo
 /// use fugue::*;
 ///
 /// // Type-safe count sampling
-/// let model = sample_u64(addr!("count"), Poisson { lambda: 3.0 });
+/// let model = sample_u64(addr!("count"), Poisson::new(3.0).unwrap());
 /// let result = model.bind(|count| {
 ///     pure(format!("Count: {}", count))
 /// });
@@ -283,9 +283,8 @@ pub fn sample_u64(addr: Address, dist: impl Distribution<u64> + 'static) -> Mode
 ///
 /// // Type-safe categorical sampling
 /// let options = vec!["red", "green", "blue"];
-/// let model = sample_usize(addr!("choice"), Categorical {
-///     probs: vec![0.5, 0.3, 0.2]
-/// });
+/// let model = sample_usize(addr!("choice"),
+///     Categorical::new(vec![0.5, 0.3, 0.2]).unwrap());
 /// let result = model.bind(move |choice_idx| {
 ///     let color = options[choice_idx]; // Direct indexing!
 ///     pure(color.to_string())
@@ -310,18 +309,17 @@ pub fn sample_usize(addr: Address, dist: impl Distribution<usize> + 'static) -> 
 /// use fugue::*;
 ///
 /// // Automatically returns f64 for continuous distributions
-/// let normal_sample: Model<f64> = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 });
+/// let normal_sample: Model<f64> = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
 ///
 /// // Automatically returns bool for Bernoulli
-/// let coin_flip: Model<bool> = sample(addr!("coin"), Bernoulli { p: 0.5 });
+/// let coin_flip: Model<bool> = sample(addr!("coin"), Bernoulli::new(0.5).unwrap());
 ///
 /// // Automatically returns u64 for Poisson
-/// let count: Model<u64> = sample(addr!("count"), Poisson { lambda: 3.0 });
+/// let count: Model<u64> = sample(addr!("count"), Poisson::new(3.0).unwrap());
 ///
 /// // Automatically returns usize for Categorical
-/// let choice: Model<usize> = sample(addr!("choice"), Categorical {
-///     probs: vec![0.3, 0.5, 0.2]
-/// });
+/// let choice: Model<usize> = sample(addr!("choice"),
+///     Categorical::new(vec![0.3, 0.5, 0.2]).unwrap());
 /// ```
 pub fn sample<T>(addr: Address, dist: impl Distribution<T> + 'static) -> Model<T>
 where
@@ -440,18 +438,17 @@ impl SampleType for usize {
 /// use fugue::*;
 ///
 /// // Observe f64 value from continuous distribution
-/// let model = observe(addr!("y"), Normal { mu: 1.0, sigma: 0.5 }, 2.5);
+/// let model = observe(addr!("y"), Normal::new(1.0, 0.5).unwrap(), 2.5);
 ///
 /// // Observe bool value from Bernoulli
-/// let model = observe(addr!("coin"), Bernoulli { p: 0.6 }, true);
+/// let model = observe(addr!("coin"), Bernoulli::new(0.6).unwrap(), true);
 ///
 /// // Observe u64 count from Poisson
-/// let model = observe(addr!("count"), Poisson { lambda: 3.0 }, 5u64);
+/// let model = observe(addr!("count"), Poisson::new(3.0).unwrap(), 5u64);
 ///
 /// // Observe usize choice from Categorical
-/// let model = observe(addr!("choice"), Categorical {
-///     probs: vec![0.3, 0.5, 0.2]
-/// }, 1usize);
+/// let model = observe(addr!("choice"),
+///     Categorical::new(vec![0.3, 0.5, 0.2]).unwrap(), 1usize);
 /// ```
 pub fn observe<T>(addr: Address, dist: impl Distribution<T> + 'static, value: T) -> Model<()>
 where
@@ -519,20 +516,20 @@ pub fn factor(logw: LogF64) -> Model<()> {
 /// use fugue::*;
 ///
 /// // Using bind for dependent sampling
-/// let model = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 })
-///     .bind(|x| sample(addr!("y"), Normal { mu: x, sigma: 0.5 }));
+/// let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+///     .bind(|x| sample(addr!("y"), Normal::new(x, 0.5).unwrap()));
 ///
 /// // Using map for transformations
-/// let model = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 })
+/// let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
 ///     .map(|x| x * 2.0 + 1.0);
 ///
 /// // Chaining multiple operations
-/// let model = sample(addr!("x"), Uniform { low: 0.0, high: 1.0 })
+/// let model = sample(addr!("x"), Uniform::new(0.0, 1.0).unwrap())
 ///     .bind(|x| {
 ///         if x > 0.5 {
-///             sample(addr!("high"), Normal { mu: 10.0, sigma: 1.0 })
+///             sample(addr!("high"), Normal::new(10.0, 1.0).unwrap())
 ///         } else {
-///             sample(addr!("low"), Normal { mu: -10.0, sigma: 1.0 })
+///             sample(addr!("low"), Normal::new(-10.0, 1.0).unwrap())
 ///         }
 ///     })
 ///     .map(|result| result.abs());
@@ -553,8 +550,8 @@ pub trait ModelExt<A>: Sized {
     /// use fugue::*;
     ///
     /// // Dependent sampling: y depends on x
-    /// let model = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 })
-    ///     .bind(|x| sample(addr!("y"), Normal { mu: x, sigma: 0.1 }));
+    /// let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+    ///     .bind(|x| sample(addr!("y"), Normal::new(x, 0.1).unwrap()));
     /// ```
     fn bind<B>(self, k: impl FnOnce(A) -> Model<B> + Send + 'static) -> Model<B>;
 
@@ -573,7 +570,7 @@ pub trait ModelExt<A>: Sized {
     /// use fugue::*;
     ///
     /// // Transform the sampled value
-    /// let model = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 })
+    /// let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
     ///     .map(|x| x.exp()); // Apply exponential function
     /// ```
     fn map<B>(self, f: impl FnOnce(A) -> B + Send + 'static) -> Model<B> {
@@ -688,12 +685,12 @@ impl<A: 'static> ModelExt<A> for Model<A> {
 /// use fugue::*;
 ///
 /// // Sample two independent random variables
-/// let x_model = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 });
-/// let y_model = sample(addr!("y"), Uniform { low: 0.0, high: 1.0 });
+/// let x_model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
+/// let y_model = sample(addr!("y"), Uniform::new(0.0, 1.0).unwrap());
 /// let paired = zip(x_model, y_model); // Model<(f64, f64)>
 ///
 /// // Can be used with any model types
-/// let mixed = zip(pure(42.0), sample(addr!("z"), Exponential { rate: 1.0 }));
+/// let mixed = zip(pure(42.0), sample(addr!("z"), Exponential::new(1.0).unwrap()));
 /// ```
 pub fn zip<A: Send + 'static, B: Send + 'static>(ma: Model<A>, mb: Model<B>) -> Model<(A, B)> {
     ma.bind(|a| mb.map(move |b| (a, b)))
@@ -720,16 +717,16 @@ pub fn zip<A: Send + 'static, B: Send + 'static>(ma: Model<A>, mb: Model<B>) -> 
 ///
 /// // Create multiple independent samples
 /// let models = vec![
-///     sample(addr!("x", 0), Normal { mu: 0.0, sigma: 1.0 }),
-///     sample(addr!("x", 1), Normal { mu: 1.0, sigma: 1.0 }),
-///     sample(addr!("x", 2), Normal { mu: 2.0, sigma: 1.0 }),
+///     sample(addr!("x", 0), Normal::new(0.0, 1.0).unwrap()),
+///     sample(addr!("x", 1), Normal::new(1.0, 1.0).unwrap()),
+///     sample(addr!("x", 2), Normal::new(2.0, 1.0).unwrap()),
 /// ];
 /// let all_samples = sequence_vec(models); // Model<Vec<f64>>
 ///
 /// // Mix deterministic and probabilistic models
 /// let mixed_models = vec![
 ///     pure(1.0),
-///     sample(addr!("random"), Uniform { low: 0.0, high: 1.0 }),
+///     sample(addr!("random"), Uniform::new(0.0, 1.0).unwrap()),
 ///     pure(3.0),
 /// ];
 /// let results = sequence_vec(mixed_models);
@@ -766,14 +763,14 @@ pub fn sequence_vec<A: Send + 'static>(models: Vec<Model<A>>) -> Model<Vec<A>> {
 /// // Add noise to each data point
 /// let data = vec![1.0, 2.0, 3.0];
 /// let noisy_data = traverse_vec(data, |x| {
-///     sample(addr!("noise", x as usize), Normal { mu: 0.0, sigma: 0.1 })
+///     sample(addr!("noise", x as usize), Normal::new(0.0, 0.1).unwrap())
 ///         .map(move |noise| x + noise)
 /// });
 ///
 /// // Create observations for each data point
 /// let observations = vec![1.2, 2.1, 2.9];
 /// let model = traverse_vec(observations, |obs| {
-///     observe(addr!("y", obs as usize), Normal { mu: 2.0, sigma: 0.5 }, obs)
+///     observe(addr!("y", obs as usize), Normal::new(2.0, 0.5).unwrap(), obs)
 /// });
 /// ```
 pub fn traverse_vec<T, A: Send + 'static>(
@@ -804,13 +801,13 @@ pub fn traverse_vec<T, A: Send + 'static>(
 /// use fugue::*;
 ///
 /// // Ensure a sampled value is positive
-/// let model = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 })
+/// let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
 ///     .bind(|x| {
 ///         guard(x > 0.0).bind(move |_| pure(x))
 ///     });
 ///
 /// // Multiple constraints
-/// let model = sample(addr!("x"), Uniform { low: -2.0, high: 2.0 })
+/// let model = sample(addr!("x"), Uniform::new(-2.0, 2.0).unwrap())
 ///     .bind(|x| {
 ///         guard(x > -1.0).bind(move |_|
 ///             guard(x < 1.0).bind(move |_| pure(x * x))

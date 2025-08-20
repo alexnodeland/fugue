@@ -30,6 +30,12 @@ pub enum FugueError {
         address: Option<Address>,
         reason: String,
     },
+    /// Type mismatch in trace value
+    TypeMismatch {
+        address: Address,
+        expected: String,
+        found: String,
+    },
 }
 
 impl fmt::Display for FugueError {
@@ -65,6 +71,17 @@ impl fmt::Display for FugueError {
                     write!(f, "Trace error in {}: {}", operation, reason)
                 }
             }
+            FugueError::TypeMismatch {
+                address,
+                expected,
+                found,
+            } => {
+                write!(
+                    f,
+                    "Type mismatch at {}: expected {}, found {}",
+                    address, expected, found
+                )
+            }
         }
     }
 }
@@ -81,13 +98,13 @@ pub trait Validate {
 
 impl Validate for Normal {
     fn validate(&self) -> FugueResult<()> {
-        if !self.mu.is_finite() {
+        if !self.mu().is_finite() {
             return Err(FugueError::InvalidParameters {
                 distribution: "Normal".to_string(),
                 reason: "Mean (mu) must be finite".to_string(),
             });
         }
-        if self.sigma <= 0.0 || !self.sigma.is_finite() {
+        if self.sigma() <= 0.0 || !self.sigma().is_finite() {
             return Err(FugueError::InvalidParameters {
                 distribution: "Normal".to_string(),
                 reason: "Standard deviation (sigma) must be positive and finite".to_string(),
@@ -99,7 +116,7 @@ impl Validate for Normal {
 
 impl Validate for Exponential {
     fn validate(&self) -> FugueResult<()> {
-        if self.rate <= 0.0 || !self.rate.is_finite() {
+        if self.rate() <= 0.0 || !self.rate().is_finite() {
             return Err(FugueError::InvalidParameters {
                 distribution: "Exponential".to_string(),
                 reason: "Rate parameter must be positive and finite".to_string(),
@@ -111,13 +128,13 @@ impl Validate for Exponential {
 
 impl Validate for Beta {
     fn validate(&self) -> FugueResult<()> {
-        if self.alpha <= 0.0 || !self.alpha.is_finite() {
+        if self.alpha() <= 0.0 || !self.alpha().is_finite() {
             return Err(FugueError::InvalidParameters {
                 distribution: "Beta".to_string(),
                 reason: "Alpha parameter must be positive and finite".to_string(),
             });
         }
-        if self.beta <= 0.0 || !self.beta.is_finite() {
+        if self.beta() <= 0.0 || !self.beta().is_finite() {
             return Err(FugueError::InvalidParameters {
                 distribution: "Beta".to_string(),
                 reason: "Beta parameter must be positive and finite".to_string(),
@@ -129,13 +146,13 @@ impl Validate for Beta {
 
 impl Validate for Gamma {
     fn validate(&self) -> FugueResult<()> {
-        if self.shape <= 0.0 || !self.shape.is_finite() {
+        if self.shape() <= 0.0 || !self.shape().is_finite() {
             return Err(FugueError::InvalidParameters {
                 distribution: "Gamma".to_string(),
                 reason: "Shape parameter must be positive and finite".to_string(),
             });
         }
-        if self.rate <= 0.0 || !self.rate.is_finite() {
+        if self.rate() <= 0.0 || !self.rate().is_finite() {
             return Err(FugueError::InvalidParameters {
                 distribution: "Gamma".to_string(),
                 reason: "Rate parameter must be positive and finite".to_string(),
@@ -147,13 +164,13 @@ impl Validate for Gamma {
 
 impl Validate for Uniform {
     fn validate(&self) -> FugueResult<()> {
-        if !self.low.is_finite() || !self.high.is_finite() {
+        if !self.low().is_finite() || !self.high().is_finite() {
             return Err(FugueError::InvalidParameters {
                 distribution: "Uniform".to_string(),
                 reason: "Bounds must be finite".to_string(),
             });
         }
-        if self.low >= self.high {
+        if self.low() >= self.high() {
             return Err(FugueError::InvalidParameters {
                 distribution: "Uniform".to_string(),
                 reason: "Lower bound must be less than upper bound".to_string(),
@@ -165,7 +182,7 @@ impl Validate for Uniform {
 
 impl Validate for Bernoulli {
     fn validate(&self) -> FugueResult<()> {
-        if !self.p.is_finite() || self.p < 0.0 || self.p > 1.0 {
+        if !self.p().is_finite() || self.p() < 0.0 || self.p() > 1.0 {
             return Err(FugueError::InvalidParameters {
                 distribution: "Bernoulli".to_string(),
                 reason: "Probability must be in [0, 1]".to_string(),
@@ -177,14 +194,14 @@ impl Validate for Bernoulli {
 
 impl Validate for Categorical {
     fn validate(&self) -> FugueResult<()> {
-        if self.probs.is_empty() {
+        if self.probs().is_empty() {
             return Err(FugueError::InvalidParameters {
                 distribution: "Categorical".to_string(),
                 reason: "Probability vector cannot be empty".to_string(),
             });
         }
 
-        let sum: f64 = self.probs.iter().sum();
+        let sum: f64 = self.probs().iter().sum();
         if (sum - 1.0).abs() > 1e-6 {
             return Err(FugueError::InvalidParameters {
                 distribution: "Categorical".to_string(),
@@ -192,7 +209,7 @@ impl Validate for Categorical {
             });
         }
 
-        for (i, &p) in self.probs.iter().enumerate() {
+        for (i, &p) in self.probs().iter().enumerate() {
             if !p.is_finite() || p < 0.0 {
                 return Err(FugueError::InvalidParameters {
                     distribution: "Categorical".to_string(),
@@ -205,83 +222,5 @@ impl Validate for Categorical {
         }
 
         Ok(())
-    }
-}
-
-/// Safe constructors for distributions that validate parameters.
-impl Normal {
-    /// Create a Normal distribution with parameter validation.
-    pub fn new(mu: f64, sigma: f64) -> FugueResult<Self> {
-        let normal = Normal { mu, sigma };
-        normal.validate()?;
-        Ok(normal)
-    }
-}
-
-impl Exponential {
-    /// Create an Exponential distribution with parameter validation.
-    pub fn new(rate: f64) -> FugueResult<Self> {
-        let exp = Exponential { rate };
-        exp.validate()?;
-        Ok(exp)
-    }
-}
-
-impl Beta {
-    /// Create a Beta distribution with parameter validation.
-    pub fn new(alpha: f64, beta: f64) -> FugueResult<Self> {
-        let beta_dist = Beta { alpha, beta };
-        beta_dist.validate()?;
-        Ok(beta_dist)
-    }
-}
-
-impl Gamma {
-    /// Create a Gamma distribution with parameter validation.
-    pub fn new(shape: f64, rate: f64) -> FugueResult<Self> {
-        let gamma = Gamma { shape, rate };
-        gamma.validate()?;
-        Ok(gamma)
-    }
-}
-
-impl Uniform {
-    /// Create a Uniform distribution with parameter validation.
-    pub fn new(low: f64, high: f64) -> FugueResult<Self> {
-        let uniform = Uniform { low, high };
-        uniform.validate()?;
-        Ok(uniform)
-    }
-}
-
-impl Bernoulli {
-    /// Create a Bernoulli distribution with parameter validation.
-    pub fn new(p: f64) -> FugueResult<Self> {
-        let bernoulli = Bernoulli { p };
-        bernoulli.validate()?;
-        Ok(bernoulli)
-    }
-}
-
-impl Categorical {
-    /// Create a Categorical distribution with parameter validation.
-    pub fn new(probs: Vec<f64>) -> FugueResult<Self> {
-        let categorical = Categorical { probs };
-        categorical.validate()?;
-        Ok(categorical)
-    }
-
-    /// Create a uniform categorical distribution over k categories.
-    pub fn uniform(k: usize) -> FugueResult<Self> {
-        if k == 0 {
-            return Err(FugueError::InvalidParameters {
-                distribution: "Categorical".to_string(),
-                reason: "Number of categories must be positive".to_string(),
-            });
-        }
-
-        let prob = 1.0 / k as f64;
-        let probs = vec![prob; k];
-        Ok(Categorical { probs })
     }
 }

@@ -32,7 +32,7 @@
 //! - [`Poisson`]: Poisson distribution → **`u64`**
 //!
 //! All distributions can be used both within the Model system (with `sample()` and `observe()`)
-//! and for direct statistical computation outside the Model system by calling `sample()` and 
+//! and for direct statistical computation outside the Model system by calling `sample()` and
 //! `log_prob()` directly on distribution instances.
 //!
 //! ## Usage Examples
@@ -42,10 +42,10 @@
 //! use fugue::*;
 //!
 //! // Continuous distribution returns f64
-//! let normal_model: Model<f64> = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 });
+//! let normal_model: Model<f64> = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
 //!
 //! // Bernoulli returns bool - no more awkward comparisons!
-//! let coin_model: Model<bool> = sample(addr!("coin"), Bernoulli { p: 0.5 });
+//! let coin_model: Model<bool> = sample(addr!("coin"), Bernoulli::new(0.5).unwrap());
 //! let decision = coin_model.bind(|heads| {
 //!     if heads {
 //!         pure("Take action!".to_string())
@@ -55,7 +55,7 @@
 //! });
 //!
 //! // Poisson returns u64 - perfect for counting!
-//! let count_model: Model<u64> = sample(addr!("events"), Poisson { lambda: 3.0 });
+//! let count_model: Model<u64> = sample(addr!("events"), Poisson::new(3.0).unwrap());
 //! let analysis = count_model.bind(|count| {
 //!     let status = match count {
 //!         0 => "No events",
@@ -67,9 +67,8 @@
 //! });
 //!
 //! // Categorical returns usize - safe array indexing!
-//! let choice_model: Model<usize> = sample(addr!("color"), Categorical {
-//!     probs: vec![0.5, 0.3, 0.2]
-//! });
+//! let choice_model: Model<usize> = sample(addr!("color"),
+//!     Categorical::new(vec![0.5, 0.3, 0.2]).unwrap());
 //! let colors = vec!["red", "green", "blue"];
 //! let result = choice_model.bind(move |color_idx| {
 //!     let chosen_color = colors[color_idx]; // Direct indexing - no casting!
@@ -82,12 +81,12 @@
 //! use fugue::*;
 //!
 //! // Observe with natural types
-//! let model = observe(addr!("coin_result"), Bernoulli { p: 0.6 }, true)      // bool
-//!     .bind(|_| observe(addr!("count"), Poisson { lambda: 4.0 }, 7u64))      // u64
-//!     .bind(|_| observe(addr!("choice"), Categorical {
-//!         probs: vec![0.3, 0.5, 0.2]
-//!     }, 1usize))  // usize
-//!     .bind(|_| observe(addr!("temp"), Normal { mu: 20.0, sigma: 2.0 }, 18.5)); // f64
+//! let model = observe(addr!("coin_result"), Bernoulli::new(0.6).unwrap(), true)      // bool
+//!     .bind(|_| observe(addr!("count"), Poisson::new(4.0).unwrap(), 7u64))      // u64
+//!     .bind(|_| observe(addr!("choice"), Categorical::new(
+//!         vec![0.3, 0.5, 0.2]
+//!     ).unwrap(), 1usize))  // usize
+//!     .bind(|_| observe(addr!("temp"), Normal::new(20.0, 2.0).unwrap(), 18.5)); // f64
 //! ```
 use rand::{Rng, RngCore};
 use rand_distr::{
@@ -137,20 +136,20 @@ pub type LogF64 = f64;
 /// let mut rng = StdRng::seed_from_u64(42);
 ///
 /// // Continuous distribution returns f64
-/// let normal = Normal { mu: 0.0, sigma: 1.0 };
+/// let normal = Normal::new(0.0, 1.0).unwrap();
 /// let value: f64 = normal.sample(&mut rng);
 /// let log_prob = normal.log_prob(&value);
 ///
 /// // Discrete distributions return natural types!
-/// let coin = Bernoulli { p: 0.5 };
+/// let coin = Bernoulli::new(0.5).unwrap();
 /// let flip: bool = coin.sample(&mut rng);  // bool, not f64!
 /// let coin_prob = coin.log_prob(&flip);
 ///
-/// let counter = Poisson { lambda: 3.0 };
+/// let counter = Poisson::new(3.0).unwrap();
 /// let count: u64 = counter.sample(&mut rng);  // u64, not f64!
 /// let count_prob = counter.log_prob(&count);
 ///
-/// let choice = Categorical { probs: vec![0.3, 0.5, 0.2] };
+/// let choice = Categorical::new(vec![0.3, 0.5, 0.2]).unwrap();
 /// let idx: usize = choice.sample(&mut rng);  // usize for safe indexing!
 /// let choice_prob = choice.log_prob(&idx);
 /// ```
@@ -219,20 +218,75 @@ pub trait Distribution<T>: Send + Sync {
 /// use fugue::*;
 ///
 /// // Standard normal distribution
-/// let std_normal = Normal { mu: 0.0, sigma: 1.0 };
+/// let std_normal = Normal::new(0.0, 1.0).unwrap();
 ///
 /// // Normal prior for a parameter
-/// let model = sample(addr!("theta"), Normal { mu: 0.0, sigma: 2.0 });
+/// let model = sample(addr!("theta"), Normal::new(0.0, 2.0).unwrap());
 ///
 /// // Normal likelihood for observations
-/// let model = observe(addr!("y"), Normal { mu: 1.5, sigma: 0.5 }, 2.0);
+/// let model = observe(addr!("y"), Normal::new(1.5, 0.5).unwrap(), 2.0);
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Normal {
     /// Mean of the normal distribution.
-    pub mu: f64,
+    mu: f64,
     /// Standard deviation of the normal distribution (must be positive).
-    pub sigma: f64,
+    sigma: f64,
+}
+
+impl Normal {
+    /// Create a new Normal distribution with validated parameters.
+    ///
+    /// This is the only way to construct a Normal distribution, ensuring
+    /// parameter validity at construction time.
+    ///
+    /// # Arguments
+    ///
+    /// * `mu` - Mean of the distribution (must be finite)
+    /// * `sigma` - Standard deviation (must be positive and finite)
+    ///
+    /// # Errors
+    ///
+    /// Returns `FugueError::InvalidParameters` if parameters are invalid.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use fugue::*;
+    ///
+    /// // Valid construction
+    /// let normal = Normal::new(0.0, 1.0)?;
+    ///
+    /// // Invalid parameters will fail
+    /// let bad_normal = Normal::new(0.0, -1.0); // Error: negative sigma
+    /// assert!(bad_normal.is_err());
+    /// # Ok::<(), FugueError>(())
+    /// ```
+    pub fn new(mu: f64, sigma: f64) -> crate::error::FugueResult<Self> {
+        if !mu.is_finite() {
+            return Err(crate::error::FugueError::InvalidParameters {
+                distribution: "Normal".to_string(),
+                reason: "Mean (mu) must be finite".to_string(),
+            });
+        }
+        if sigma <= 0.0 || !sigma.is_finite() {
+            return Err(crate::error::FugueError::InvalidParameters {
+                distribution: "Normal".to_string(),
+                reason: "Standard deviation (sigma) must be positive and finite".to_string(),
+            });
+        }
+        Ok(Normal { mu, sigma })
+    }
+
+    /// Get the mean of the distribution.
+    pub fn mu(&self) -> f64 {
+        self.mu
+    }
+
+    /// Get the standard deviation of the distribution.
+    pub fn sigma(&self) -> f64 {
+        self.sigma
+    }
 }
 impl Distribution<f64> for Normal {
     fn sample(&self, rng: &mut dyn RngCore) -> f64 {
@@ -288,20 +342,49 @@ impl Distribution<f64> for Normal {
 /// use fugue::*;
 ///
 /// // Unit interval
-/// let unit_uniform = Uniform { low: 0.0, high: 1.0 };
+/// let unit_uniform = Uniform::new(0.0, 1.0).unwrap();
 ///
 /// // Symmetric interval around zero
-/// let symmetric = Uniform { low: -5.0, high: 5.0 };
+/// let symmetric = Uniform::new(-5.0, 5.0).unwrap();
 ///
 /// // Use as uninformative prior
-/// let model = sample(addr!("weight"), Uniform { low: 0.0, high: 100.0 });
+/// let model = sample(addr!("weight"), Uniform::new(0.0, 100.0).unwrap());
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Uniform {
     /// Lower bound of the uniform distribution (inclusive).
-    pub low: f64,
+    low: f64,
     /// Upper bound of the uniform distribution (exclusive).
-    pub high: f64,
+    high: f64,
+}
+
+impl Uniform {
+    /// Create a new Uniform distribution with validated parameters.
+    pub fn new(low: f64, high: f64) -> crate::error::FugueResult<Self> {
+        if !low.is_finite() || !high.is_finite() {
+            return Err(crate::error::FugueError::InvalidParameters {
+                distribution: "Uniform".to_string(),
+                reason: "Bounds must be finite".to_string(),
+            });
+        }
+        if low >= high {
+            return Err(crate::error::FugueError::InvalidParameters {
+                distribution: "Uniform".to_string(),
+                reason: "Lower bound must be less than upper bound".to_string(),
+            });
+        }
+        Ok(Uniform { low, high })
+    }
+
+    /// Get the lower bound.
+    pub fn low(&self) -> f64 {
+        self.low
+    }
+
+    /// Get the upper bound.
+    pub fn high(&self) -> f64 {
+        self.high
+    }
 }
 impl Distribution<f64> for Uniform {
     fn sample(&self, rng: &mut dyn RngCore) -> f64 {
@@ -365,20 +448,49 @@ impl Distribution<f64> for Uniform {
 /// use fugue::*;
 ///
 /// // Standard log-normal
-/// let log_normal = LogNormal { mu: 0.0, sigma: 1.0 };
+/// let log_normal = LogNormal::new(0.0, 1.0).unwrap();
 ///
 /// // Model for positive scale parameters
-/// let model = sample(addr!("scale"), LogNormal { mu: 0.0, sigma: 0.5 });
+/// let model = sample(addr!("scale"), LogNormal::new(0.0, 0.5).unwrap());
 ///
 /// // Income distribution (often log-normal)
-/// let income_model = sample(addr!("income"), LogNormal { mu: 10.0, sigma: 0.8 });
+/// let income_model = sample(addr!("income"), LogNormal::new(10.0, 0.8).unwrap());
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub struct LogNormal {
     /// Mean of the underlying normal distribution.
-    pub mu: f64,
+    mu: f64,
     /// Standard deviation of the underlying normal distribution (must be positive).
-    pub sigma: f64,
+    sigma: f64,
+}
+
+impl LogNormal {
+    /// Create a new LogNormal distribution with validated parameters.
+    pub fn new(mu: f64, sigma: f64) -> crate::error::FugueResult<Self> {
+        if !mu.is_finite() {
+            return Err(crate::error::FugueError::InvalidParameters {
+                distribution: "LogNormal".to_string(),
+                reason: "Mean (mu) must be finite".to_string(),
+            });
+        }
+        if sigma <= 0.0 || !sigma.is_finite() {
+            return Err(crate::error::FugueError::InvalidParameters {
+                distribution: "LogNormal".to_string(),
+                reason: "Standard deviation (sigma) must be positive and finite".to_string(),
+            });
+        }
+        Ok(LogNormal { mu, sigma })
+    }
+
+    /// Get the mean of the underlying normal distribution.
+    pub fn mu(&self) -> f64 {
+        self.mu
+    }
+
+    /// Get the standard deviation of the underlying normal distribution.
+    pub fn sigma(&self) -> f64 {
+        self.sigma
+    }
 }
 impl Distribution<f64> for LogNormal {
     fn sample(&self, rng: &mut dyn RngCore) -> f64 {
@@ -438,18 +550,36 @@ impl Distribution<f64> for LogNormal {
 /// use fugue::*;
 ///
 /// // Model time between events (rate = 2 events per unit time)
-/// let waiting_time = Exponential { rate: 2.0 };
+/// let waiting_time = Exponential::new(2.0).unwrap();
 ///
 /// // Survival analysis / hazard modeling
-/// let model = sample(addr!("survival_time"), Exponential { rate: 0.1 });
+/// let model = sample(addr!("survival_time"), Exponential::new(0.1).unwrap());
 ///
 /// // Prior for precision parameters (inverse of variance)
-/// let precision_prior = sample(addr!("precision"), Exponential { rate: 1.0 });
+/// let precision_prior = sample(addr!("precision"), Exponential::new(1.0).unwrap());
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Exponential {
     /// Rate parameter λ of the exponential distribution (must be positive).
-    pub rate: f64,
+    rate: f64,
+}
+
+impl Exponential {
+    /// Create a new Exponential distribution with validated parameters.
+    pub fn new(rate: f64) -> crate::error::FugueResult<Self> {
+        if rate <= 0.0 || !rate.is_finite() {
+            return Err(crate::error::FugueError::InvalidParameters {
+                distribution: "Exponential".to_string(),
+                reason: "Rate parameter must be positive and finite".to_string(),
+            });
+        }
+        Ok(Exponential { rate })
+    }
+
+    /// Get the rate parameter.
+    pub fn rate(&self) -> f64 {
+        self.rate
+    }
 }
 impl Distribution<f64> for Exponential {
     fn sample(&self, rng: &mut dyn RngCore) -> f64 {
@@ -508,7 +638,7 @@ impl Distribution<f64> for Exponential {
 /// use fugue::*;
 ///
 /// // Type-safe boolean sampling - no more f64 comparisons!
-/// let coin_model: Model<bool> = sample(addr!("coin"), Bernoulli { p: 0.5 });
+/// let coin_model: Model<bool> = sample(addr!("coin"), Bernoulli::new(0.5).unwrap());
 /// let decision = coin_model.bind(|heads| {
 ///     if heads {  // ✅ Natural boolean usage!
 ///         pure("Heads - take action!".to_string())
@@ -518,7 +648,7 @@ impl Distribution<f64> for Exponential {
 /// });
 ///
 /// // Mixture component selection with natural boolean logic
-/// let component_model = sample(addr!("component"), Bernoulli { p: 0.3 })
+/// let component_model = sample(addr!("component"), Bernoulli::new(0.3).unwrap())
 ///     .bind(|is_component_2| {
 ///         let component_name = if is_component_2 {
 ///             "Component 2"
@@ -529,12 +659,30 @@ impl Distribution<f64> for Exponential {
 ///     });
 ///
 /// // Type-safe observation of boolean outcomes
-/// let obs_model = observe(addr!("success"), Bernoulli { p: 0.8 }, true);
+/// let obs_model = observe(addr!("success"), Bernoulli::new(0.8).unwrap(), true);
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Bernoulli {
     /// Probability of success (must be in [0, 1]).
-    pub p: f64,
+    p: f64,
+}
+
+impl Bernoulli {
+    /// Create a new Bernoulli distribution with validated parameters.
+    pub fn new(p: f64) -> crate::error::FugueResult<Self> {
+        if !p.is_finite() || p < 0.0 || p > 1.0 {
+            return Err(crate::error::FugueError::InvalidParameters {
+                distribution: "Bernoulli".to_string(),
+                reason: "Probability must be in [0, 1]".to_string(),
+            });
+        }
+        Ok(Bernoulli { p })
+    }
+
+    /// Get the success probability.
+    pub fn p(&self) -> f64 {
+        self.p
+    }
 }
 impl Distribution<bool> for Bernoulli {
     fn sample(&self, rng: &mut dyn RngCore) -> bool {
@@ -600,9 +748,8 @@ impl Distribution<bool> for Bernoulli {
 ///
 /// // Type-safe categorical choice - returns usize directly!
 /// let options = vec!["red", "green", "blue"];
-/// let color_model: Model<usize> = sample(addr!("color"), Categorical {
-///     probs: vec![0.5, 0.3, 0.2]
-/// });
+/// let color_model: Model<usize> = sample(addr!("color"),
+///     Categorical::new(vec![0.5, 0.3, 0.2]).unwrap());
 /// let result = color_model.bind(move |color_idx| {
 ///     // color_idx is naturally usize - safe for direct array indexing!
 ///     let chosen_color = options[color_idx]; // No casting, no bounds checking needed!
@@ -610,23 +757,85 @@ impl Distribution<bool> for Bernoulli {
 /// });
 ///
 /// // Multi-armed bandit with type-safe action selection
-/// let action_model = sample(addr!("action"), Categorical {
-///     probs: vec![0.4, 0.3, 0.2, 0.1]  // 4 possible actions
-/// }).bind(|action_idx| {
+/// let action_model = sample(addr!("action"),
+///     Categorical::new(vec![0.4, 0.3, 0.2, 0.1]).unwrap()  // 4 possible actions
+/// ).bind(|action_idx| {
 ///     let action_rewards = vec![10.0, 15.0, 5.0, 20.0];
 ///     let reward = action_rewards[action_idx]; // Direct, safe indexing!
 ///     pure(reward)
 /// });
 ///
 /// // Type-safe observation of categorical outcomes
-/// let obs_model = observe(addr!("user_choice"), Categorical {
-///     probs: vec![0.2, 0.3, 0.3, 0.2]
-/// }, 2usize);  // Observed choice was index 2
+/// let obs_model = observe(addr!("user_choice"),
+///     Categorical::new(vec![0.2, 0.3, 0.3, 0.2]).unwrap(), 2usize);  // Observed choice was index 2
 /// ```
 #[derive(Clone, Debug)]
 pub struct Categorical {
     /// Probabilities for each category (should sum to 1.0).
-    pub probs: Vec<f64>,
+    probs: Vec<f64>,
+}
+
+impl Categorical {
+    /// Create a new Categorical distribution with validated parameters.
+    pub fn new(probs: Vec<f64>) -> crate::error::FugueResult<Self> {
+        if probs.is_empty() {
+            return Err(crate::error::FugueError::InvalidParameters {
+                distribution: "Categorical".to_string(),
+                reason: "Probability vector cannot be empty".to_string(),
+            });
+        }
+
+        let sum: f64 = probs.iter().sum();
+        if (sum - 1.0).abs() > 1e-6 {
+            return Err(crate::error::FugueError::InvalidParameters {
+                distribution: "Categorical".to_string(),
+                reason: format!("Probabilities must sum to 1.0, got {:.6}", sum),
+            });
+        }
+
+        for (i, &p) in probs.iter().enumerate() {
+            if !p.is_finite() || p < 0.0 {
+                return Err(crate::error::FugueError::InvalidParameters {
+                    distribution: "Categorical".to_string(),
+                    reason: format!(
+                        "Probability at index {} must be non-negative and finite, got {}",
+                        i, p
+                    ),
+                });
+            }
+        }
+
+        Ok(Categorical { probs })
+    }
+
+    /// Create a uniform categorical distribution over k categories.
+    pub fn uniform(k: usize) -> crate::error::FugueResult<Self> {
+        if k == 0 {
+            return Err(crate::error::FugueError::InvalidParameters {
+                distribution: "Categorical".to_string(),
+                reason: "Number of categories must be positive".to_string(),
+            });
+        }
+
+        let prob = 1.0 / k as f64;
+        let probs = vec![prob; k];
+        Ok(Categorical { probs })
+    }
+
+    /// Get the probability vector.
+    pub fn probs(&self) -> &[f64] {
+        &self.probs
+    }
+
+    /// Get the number of categories.
+    pub fn len(&self) -> usize {
+        self.probs.len()
+    }
+
+    /// Check if the distribution has no categories.
+    pub fn is_empty(&self) -> bool {
+        self.probs.is_empty()
+    }
 }
 impl Distribution<usize> for Categorical {
     fn sample(&self, rng: &mut dyn RngCore) -> usize {
@@ -699,21 +908,50 @@ impl Distribution<usize> for Categorical {
 /// use fugue::*;
 ///
 /// // Uniform on [0,1] (alpha=1, beta=1)
-/// let uniform_beta = Beta { alpha: 1.0, beta: 1.0 };
+/// let uniform_beta = Beta::new(1.0, 1.0).unwrap();
 ///
 /// // Prior for a probability parameter
-/// let prob_prior = sample(addr!("p"), Beta { alpha: 2.0, beta: 5.0 });
+/// let prob_prior = sample(addr!("p"), Beta::new(2.0, 5.0).unwrap());
 ///
 /// // Conjugate prior for Bernoulli likelihood
-/// let model = sample(addr!("success_rate"), Beta { alpha: 3.0, beta: 7.0 })
-///     .bind(|p| observe(addr!("trial"), Bernoulli { p }, true));
+/// let model = sample(addr!("success_rate"), Beta::new(3.0, 7.0).unwrap())
+///     .bind(|p| observe(addr!("trial"), Bernoulli::new(p).unwrap(), true));
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Beta {
     /// First shape parameter α (must be positive).
-    pub alpha: f64,
+    alpha: f64,
     /// Second shape parameter β (must be positive).
-    pub beta: f64,
+    beta: f64,
+}
+
+impl Beta {
+    /// Create a new Beta distribution with validated parameters.
+    pub fn new(alpha: f64, beta: f64) -> crate::error::FugueResult<Self> {
+        if alpha <= 0.0 || !alpha.is_finite() {
+            return Err(crate::error::FugueError::InvalidParameters {
+                distribution: "Beta".to_string(),
+                reason: "Alpha parameter must be positive and finite".to_string(),
+            });
+        }
+        if beta <= 0.0 || !beta.is_finite() {
+            return Err(crate::error::FugueError::InvalidParameters {
+                distribution: "Beta".to_string(),
+                reason: "Beta parameter must be positive and finite".to_string(),
+            });
+        }
+        Ok(Beta { alpha, beta })
+    }
+
+    /// Get the alpha parameter.
+    pub fn alpha(&self) -> f64 {
+        self.alpha
+    }
+
+    /// Get the beta parameter.
+    pub fn beta(&self) -> f64 {
+        self.beta
+    }
 }
 impl Distribution<f64> for Beta {
     fn sample(&self, rng: &mut dyn RngCore) -> f64 {
@@ -789,21 +1027,50 @@ impl Distribution<f64> for Beta {
 /// use fugue::*;
 ///
 /// // Exponential is Gamma(1, rate)
-/// let exponential_like = Gamma { shape: 1.0, rate: 2.0 };
+/// let exponential_like = Gamma::new(1.0, 2.0).unwrap();
 ///
 /// // Prior for precision (inverse variance)
-/// let precision = sample(addr!("precision"), Gamma { shape: 2.0, rate: 1.0 });
+/// let precision = sample(addr!("precision"), Gamma::new(2.0, 1.0).unwrap());
 ///
 /// // Conjugate prior for Poisson rate
-/// let model = sample(addr!("rate"), Gamma { shape: 3.0, rate: 2.0 })
-///     .bind(|lambda| observe(addr!("count"), Poisson { lambda }, 5u64));
+/// let model = sample(addr!("rate"), Gamma::new(3.0, 2.0).unwrap())
+///     .bind(|lambda| observe(addr!("count"), Poisson::new(lambda).unwrap(), 5u64));
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Gamma {
     /// Shape parameter k (must be positive).
-    pub shape: f64,
+    shape: f64,
     /// Rate parameter λ (must be positive).
-    pub rate: f64,
+    rate: f64,
+}
+
+impl Gamma {
+    /// Create a new Gamma distribution with validated parameters.
+    pub fn new(shape: f64, rate: f64) -> crate::error::FugueResult<Self> {
+        if shape <= 0.0 || !shape.is_finite() {
+            return Err(crate::error::FugueError::InvalidParameters {
+                distribution: "Gamma".to_string(),
+                reason: "Shape parameter must be positive and finite".to_string(),
+            });
+        }
+        if rate <= 0.0 || !rate.is_finite() {
+            return Err(crate::error::FugueError::InvalidParameters {
+                distribution: "Gamma".to_string(),
+                reason: "Rate parameter must be positive and finite".to_string(),
+            });
+        }
+        Ok(Gamma { shape, rate })
+    }
+
+    /// Get the shape parameter.
+    pub fn shape(&self) -> f64 {
+        self.shape
+    }
+
+    /// Get the rate parameter.
+    pub fn rate(&self) -> f64 {
+        self.rate
+    }
 }
 impl Distribution<f64> for Gamma {
     fn sample(&self, rng: &mut dyn RngCore) -> f64 {
@@ -877,7 +1144,7 @@ impl Distribution<f64> for Gamma {
 /// use fugue::*;
 ///
 /// // Type-safe success counting - returns u64 directly!
-/// let trial_model: Model<u64> = sample(addr!("successes"), Binomial { n: 10, p: 0.5 });
+/// let trial_model: Model<u64> = sample(addr!("successes"), Binomial::new(10, 0.5).unwrap());
 /// let analysis = trial_model.bind(|success_count| {
 ///     // success_count is naturally u64 - can be used in arithmetic directly
 ///     let success_rate = success_count as f64 / 10.0;
@@ -892,9 +1159,9 @@ impl Distribution<f64> for Gamma {
 /// });
 ///
 /// // Clinical trial with type-safe counting
-/// let clinical_trial = sample(addr!("success_rate"), Beta { alpha: 1.0, beta: 1.0 })
+/// let clinical_trial = sample(addr!("success_rate"), Beta::new(1.0, 1.0).unwrap())
 ///     .bind(|p| {
-///         sample(addr!("successes"), Binomial { n: 100, p })
+///         sample(addr!("successes"), Binomial::new(100, p).unwrap())
 ///             .bind(|successes| {
 ///                 // successes is naturally u64 - no casting needed!
 ///                 let efficacy = successes as f64 / 100.0;
@@ -903,14 +1170,37 @@ impl Distribution<f64> for Gamma {
 ///     });
 ///
 /// // Type-safe observation of trial results
-/// let obs_model = observe(addr!("trial_successes"), Binomial { n: 20, p: 0.3 }, 7u64);
+/// let obs_model = observe(addr!("trial_successes"), Binomial::new(20, 0.3).unwrap(), 7u64);
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Binomial {
     /// Number of trials.
-    pub n: u64,
+    n: u64,
     /// Probability of success on each trial (must be in [0, 1]).
-    pub p: f64,
+    p: f64,
+}
+
+impl Binomial {
+    /// Create a new Binomial distribution with validated parameters.
+    pub fn new(n: u64, p: f64) -> crate::error::FugueResult<Self> {
+        if !p.is_finite() || p < 0.0 || p > 1.0 {
+            return Err(crate::error::FugueError::InvalidParameters {
+                distribution: "Binomial".to_string(),
+                reason: "Probability must be in [0, 1]".to_string(),
+            });
+        }
+        Ok(Binomial { n, p })
+    }
+
+    /// Get the number of trials.
+    pub fn n(&self) -> u64 {
+        self.n
+    }
+
+    /// Get the success probability.
+    pub fn p(&self) -> f64 {
+        self.p
+    }
 }
 impl Distribution<u64> for Binomial {
     fn sample(&self, rng: &mut dyn RngCore) -> u64 {
@@ -960,7 +1250,7 @@ impl Distribution<u64> for Binomial {
 /// use fugue::*;
 ///
 /// // Type-safe count modeling - returns u64 directly!
-/// let count_model: Model<u64> = sample(addr!("events"), Poisson { lambda: 3.5 });
+/// let count_model: Model<u64> = sample(addr!("events"), Poisson::new(3.5).unwrap());
 /// let analysis = count_model.bind(|count| {
 ///     // count is naturally u64 - can be used directly in match patterns
 ///     let status = match count {
@@ -973,9 +1263,9 @@ impl Distribution<u64> for Binomial {
 /// });
 ///
 /// // Hierarchical count modeling with type safety
-/// let hierarchical = sample(addr!("rate"), Gamma { shape: 2.0, rate: 1.0 })
+/// let hierarchical = sample(addr!("rate"), Gamma::new(2.0, 1.0).unwrap())
 ///     .bind(|lambda| {
-///         sample(addr!("count"), Poisson { lambda })
+///         sample(addr!("count"), Poisson::new(lambda).unwrap())
 ///             .bind(|count| {
 ///                 // count is naturally u64 - no casting needed!
 ///                 let bonus = if count > 5 { count * 2 } else { count };
@@ -984,12 +1274,30 @@ impl Distribution<u64> for Binomial {
 ///     });
 ///
 /// // Type-safe observation of count data
-/// let obs_model = observe(addr!("observed_count"), Poisson { lambda: 4.0 }, 7u64);
+/// let obs_model = observe(addr!("observed_count"), Poisson::new(4.0).unwrap(), 7u64);
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Poisson {
     /// Rate parameter λ (must be positive). Mean and variance of the distribution.
-    pub lambda: f64,
+    lambda: f64,
+}
+
+impl Poisson {
+    /// Create a new Poisson distribution with validated parameters.
+    pub fn new(lambda: f64) -> crate::error::FugueResult<Self> {
+        if lambda <= 0.0 || !lambda.is_finite() {
+            return Err(crate::error::FugueError::InvalidParameters {
+                distribution: "Poisson".to_string(),
+                reason: "Rate parameter lambda must be positive and finite".to_string(),
+            });
+        }
+        Ok(Poisson { lambda })
+    }
+
+    /// Get the rate parameter.
+    pub fn lambda(&self) -> f64 {
+        self.lambda
+    }
 }
 impl Distribution<u64> for Poisson {
     fn sample(&self, rng: &mut dyn RngCore) -> u64 {
@@ -1023,5 +1331,3 @@ impl Distribution<u64> for Poisson {
         Box::new(*self)
     }
 }
-
-

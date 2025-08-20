@@ -20,7 +20,7 @@
 /// use rand::rngs::StdRng;
 /// use rand::SeedableRng;
 ///
-/// let model = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 });
+/// let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
 /// let mut rng = StdRng::seed_from_u64(42);
 /// let (value, trace) = runtime::handler::run(
 ///     PriorHandler { rng: &mut rng, trace: Trace::default() },
@@ -37,7 +37,7 @@
 /// use rand::SeedableRng;
 ///
 /// # let existing_trace = Trace::default(); // From previous execution
-/// let model = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 });
+/// let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
 /// let mut rng = StdRng::seed_from_u64(42);
 /// let (value, new_trace) = runtime::handler::run(
 ///     ReplayHandler {
@@ -58,7 +58,7 @@
 /// use rand::SeedableRng;
 ///
 /// // Create a trace with choices first
-/// let model_fn = || sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 });
+/// let model_fn = || sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
 /// let mut rng = StdRng::seed_from_u64(42);
 /// let (_, existing_trace) = runtime::handler::run(
 ///     PriorHandler { rng: &mut rng, trace: Trace::default() },
@@ -79,6 +79,7 @@ use crate::core::address::Address;
 use crate::core::distribution::Distribution;
 use crate::runtime::handler::Handler;
 use crate::runtime::trace::{Choice, ChoiceValue, Trace};
+
 use rand::RngCore;
 
 /// Handler for prior sampling - generates fresh random values from distributions.
@@ -103,8 +104,8 @@ use rand::RngCore;
 /// use rand::rngs::StdRng;
 /// use rand::SeedableRng;
 ///
-/// let model = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 })
-///     .bind(|x| observe(addr!("y"), Normal { mu: x, sigma: 0.5 }, 1.2).map(move |_| x));
+/// let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+///     .bind(|x| observe(addr!("y"), Normal::new(x, 0.5).unwrap(), 1.2).map(move |_| x));
 ///
 /// let mut rng = StdRng::seed_from_u64(123);
 /// let (result, trace) = runtime::handler::run(
@@ -236,7 +237,7 @@ impl<'r, R: RngCore> Handler for PriorHandler<'r, R> {
 /// use rand::SeedableRng;
 ///
 /// // First, create a base trace
-/// let model_fn = || sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 });
+/// let model_fn = || sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
 /// let mut rng = StdRng::seed_from_u64(123);
 /// let (original_value, base_trace) = runtime::handler::run(
 ///     PriorHandler { rng: &mut rng, trace: Trace::default() },
@@ -409,7 +410,7 @@ impl<'r, R: RngCore> Handler for ReplayHandler<'r, R> {
 /// use rand::SeedableRng;
 ///
 /// // Create a trace with some choices
-/// let model_fn = || sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 });
+/// let model_fn = || sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
 /// let mut rng = StdRng::seed_from_u64(123);
 /// let (_, complete_trace) = runtime::handler::run(
 ///     PriorHandler { rng: &mut rng, trace: Trace::default() },
@@ -417,7 +418,7 @@ impl<'r, R: RngCore> Handler for ReplayHandler<'r, R> {
 /// );
 ///
 /// // Score the model under different parameters
-/// let different_model_fn = || sample(addr!("x"), Normal { mu: 1.0, sigma: 2.0 });
+/// let different_model_fn = || sample(addr!("x"), Normal::new(1.0, 2.0).unwrap());
 /// let (value, score_trace) = runtime::handler::run(
 ///     ScoreGivenTrace {
 ///         base: complete_trace,
@@ -433,6 +434,302 @@ pub struct ScoreGivenTrace {
     pub base: Trace,
     /// New trace to accumulate log-probabilities.
     pub trace: Trace,
+}
+
+/// Safe version of ReplayHandler that uses type-safe trace accessors.
+///
+/// This handler replays a model execution using values stored in a base trace,
+/// but gracefully handles type mismatches by logging warnings and falling back
+/// to fresh sampling instead of panicking.
+///
+/// # Examples
+///
+/// ```rust
+/// use fugue::*;
+/// use rand::rngs::StdRng;
+/// use rand::SeedableRng;
+///
+/// let base_trace = Trace::default(); // From previous execution
+/// let mut rng = StdRng::seed_from_u64(42);
+/// let handler = SafeReplayHandler {
+///     rng: &mut rng,
+///     base: base_trace,
+///     trace: Trace::default(),
+///     warn_on_mismatch: true,
+/// };
+/// ```
+pub struct SafeReplayHandler<'r, R: RngCore> {
+    /// Random number generator for sampling at addresses not in base trace.
+    pub rng: &'r mut R,
+    /// Base trace containing values to replay.
+    pub base: Trace,
+    /// New trace to accumulate the replay execution.
+    pub trace: Trace,
+    /// Whether to log warnings on type mismatches (useful for debugging).
+    pub warn_on_mismatch: bool,
+}
+
+impl<'r, R: RngCore> Handler for SafeReplayHandler<'r, R> {
+    fn on_sample_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>) -> f64 {
+        let x = match self.base.get_f64(addr) {
+            Some(v) => v,
+            None => {
+                if self.warn_on_mismatch && self.base.choices.contains_key(addr) {
+                    if let Some(choice) = self.base.choices.get(addr) {
+                        eprintln!(
+                            "Warning: Type mismatch at {}: expected f64, found {}",
+                            addr,
+                            choice.value.type_name()
+                        );
+                    }
+                }
+                dist.sample(self.rng)
+            }
+        };
+        let lp = dist.log_prob(&x);
+        self.trace.log_prior += lp;
+        self.trace.choices.insert(
+            addr.clone(),
+            Choice {
+                addr: addr.clone(),
+                value: ChoiceValue::F64(x),
+                logp: lp,
+            },
+        );
+        x
+    }
+
+    fn on_sample_bool(&mut self, addr: &Address, dist: &dyn Distribution<bool>) -> bool {
+        let x = match self.base.get_bool(addr) {
+            Some(v) => v,
+            None => {
+                if self.warn_on_mismatch && self.base.choices.contains_key(addr) {
+                    if let Some(choice) = self.base.choices.get(addr) {
+                        eprintln!(
+                            "Warning: Type mismatch at {}: expected bool, found {}",
+                            addr,
+                            choice.value.type_name()
+                        );
+                    }
+                }
+                dist.sample(self.rng)
+            }
+        };
+        let lp = dist.log_prob(&x);
+        self.trace.log_prior += lp;
+        self.trace.choices.insert(
+            addr.clone(),
+            Choice {
+                addr: addr.clone(),
+                value: ChoiceValue::Bool(x),
+                logp: lp,
+            },
+        );
+        x
+    }
+
+    fn on_sample_u64(&mut self, addr: &Address, dist: &dyn Distribution<u64>) -> u64 {
+        let x = match self.base.get_u64(addr) {
+            Some(v) => v,
+            None => {
+                if self.warn_on_mismatch && self.base.choices.contains_key(addr) {
+                    if let Some(choice) = self.base.choices.get(addr) {
+                        eprintln!(
+                            "Warning: Type mismatch at {}: expected u64, found {}",
+                            addr,
+                            choice.value.type_name()
+                        );
+                    }
+                }
+                dist.sample(self.rng)
+            }
+        };
+        let lp = dist.log_prob(&x);
+        self.trace.log_prior += lp;
+        self.trace.choices.insert(
+            addr.clone(),
+            Choice {
+                addr: addr.clone(),
+                value: ChoiceValue::U64(x),
+                logp: lp,
+            },
+        );
+        x
+    }
+
+    fn on_sample_usize(&mut self, addr: &Address, dist: &dyn Distribution<usize>) -> usize {
+        let x = match self.base.get_usize(addr) {
+            Some(v) => v,
+            None => {
+                if self.warn_on_mismatch && self.base.choices.contains_key(addr) {
+                    if let Some(choice) = self.base.choices.get(addr) {
+                        eprintln!(
+                            "Warning: Type mismatch at {}: expected usize, found {}",
+                            addr,
+                            choice.value.type_name()
+                        );
+                    }
+                }
+                dist.sample(self.rng)
+            }
+        };
+        let lp = dist.log_prob(&x);
+        self.trace.log_prior += lp;
+        self.trace.choices.insert(
+            addr.clone(),
+            Choice {
+                addr: addr.clone(),
+                value: ChoiceValue::Usize(x),
+                logp: lp,
+            },
+        );
+        x
+    }
+
+    fn on_observe_f64(&mut self, _: &Address, dist: &dyn Distribution<f64>, value: f64) {
+        self.trace.log_likelihood += dist.log_prob(&value);
+    }
+
+    fn on_observe_bool(&mut self, _: &Address, dist: &dyn Distribution<bool>, value: bool) {
+        self.trace.log_likelihood += dist.log_prob(&value);
+    }
+
+    fn on_observe_u64(&mut self, _: &Address, dist: &dyn Distribution<u64>, value: u64) {
+        self.trace.log_likelihood += dist.log_prob(&value);
+    }
+
+    fn on_observe_usize(&mut self, _: &Address, dist: &dyn Distribution<usize>, value: usize) {
+        self.trace.log_likelihood += dist.log_prob(&value);
+    }
+
+    fn on_factor(&mut self, logw: f64) {
+        self.trace.log_factors += logw;
+    }
+
+    fn finish(self) -> Trace {
+        self.trace
+    }
+}
+
+/// Safe version of ScoreGivenTrace that uses type-safe trace accessors.
+///
+/// This handler computes log-probability of a model execution but gracefully
+/// handles missing addresses or type mismatches by returning negative infinity
+/// log-weight instead of panicking.
+pub struct SafeScoreGivenTrace {
+    /// Base trace containing the fixed choices to score.
+    pub base: Trace,
+    /// New trace to accumulate log-probabilities.
+    pub trace: Trace,
+    /// Whether to log warnings on missing addresses or type mismatches.
+    pub warn_on_error: bool,
+}
+
+impl Handler for SafeScoreGivenTrace {
+    fn on_sample_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>) -> f64 {
+        match self.base.get_f64_result(addr) {
+            Ok(x) => {
+                let lp = dist.log_prob(&x);
+                self.trace.log_prior += lp;
+                if let Some(choice) = self.base.choices.get(addr) {
+                    self.trace.choices.insert(addr.clone(), choice.clone());
+                }
+                x
+            }
+            Err(e) => {
+                if self.warn_on_error {
+                    eprintln!("Warning: Failed to get f64 at {}: {}", addr, e);
+                }
+                // Add negative infinity to make this trace invalid
+                self.trace.log_prior += f64::NEG_INFINITY;
+                0.0 // Return a dummy value
+            }
+        }
+    }
+
+    fn on_sample_bool(&mut self, addr: &Address, dist: &dyn Distribution<bool>) -> bool {
+        match self.base.get_bool_result(addr) {
+            Ok(x) => {
+                let lp = dist.log_prob(&x);
+                self.trace.log_prior += lp;
+                if let Some(choice) = self.base.choices.get(addr) {
+                    self.trace.choices.insert(addr.clone(), choice.clone());
+                }
+                x
+            }
+            Err(e) => {
+                if self.warn_on_error {
+                    eprintln!("Warning: Failed to get bool at {}: {}", addr, e);
+                }
+                self.trace.log_prior += f64::NEG_INFINITY;
+                false
+            }
+        }
+    }
+
+    fn on_sample_u64(&mut self, addr: &Address, dist: &dyn Distribution<u64>) -> u64 {
+        match self.base.get_u64_result(addr) {
+            Ok(x) => {
+                let lp = dist.log_prob(&x);
+                self.trace.log_prior += lp;
+                if let Some(choice) = self.base.choices.get(addr) {
+                    self.trace.choices.insert(addr.clone(), choice.clone());
+                }
+                x
+            }
+            Err(e) => {
+                if self.warn_on_error {
+                    eprintln!("Warning: Failed to get u64 at {}: {}", addr, e);
+                }
+                self.trace.log_prior += f64::NEG_INFINITY;
+                0
+            }
+        }
+    }
+
+    fn on_sample_usize(&mut self, addr: &Address, dist: &dyn Distribution<usize>) -> usize {
+        match self.base.get_usize_result(addr) {
+            Ok(x) => {
+                let lp = dist.log_prob(&x);
+                self.trace.log_prior += lp;
+                if let Some(choice) = self.base.choices.get(addr) {
+                    self.trace.choices.insert(addr.clone(), choice.clone());
+                }
+                x
+            }
+            Err(e) => {
+                if self.warn_on_error {
+                    eprintln!("Warning: Failed to get usize at {}: {}", addr, e);
+                }
+                self.trace.log_prior += f64::NEG_INFINITY;
+                0
+            }
+        }
+    }
+
+    fn on_observe_f64(&mut self, _: &Address, dist: &dyn Distribution<f64>, value: f64) {
+        self.trace.log_likelihood += dist.log_prob(&value);
+    }
+
+    fn on_observe_bool(&mut self, _: &Address, dist: &dyn Distribution<bool>, value: bool) {
+        self.trace.log_likelihood += dist.log_prob(&value);
+    }
+
+    fn on_observe_u64(&mut self, _: &Address, dist: &dyn Distribution<u64>, value: u64) {
+        self.trace.log_likelihood += dist.log_prob(&value);
+    }
+
+    fn on_observe_usize(&mut self, _: &Address, dist: &dyn Distribution<usize>, value: usize) {
+        self.trace.log_likelihood += dist.log_prob(&value);
+    }
+
+    fn on_factor(&mut self, logw: f64) {
+        self.trace.log_factors += logw;
+    }
+
+    fn finish(self) -> Trace {
+        self.trace
+    }
 }
 
 impl Handler for ScoreGivenTrace {

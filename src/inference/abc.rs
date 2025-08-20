@@ -42,7 +42,7 @@
 //!
 //! let samples = abc_scalar_summary(
 //!     &mut rng,
-//!     || sample(addr!("mu"), Normal { mu: 0.0, sigma: 2.0 }),
+//!     || sample(addr!("mu"), Normal::new(0.0, 2.0).unwrap()),
 //!     |trace| {
 //!         if let Some(choice) = trace.choices.get(&addr!("mu")) {
 //!             if let ChoiceValue::F64(mu) = choice.value {
@@ -263,7 +263,7 @@ impl DistanceFunction<Vec<f64>> for SummaryStatsDistance {
 ///
 /// let samples = abc_scalar_summary(
 ///     &mut rng,
-///     || sample(addr!("mu"), Normal { mu: 0.0, sigma: 2.0 }),
+///     || sample(addr!("mu"), Normal::new(0.0, 2.0).unwrap()),
 ///     |trace| {
 ///         if let Some(choice) = trace.choices.get(&addr!("mu")) {
 ///             if let ChoiceValue::F64(mu) = choice.value {
@@ -364,7 +364,7 @@ pub fn abc_rejection<A, T, R: Rng>(
 ///
 /// let samples = abc_smc(
 ///     &mut rng,
-///     || sample(addr!("mu"), Normal { mu: 0.0, sigma: 1.0 }),
+///     || sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap()),
 ///     |trace| {
 ///         if let Some(choice) = trace.choices.get(&addr!("mu")) {
 ///             if let ChoiceValue::F64(mu) = choice.value {
@@ -497,7 +497,7 @@ pub fn abc_smc<A, T, R: Rng>(
 ///
 /// let samples = abc_scalar_summary(
 ///     &mut rng,
-///     || sample(addr!("mu"), Normal { mu: 0.0, sigma: 2.0 }),
+///     || sample(addr!("mu"), Normal::new(0.0, 2.0).unwrap()),
 ///     |trace| {
 ///         // Extract mu parameter and return it as summary
 ///         if let Some(choice) = trace.choices.get(&addr!("mu")) {

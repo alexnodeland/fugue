@@ -4,33 +4,12 @@ use rand::{rngs::StdRng, SeedableRng};
 
 /// Simple 2-component mixture model.
 fn mixture_model(obs: f64) -> Model<(f64, f64)> {
-    sample(
-        addr!("weight"),
-        Beta {
-            alpha: 1.0,
-            beta: 1.0,
-        },
-    )
-    .bind(move |weight| {
-        sample(
-            addr!("mu1"),
-            Normal {
-                mu: -2.0,
-                sigma: 1.0,
-            },
-        )
-        .bind(move |mu1| {
-            sample(
-                addr!("mu2"),
-                Normal {
-                    mu: 2.0,
-                    sigma: 1.0,
-                },
-            )
-            .bind(move |mu2| {
-                sample(addr!("component"), Bernoulli { p: weight }).bind(move |comp| {
+    sample(addr!("weight"), Beta::new(1.0, 1.0).unwrap()).bind(move |weight| {
+        sample(addr!("mu1"), Normal::new(-2.0, 1.0).unwrap()).bind(move |mu1| {
+            sample(addr!("mu2"), Normal::new(2.0, 1.0).unwrap()).bind(move |mu2| {
+                sample(addr!("component"), Bernoulli::new(weight).unwrap()).bind(move |comp| {
                     let mu = if comp { mu2 } else { mu1 };
-                    observe(addr!("y"), Normal { mu, sigma: 1.0 }, obs)
+                    observe(addr!("y"), Normal::new(mu, 1.0).unwrap(), obs)
                         .bind(move |_| pure((mu1, mu2)))
                 })
             })
