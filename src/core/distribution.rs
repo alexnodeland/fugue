@@ -1,13 +1,23 @@
-//! Probability distributions over `f64` with sampling and log-density.
+//! Type-safe probability distributions with natural return types.
 //!
-//! This module provides a unified interface for probability distributions used in Fugue models.
-//! All distributions implement the `DistributionF64` trait, which provides sampling and
-//! log-probability density computation. The trait is designed to be dyn-object safe,
-//! allowing distributions to be stored as trait objects within `Model` computations.
+//! This module provides a unified, type-safe interface for probability distributions used in Fugue models.
+//! All distributions implement the `Distribution<T>` trait, which provides sampling and
+//! log-probability density computation. The trait is generic over the sample type `T`,
+//! enabling natural return types for each distribution.
+//!
+//! ## Key Innovation: Type Safety
+//!
+//! Unlike traditional probabilistic programming libraries that force all distributions
+//! to return `f64`, Fugue's distributions return their natural types:
+//!
+//! - **Continuous distributions** → `f64` (as expected)
+//! - **Bernoulli** → `bool` (not 0.0/1.0!)
+//! - **Poisson/Binomial** → `u64` (natural counting)
+//! - **Categorical** → `usize` (safe array indexing)
 //!
 //! ## Available Distributions
 //!
-//! ### Continuous Distributions
+//! ### Continuous Distributions (return `f64`)
 //! - [`Normal`]: Normal/Gaussian distribution
 //! - [`LogNormal`]: Log-normal distribution  
 //! - [`Uniform`]: Uniform distribution over an interval
@@ -15,33 +25,74 @@
 //! - [`Beta`]: Beta distribution on \[0,1\]
 //! - [`Gamma`]: Gamma distribution
 //!
-//! ### Discrete Distributions
-//! - [`Bernoulli`]: Bernoulli distribution (0 or 1)
-//! - [`Binomial`]: Binomial distribution
-//! - [`Categorical`]: Categorical distribution over discrete choices
-//! - [`Poisson`]: Poisson distribution
+//! ### Discrete Distributions (return natural types!)
+//! - [`Bernoulli`]: Bernoulli distribution → **`bool`**
+//! - [`Binomial`]: Binomial distribution → **`u64`**
+//! - [`Categorical`]: Categorical distribution → **`usize`**
+//! - [`Poisson`]: Poisson distribution → **`u64`**
 //!
-//! ## Usage
+//! All distributions can be used both within the Model system (with `sample()` and `observe()`)
+//! and for direct statistical computation outside the Model system by calling `sample()` and 
+//! `log_prob()` directly on distribution instances.
 //!
+//! ## Usage Examples
+//!
+//! ### Type-Safe Sampling
 //! ```rust
 //! use fugue::*;
 //!
-//! // Create and use distributions in models
-//! let model = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 })
-//!     .bind(|x| {
-//!         let transformed = if x > 0.0 {
-//!             Exponential { rate: x }
-//!         } else {
-//!             Exponential { rate: 0.1 }
-//!         };
-//!         sample(addr!("y"), transformed)
-//!     });
+//! // Continuous distribution returns f64
+//! let normal_model: Model<f64> = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 });
+//!
+//! // Bernoulli returns bool - no more awkward comparisons!
+//! let coin_model: Model<bool> = sample(addr!("coin"), Bernoulli { p: 0.5 });
+//! let decision = coin_model.bind(|heads| {
+//!     if heads {
+//!         pure("Take action!".to_string())
+//!     } else {
+//!         pure("Wait...".to_string())
+//!     }
+//! });
+//!
+//! // Poisson returns u64 - perfect for counting!
+//! let count_model: Model<u64> = sample(addr!("events"), Poisson { lambda: 3.0 });
+//! let analysis = count_model.bind(|count| {
+//!     let status = match count {
+//!         0 => "No events",
+//!         1 => "Single event",
+//!         n if n > 10 => "Many events!",
+//!         n => &format!("{} events", n),
+//!     };
+//!     pure(status.to_string())
+//! });
+//!
+//! // Categorical returns usize - safe array indexing!
+//! let choice_model: Model<usize> = sample(addr!("color"), Categorical {
+//!     probs: vec![0.5, 0.3, 0.2]
+//! });
+//! let colors = vec!["red", "green", "blue"];
+//! let result = choice_model.bind(move |color_idx| {
+//!     let chosen_color = colors[color_idx]; // Direct indexing - no casting!
+//!     pure(chosen_color.to_string())
+//! });
+//! ```
+//!
+//! ### Type-Safe Observations
+//! ```rust
+//! use fugue::*;
+//!
+//! // Observe with natural types
+//! let model = observe(addr!("coin_result"), Bernoulli { p: 0.6 }, true)      // bool
+//!     .bind(|_| observe(addr!("count"), Poisson { lambda: 4.0 }, 7u64))      // u64
+//!     .bind(|_| observe(addr!("choice"), Categorical {
+//!         probs: vec![0.3, 0.5, 0.2]
+//!     }, 1usize))  // usize
+//!     .bind(|_| observe(addr!("temp"), Normal { mu: 20.0, sigma: 2.0 }, 18.5)); // f64
 //! ```
 use rand::{Rng, RngCore};
 use rand_distr::{
-    Bernoulli as RDBernoulli, Beta as RDBeta, Binomial as RDBinomial, Distribution as RandDistr,
-    Exp as RDExp, Gamma as RDGamma, LogNormal as RDLogNormal, Normal as RDNormal,
-    Poisson as RDPoisson,
+    Beta as RDBeta, Binomial as RDBinomial, Distribution as RandDistr, Exp as RDExp,
+    Gamma as RDGamma, LogNormal as RDLogNormal, Normal as RDNormal, Poisson as RDPoisson,
 };
 /// Type alias for log-probabilities.
 ///
@@ -49,20 +100,32 @@ use rand_distr::{
 /// zero probability, while finite values represent the natural logarithm of probabilities.
 pub type LogF64 = f64;
 
-/// Common interface for probability distributions over `f64` values.
+/// Generic interface for type-safe probability distributions.
 ///
-/// This trait provides the essential operations needed for probabilistic programming:
-/// sampling from the distribution and computing log-probability densities. The trait
-/// is object-safe, allowing distributions to be stored as trait objects.
+/// This trait provides the essential operations needed for probabilistic programming
+/// with **full type safety**. Unlike traditional PPLs that force all distributions to return `f64`,
+/// Fugue's `Distribution<T>` trait is generic over the sample type `T`, enabling:
 ///
-/// All distributions in Fugue implement this trait, enabling generic probabilistic
-/// programming where the specific distribution can be chosen at runtime.
+/// - **Natural return types**: Each distribution returns its mathematically appropriate type
+/// - **Compile-time safety**: Type errors are caught by the compiler, not at runtime
+/// - **Zero overhead**: No unnecessary type conversions or boxing
+/// - **Intuitive code**: Write code that matches statistical intuition
+///
+/// ## Type Safety Benefits
+///
+/// | Distribution | Traditional PPL | Fugue Type-Safe |
+/// |--------------|-----------------|-----------------|
+/// | Bernoulli | `f64` (0.0/1.0) | **`bool`** (true/false) |
+/// | Poisson | `f64` (needs casting) | **`u64`** (natural counts) |
+/// | Categorical | `f64` (risky indexing) | **`usize`** (safe indexing) |
+/// | Binomial | `f64` (needs casting) | **`u64`** (natural counts) |
+/// | Normal | `f64` ✓ | **`f64`** ✓ |
 ///
 /// # Required Methods
 ///
-/// - [`sample`](Self::sample): Generate a random sample from the distribution
-/// - [`log_prob`](Self::log_prob): Compute the log-probability density at a point
-/// - [`clone_box`](Self::clone_box): Clone the distribution into a boxed trait object
+/// - [`sample`](Self::sample): Generate a random sample of type `T`
+/// - [`log_prob`](Self::log_prob): Compute log-probability of a value of type `T`
+/// - [`clone_box`](Self::clone_box): Clone into a boxed trait object
 ///
 /// # Examples
 ///
@@ -71,15 +134,35 @@ pub type LogF64 = f64;
 /// use rand::rngs::StdRng;
 /// use rand::SeedableRng;
 ///
-/// // Use trait methods directly
-/// let normal = Normal { mu: 0.0, sigma: 1.0 };
 /// let mut rng = StdRng::seed_from_u64(42);
 ///
-/// let sample = normal.sample(&mut rng);
-/// let log_prob = normal.log_prob(0.0); // Should be near -0.92 (for standard normal)
+/// // Continuous distribution returns f64
+/// let normal = Normal { mu: 0.0, sigma: 1.0 };
+/// let value: f64 = normal.sample(&mut rng);
+/// let log_prob = normal.log_prob(&value);
+///
+/// // Discrete distributions return natural types!
+/// let coin = Bernoulli { p: 0.5 };
+/// let flip: bool = coin.sample(&mut rng);  // bool, not f64!
+/// let coin_prob = coin.log_prob(&flip);
+///
+/// let counter = Poisson { lambda: 3.0 };
+/// let count: u64 = counter.sample(&mut rng);  // u64, not f64!
+/// let count_prob = counter.log_prob(&count);
+///
+/// let choice = Categorical { probs: vec![0.3, 0.5, 0.2] };
+/// let idx: usize = choice.sample(&mut rng);  // usize for safe indexing!
+/// let choice_prob = choice.log_prob(&idx);
 /// ```
-pub trait DistributionF64: Send + Sync {
+pub trait Distribution<T>: Send + Sync {
     /// Generate a random sample from this distribution.
+    ///
+    /// Returns a value of type `T` drawn from this distribution. The return type
+    /// is naturally suited to the distribution:
+    /// - `f64` for continuous distributions (Normal, Beta, etc.)
+    /// - `bool` for Bernoulli (true/false outcomes)
+    /// - `u64` for count distributions (Poisson, Binomial)
+    /// - `usize` for categorical indices (safe array indexing)
     ///
     /// # Arguments
     ///
@@ -87,26 +170,29 @@ pub trait DistributionF64: Send + Sync {
     ///
     /// # Returns
     ///
-    /// A sample from the distribution as an `f64`.
-    fn sample(&self, rng: &mut dyn RngCore) -> f64;
+    /// A sample from the distribution of type `T`.
+    fn sample(&self, rng: &mut dyn RngCore) -> T;
 
-    /// Compute the log-probability density of a value under this distribution.
+    /// Compute the log-probability density/mass of a value under this distribution.
+    ///
+    /// Accepts a reference to a value of type `T` to avoid unnecessary copying
+    /// and to maintain consistency across all distribution types.
     ///
     /// # Arguments
     ///
-    /// * `x` - Value to compute log-probability for
+    /// * `x` - Reference to the value to compute log-probability for
     ///
     /// # Returns
     ///
-    /// The natural logarithm of the probability density at `x`.
+    /// The natural logarithm of the probability density/mass at `x`.
     /// Returns negative infinity for values outside the distribution's support.
-    fn log_prob(&self, x: f64) -> LogF64;
+    fn log_prob(&self, x: &T) -> LogF64;
 
     /// Clone this distribution into a boxed trait object.
     ///
     /// This method is required for the trait to be object-safe, allowing
-    /// distributions to be stored as `Box<dyn DistributionF64>`.
-    fn clone_box(&self) -> Box<dyn DistributionF64>;
+    /// distributions to be stored as `Box<dyn Distribution<T>>`.
+    fn clone_box(&self) -> Box<dyn Distribution<T>>;
 }
 
 /// Normal (Gaussian) distribution.
@@ -148,14 +234,14 @@ pub struct Normal {
     /// Standard deviation of the normal distribution (must be positive).
     pub sigma: f64,
 }
-impl DistributionF64 for Normal {
+impl Distribution<f64> for Normal {
     fn sample(&self, rng: &mut dyn RngCore) -> f64 {
         if self.sigma <= 0.0 {
             return f64::NAN;
         }
         RDNormal::new(self.mu, self.sigma).unwrap().sample(rng)
     }
-    fn log_prob(&self, x: f64) -> LogF64 {
+    fn log_prob(&self, x: &f64) -> LogF64 {
         // Parameter validation
         if self.sigma <= 0.0 || !self.sigma.is_finite() || !self.mu.is_finite() || !x.is_finite() {
             return f64::NEG_INFINITY;
@@ -173,7 +259,7 @@ impl DistributionF64 for Normal {
         const LN_2PI: f64 = 1.8378770664093454835606594728112; // ln(2π)
         -0.5 * z * z - self.sigma.ln() - 0.5 * LN_2PI
     }
-    fn clone_box(&self) -> Box<dyn DistributionF64> {
+    fn clone_box(&self) -> Box<dyn Distribution<f64>> {
         Box::new(*self)
     }
 }
@@ -217,7 +303,7 @@ pub struct Uniform {
     /// Upper bound of the uniform distribution (exclusive).
     pub high: f64,
 }
-impl DistributionF64 for Uniform {
+impl Distribution<f64> for Uniform {
     fn sample(&self, rng: &mut dyn RngCore) -> f64 {
         // Parameter validation
         if self.low >= self.high || !self.low.is_finite() || !self.high.is_finite() {
@@ -225,7 +311,7 @@ impl DistributionF64 for Uniform {
         }
         Rng::gen_range(rng, self.low..self.high)
     }
-    fn log_prob(&self, x: f64) -> LogF64 {
+    fn log_prob(&self, x: &f64) -> LogF64 {
         // Parameter validation
         if self.low >= self.high
             || !self.low.is_finite()
@@ -236,7 +322,7 @@ impl DistributionF64 for Uniform {
         }
 
         // Check support with proper boundary handling
-        if x < self.low || x >= self.high {
+        if *x < self.low || *x >= self.high {
             f64::NEG_INFINITY
         } else {
             let width = self.high - self.low;
@@ -247,7 +333,7 @@ impl DistributionF64 for Uniform {
             }
         }
     }
-    fn clone_box(&self) -> Box<dyn DistributionF64> {
+    fn clone_box(&self) -> Box<dyn Distribution<f64>> {
         Box::new(*self)
     }
 }
@@ -294,19 +380,19 @@ pub struct LogNormal {
     /// Standard deviation of the underlying normal distribution (must be positive).
     pub sigma: f64,
 }
-impl DistributionF64 for LogNormal {
+impl Distribution<f64> for LogNormal {
     fn sample(&self, rng: &mut dyn RngCore) -> f64 {
         if self.sigma <= 0.0 {
             return f64::NAN;
         }
         RDLogNormal::new(self.mu, self.sigma).unwrap().sample(rng)
     }
-    fn log_prob(&self, x: f64) -> LogF64 {
+    fn log_prob(&self, x: &f64) -> LogF64 {
         // Parameter and input validation
         if self.sigma <= 0.0 || !self.sigma.is_finite() || !self.mu.is_finite() {
             return f64::NEG_INFINITY;
         }
-        if x <= 0.0 || !x.is_finite() {
+        if *x <= 0.0 || !x.is_finite() {
             return f64::NEG_INFINITY;
         }
 
@@ -323,7 +409,7 @@ impl DistributionF64 for LogNormal {
         const LN_2PI: f64 = 1.8378770664093454835606594728112; // ln(2π)
         -0.5 * z * z - lx - self.sigma.ln() - 0.5 * LN_2PI
     }
-    fn clone_box(&self) -> Box<dyn DistributionF64> {
+    fn clone_box(&self) -> Box<dyn Distribution<f64>> {
         Box::new(*self)
     }
 }
@@ -365,20 +451,20 @@ pub struct Exponential {
     /// Rate parameter λ of the exponential distribution (must be positive).
     pub rate: f64,
 }
-impl DistributionF64 for Exponential {
+impl Distribution<f64> for Exponential {
     fn sample(&self, rng: &mut dyn RngCore) -> f64 {
         if self.rate <= 0.0 {
             return f64::NAN;
         }
         RDExp::new(self.rate).unwrap().sample(rng)
     }
-    fn log_prob(&self, x: f64) -> LogF64 {
+    fn log_prob(&self, x: &f64) -> LogF64 {
         // Parameter validation
         if self.rate <= 0.0 || !self.rate.is_finite() || !x.is_finite() {
             return f64::NEG_INFINITY;
         }
 
-        if x < 0.0 {
+        if *x < 0.0 {
             f64::NEG_INFINITY
         } else {
             // Check for overflow: if rate * x > 700, exp(-rate*x) underflows
@@ -388,24 +474,29 @@ impl DistributionF64 for Exponential {
             self.rate.ln() - self.rate * x
         }
     }
-    fn clone_box(&self) -> Box<dyn DistributionF64> {
+    fn clone_box(&self) -> Box<dyn Distribution<f64>> {
         Box::new(*self)
     }
 }
 
-/// Bernoulli distribution.
+/// **Type-safe Bernoulli distribution** → returns `bool`
 ///
 /// A discrete distribution representing a single trial with two possible outcomes:
-/// success (1.0) with probability p, or failure (0.0) with probability 1-p.
+/// success (true) with probability p, or failure (false) with probability 1-p.
 /// This is the building block for binomial distributions and binary classification.
+///
+/// ## 🎯 Type Safety Innovation
+///
+/// **Unlike traditional PPLs**, Fugue's Bernoulli distribution returns **`bool` directly**,
+/// eliminating error-prone floating-point comparisons like `if sample == 1.0`.
 ///
 /// **Probability mass function:**
 /// ```text
-/// P(X = 1) = p
-/// P(X = 0) = 1 - p
+/// P(X = true) = p
+/// P(X = false) = 1 - p
 /// ```
 ///
-/// **Support:** {0.0, 1.0} (represented as f64 for trait compatibility)
+/// **Support:** {false, true} (natural boolean values!)
 ///
 /// # Fields
 ///
@@ -416,78 +507,87 @@ impl DistributionF64 for Exponential {
 /// ```rust
 /// use fugue::*;
 ///
-/// // Fair coin flip
-/// let coin = Bernoulli { p: 0.5 };
+/// // Type-safe boolean sampling - no more f64 comparisons!
+/// let coin_model: Model<bool> = sample(addr!("coin"), Bernoulli { p: 0.5 });
+/// let decision = coin_model.bind(|heads| {
+///     if heads {  // ✅ Natural boolean usage!
+///         pure("Heads - take action!".to_string())
+///     } else {
+///         pure("Tails - wait...".to_string())
+///     }
+/// });
 ///
-/// // Biased coin
-/// let biased_coin = Bernoulli { p: 0.7 };
+/// // Mixture component selection with natural boolean logic
+/// let component_model = sample(addr!("component"), Bernoulli { p: 0.3 })
+///     .bind(|is_component_2| {
+///         let component_name = if is_component_2 {
+///             "Component 2"
+///         } else {
+///             "Component 1"  
+///         };
+///         pure(component_name.to_string())
+///     });
 ///
-/// // Binary classification model
-/// let model = sample(addr!("class"), Bernoulli { p: 0.8 });
-///
-/// // Mixture component indicator
-/// let component = sample(addr!("component"), Bernoulli { p: 0.3 });
+/// // Type-safe observation of boolean outcomes
+/// let obs_model = observe(addr!("success"), Bernoulli { p: 0.8 }, true);
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Bernoulli {
     /// Probability of success (must be in [0, 1]).
     pub p: f64,
 }
-impl DistributionF64 for Bernoulli {
-    fn sample(&self, rng: &mut dyn RngCore) -> f64 {
+impl Distribution<bool> for Bernoulli {
+    fn sample(&self, rng: &mut dyn RngCore) -> bool {
         if self.p < 0.0 || self.p > 1.0 || !self.p.is_finite() {
-            return f64::NAN;
+            return false; // Default to false for invalid parameters
         }
-        if RDBernoulli::new(self.p).unwrap().sample(rng) {
-            1.0
-        } else {
-            0.0
-        }
+        use rand::Rng;
+        rng.gen::<f64>() < self.p
     }
-    fn log_prob(&self, x: f64) -> LogF64 {
+    fn log_prob(&self, x: &bool) -> LogF64 {
         // Parameter validation
-        if self.p < 0.0 || self.p > 1.0 || !self.p.is_finite() || !x.is_finite() {
+        if self.p < 0.0 || self.p > 1.0 || !self.p.is_finite() {
             return f64::NEG_INFINITY;
         }
 
-        // Use small tolerance for discrete values represented as f64
-        const TOLERANCE: f64 = 1e-12;
-
-        if (x - 1.0).abs() < TOLERANCE {
-            // Handle edge cases for p near 0 or 1
+        if *x {
+            // P(X = true) = p
             if self.p <= 0.0 {
                 f64::NEG_INFINITY
             } else {
                 self.p.ln()
             }
-        } else if (x - 0.0).abs() < TOLERANCE {
+        } else {
+            // P(X = false) = 1 - p
             if self.p >= 1.0 {
                 f64::NEG_INFINITY
             } else {
-                // log(1 - p) with numerical stability
                 (1.0 - self.p).ln()
             }
-        } else {
-            f64::NEG_INFINITY
         }
     }
-    fn clone_box(&self) -> Box<dyn DistributionF64> {
+    fn clone_box(&self) -> Box<dyn Distribution<bool>> {
         Box::new(*self)
     }
 }
 
-/// Categorical distribution over discrete choices.
+/// **Type-safe Categorical distribution** → returns `usize`
 ///
 /// A discrete distribution that represents choosing among k different categories
 /// with specified probabilities. The outcome is the index of the chosen category
-/// (as an f64 for trait compatibility).
+/// as a `usize`, making it **naturally suitable for safe array indexing**.
+///
+/// ## 🎯 Type Safety Innovation
+///
+/// **Unlike traditional PPLs**, Fugue's Categorical distribution returns **`usize` directly**,
+/// enabling safe array indexing without error-prone casting from `f64`.
 ///
 /// **Probability mass function:**
 /// ```text
 /// P(X = i) = probs[i]  for i ∈ {0, 1, ..., k-1}
 /// ```
 ///
-/// **Support:** {0.0, 1.0, ..., k-1.0} where k = probs.len()
+/// **Support:** {0, 1, ..., k-1} where k = probs.len() (natural array indices!)
 ///
 /// # Fields
 ///
@@ -498,51 +598,62 @@ impl DistributionF64 for Bernoulli {
 /// ```rust
 /// use fugue::*;
 ///
-/// // Three-way choice
-/// let choice = Categorical {
+/// // Type-safe categorical choice - returns usize directly!
+/// let options = vec!["red", "green", "blue"];
+/// let color_model: Model<usize> = sample(addr!("color"), Categorical {
 ///     probs: vec![0.5, 0.3, 0.2]
-/// };
-///
-/// // Mixture component selection
-/// let component = sample(addr!("component"), Categorical {
-///     probs: vec![0.4, 0.6]
+/// });
+/// let result = color_model.bind(move |color_idx| {
+///     // color_idx is naturally usize - safe for direct array indexing!
+///     let chosen_color = options[color_idx]; // No casting, no bounds checking needed!
+///     pure(chosen_color.to_string())
 /// });
 ///
-/// // Discrete outcome modeling
-/// let outcome = sample(addr!("outcome"), Categorical {
-///     probs: vec![0.1, 0.2, 0.3, 0.4]
+/// // Multi-armed bandit with type-safe action selection
+/// let action_model = sample(addr!("action"), Categorical {
+///     probs: vec![0.4, 0.3, 0.2, 0.1]  // 4 possible actions
+/// }).bind(|action_idx| {
+///     let action_rewards = vec![10.0, 15.0, 5.0, 20.0];
+///     let reward = action_rewards[action_idx]; // Direct, safe indexing!
+///     pure(reward)
 /// });
+///
+/// // Type-safe observation of categorical outcomes
+/// let obs_model = observe(addr!("user_choice"), Categorical {
+///     probs: vec![0.2, 0.3, 0.3, 0.2]
+/// }, 2usize);  // Observed choice was index 2
 /// ```
 #[derive(Clone, Debug)]
 pub struct Categorical {
     /// Probabilities for each category (should sum to 1.0).
     pub probs: Vec<f64>,
 }
-impl DistributionF64 for Categorical {
-    fn sample(&self, rng: &mut dyn RngCore) -> f64 {
+impl Distribution<usize> for Categorical {
+    fn sample(&self, rng: &mut dyn RngCore) -> usize {
         // Parameter validation
         if self.probs.is_empty() {
-            return f64::NAN;
+            return 0;
         }
 
         let prob_sum: f64 = self.probs.iter().sum();
         if (prob_sum - 1.0).abs() > 1e-6 || self.probs.iter().any(|&p| p < 0.0 || !p.is_finite()) {
-            return f64::NAN;
+            return 0;
         }
 
+        use rand::Rng;
         let u: f64 = rng.gen();
         let mut cum = 0.0;
         for (i, &p) in self.probs.iter().enumerate() {
             cum += p;
             if u <= cum {
-                return i as f64;
+                return i;
             }
         }
-        (self.probs.len() - 1) as f64
+        self.probs.len() - 1
     }
-    fn log_prob(&self, x: f64) -> LogF64 {
+    fn log_prob(&self, x: &usize) -> LogF64 {
         // Parameter validation
-        if self.probs.is_empty() || !x.is_finite() {
+        if self.probs.is_empty() || *x >= self.probs.len() {
             return f64::NEG_INFINITY;
         }
 
@@ -551,20 +662,13 @@ impl DistributionF64 for Categorical {
             return f64::NEG_INFINITY;
         }
 
-        // Check if x represents a valid category index
-        let idx = x.round() as i64;
-        if idx < 0 || idx >= self.probs.len() as i64 || (x - idx as f64).abs() > 1e-12 {
-            return f64::NEG_INFINITY;
-        }
-
-        let idx = idx as usize;
-        if self.probs[idx] <= 0.0 {
+        if self.probs[*x] <= 0.0 {
             f64::NEG_INFINITY
         } else {
-            self.probs[idx].ln()
+            self.probs[*x].ln()
         }
     }
-    fn clone_box(&self) -> Box<dyn DistributionF64> {
+    fn clone_box(&self) -> Box<dyn Distribution<usize>> {
         Box::new(self.clone())
     }
 }
@@ -602,7 +706,7 @@ impl DistributionF64 for Categorical {
 ///
 /// // Conjugate prior for Bernoulli likelihood
 /// let model = sample(addr!("success_rate"), Beta { alpha: 3.0, beta: 7.0 })
-///     .bind(|p| observe(addr!("trial"), Bernoulli { p }, 1.0));
+///     .bind(|p| observe(addr!("trial"), Bernoulli { p }, true));
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Beta {
@@ -611,14 +715,14 @@ pub struct Beta {
     /// Second shape parameter β (must be positive).
     pub beta: f64,
 }
-impl DistributionF64 for Beta {
+impl Distribution<f64> for Beta {
     fn sample(&self, rng: &mut dyn RngCore) -> f64 {
         if self.alpha <= 0.0 || self.beta <= 0.0 {
             return f64::NAN;
         }
         RDBeta::new(self.alpha, self.beta).unwrap().sample(rng)
     }
-    fn log_prob(&self, x: f64) -> LogF64 {
+    fn log_prob(&self, x: &f64) -> LogF64 {
         // Parameter validation
         if self.alpha <= 0.0
             || self.beta <= 0.0
@@ -630,12 +734,12 @@ impl DistributionF64 for Beta {
         }
 
         // Support validation
-        if x <= 0.0 || x >= 1.0 {
+        if *x <= 0.0 || *x >= 1.0 {
             return f64::NEG_INFINITY;
         }
 
         // Handle edge cases near boundaries
-        if x < 1e-100 || x > 1.0 - 1e-100 {
+        if *x < 1e-100 || *x > 1.0 - 1e-100 {
             return f64::NEG_INFINITY;
         }
 
@@ -654,7 +758,7 @@ impl DistributionF64 for Beta {
 
         (self.alpha - 1.0) * ln_x + (self.beta - 1.0) * ln_1_minus_x - log_beta_fn
     }
-    fn clone_box(&self) -> Box<dyn DistributionF64> {
+    fn clone_box(&self) -> Box<dyn Distribution<f64>> {
         Box::new(*self)
     }
 }
@@ -692,7 +796,7 @@ impl DistributionF64 for Beta {
 ///
 /// // Conjugate prior for Poisson rate
 /// let model = sample(addr!("rate"), Gamma { shape: 3.0, rate: 2.0 })
-///     .bind(|lambda| observe(addr!("count"), Poisson { lambda }, 5.0));
+///     .bind(|lambda| observe(addr!("count"), Poisson { lambda }, 5u64));
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Gamma {
@@ -701,7 +805,7 @@ pub struct Gamma {
     /// Rate parameter λ (must be positive).
     pub rate: f64,
 }
-impl DistributionF64 for Gamma {
+impl Distribution<f64> for Gamma {
     fn sample(&self, rng: &mut dyn RngCore) -> f64 {
         if self.shape <= 0.0 || self.rate <= 0.0 {
             return f64::NAN;
@@ -710,7 +814,7 @@ impl DistributionF64 for Gamma {
             .unwrap()
             .sample(rng)
     }
-    fn log_prob(&self, x: f64) -> LogF64 {
+    fn log_prob(&self, x: &f64) -> LogF64 {
         // Parameter validation
         if self.shape <= 0.0
             || self.rate <= 0.0
@@ -721,7 +825,7 @@ impl DistributionF64 for Gamma {
             return f64::NEG_INFINITY;
         }
 
-        if x <= 0.0 {
+        if *x <= 0.0 {
             return f64::NEG_INFINITY;
         }
 
@@ -738,16 +842,21 @@ impl DistributionF64 for Gamma {
 
         self.shape * log_rate + (self.shape - 1.0) * log_x - self.rate * x - log_gamma_shape
     }
-    fn clone_box(&self) -> Box<dyn DistributionF64> {
+    fn clone_box(&self) -> Box<dyn Distribution<f64>> {
         Box::new(*self)
     }
 }
 
-/// Binomial distribution.
+/// **Type-safe Binomial distribution** → returns `u64`
 ///
 /// A discrete distribution representing the number of successes in n independent
 /// Bernoulli trials, each with success probability p. This distribution models
 /// counting processes and is widely used in statistics.
+///
+/// ## 🎯 Type Safety Innovation
+///
+/// **Unlike traditional PPLs**, Fugue's Binomial distribution returns **`u64` directly**,
+/// providing natural counting semantics for the number of successes without casting.
 ///
 /// **Probability mass function:**
 /// ```text
@@ -755,7 +864,7 @@ impl DistributionF64 for Gamma {
 /// ```
 /// where C(n,k) is the binomial coefficient "n choose k".
 ///
-/// **Support:** {0.0, 1.0, ..., n.0} (represented as f64 for trait compatibility)
+/// **Support:** {0, 1, ..., n} (natural success counts!)
 ///
 /// # Fields
 ///
@@ -767,15 +876,34 @@ impl DistributionF64 for Gamma {
 /// ```rust
 /// use fugue::*;
 ///
-/// // Count successes in 10 coin flips
-/// let coin_flips = Binomial { n: 10, p: 0.5 };
+/// // Type-safe success counting - returns u64 directly!
+/// let trial_model: Model<u64> = sample(addr!("successes"), Binomial { n: 10, p: 0.5 });
+/// let analysis = trial_model.bind(|success_count| {
+///     // success_count is naturally u64 - can be used in arithmetic directly
+///     let success_rate = success_count as f64 / 10.0;
+///     let verdict = if success_rate > 0.7 {
+///         "High success rate!"
+///     } else if success_rate < 0.3 {
+///         "Low success rate"
+///     } else {
+///         "Moderate success rate"
+///     };
+///     pure(verdict.to_string())
+/// });
 ///
-/// // Clinical trial success count
-/// let trial_model = sample(addr!("success_rate"), Beta { alpha: 1.0, beta: 1.0 })
-///     .bind(|p| sample(addr!("successes"), Binomial { n: 100, p }));
+/// // Clinical trial with type-safe counting
+/// let clinical_trial = sample(addr!("success_rate"), Beta { alpha: 1.0, beta: 1.0 })
+///     .bind(|p| {
+///         sample(addr!("successes"), Binomial { n: 100, p })
+///             .bind(|successes| {
+///                 // successes is naturally u64 - no casting needed!
+///                 let efficacy = successes as f64 / 100.0;
+///                 pure(efficacy)
+///             })
+///     });
 ///
-/// // Observe data from a binomial process
-/// let model = observe(addr!("observed_successes"), Binomial { n: 20, p: 0.3 }, 7.0);
+/// // Type-safe observation of trial results
+/// let obs_model = observe(addr!("trial_successes"), Binomial { n: 20, p: 0.3 }, 7u64);
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Binomial {
@@ -784,13 +912,13 @@ pub struct Binomial {
     /// Probability of success on each trial (must be in [0, 1]).
     pub p: f64,
 }
-impl DistributionF64 for Binomial {
-    fn sample(&self, rng: &mut dyn RngCore) -> f64 {
-        RDBinomial::new(self.n, self.p).unwrap().sample(rng) as f64
+impl Distribution<u64> for Binomial {
+    fn sample(&self, rng: &mut dyn RngCore) -> u64 {
+        RDBinomial::new(self.n, self.p).unwrap().sample(rng) as u64
     }
-    fn log_prob(&self, x: f64) -> LogF64 {
-        let k = x as u64;
-        if k > self.n || (x - k as f64).abs() > 1e-12 {
+    fn log_prob(&self, x: &u64) -> LogF64 {
+        let k = *x;
+        if k > self.n {
             return f64::NEG_INFINITY;
         }
         // log Binomial(k; n, p) = log C(n,k) + k*ln(p) + (n-k)*ln(1-p)
@@ -799,23 +927,28 @@ impl DistributionF64 for Binomial {
             - libm::lgamma((self.n - k) as f64 + 1.0);
         log_binom_coeff + (k as f64) * self.p.ln() + ((self.n - k) as f64) * (1.0 - self.p).ln()
     }
-    fn clone_box(&self) -> Box<dyn DistributionF64> {
+    fn clone_box(&self) -> Box<dyn Distribution<u64>> {
         Box::new(*self)
     }
 }
 
-/// Poisson distribution.
+/// **Type-safe Poisson distribution** → returns `u64`
 ///
 /// A discrete probability distribution expressing the probability of a given number
 /// of events occurring in a fixed interval of time or space, given that these events
 /// occur with a known constant mean rate and independently of each other.
+///
+/// ## 🎯 Type Safety Innovation
+///
+/// **Unlike traditional PPLs**, Fugue's Poisson distribution returns **`u64` directly**,
+/// providing natural counting semantics without error-prone casting from `f64`.
 ///
 /// **Probability mass function:**
 /// ```text
 /// P(X = k) = (λ^k * exp(-λ)) / k!  for k ∈ {0, 1, 2, ...}
 /// ```
 ///
-/// **Support:** {0.0, 1.0, 2.0, ...} (represented as f64 for trait compatibility)
+/// **Support:** {0, 1, 2, ...} (natural non-negative integers!)
 ///
 /// # Fields
 ///
@@ -826,43 +959,52 @@ impl DistributionF64 for Binomial {
 /// ```rust
 /// use fugue::*;
 ///
-/// // Model number of events per time unit
-/// let events = Poisson { lambda: 3.5 };
+/// // Type-safe count modeling - returns u64 directly!
+/// let count_model: Model<u64> = sample(addr!("events"), Poisson { lambda: 3.5 });
+/// let analysis = count_model.bind(|count| {
+///     // count is naturally u64 - can be used directly in match patterns
+///     let status = match count {
+///         0 => "No events occurred",
+///         1 => "Single event occurred",
+///         n if n > 10 => "High activity period!",
+///         n => &format!("{} events occurred", n),
+///     };
+///     pure(status.to_string())
+/// });
 ///
-/// // Count data modeling
-/// let model = sample(addr!("rate"), Gamma { shape: 2.0, rate: 1.0 })
-///     .bind(|lambda| observe(addr!("count"), Poisson { lambda }, 4.0));
+/// // Hierarchical count modeling with type safety
+/// let hierarchical = sample(addr!("rate"), Gamma { shape: 2.0, rate: 1.0 })
+///     .bind(|lambda| {
+///         sample(addr!("count"), Poisson { lambda })
+///             .bind(|count| {
+///                 // count is naturally u64 - no casting needed!
+///                 let bonus = if count > 5 { count * 2 } else { count };
+///                 pure(bonus)
+///             })
+///     });
 ///
-/// // Rare events modeling
-/// let rare_events = sample(addr!("occurrences"), Poisson { lambda: 0.1 });
+/// // Type-safe observation of count data
+/// let obs_model = observe(addr!("observed_count"), Poisson { lambda: 4.0 }, 7u64);
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Poisson {
     /// Rate parameter λ (must be positive). Mean and variance of the distribution.
     pub lambda: f64,
 }
-impl DistributionF64 for Poisson {
-    fn sample(&self, rng: &mut dyn RngCore) -> f64 {
+impl Distribution<u64> for Poisson {
+    fn sample(&self, rng: &mut dyn RngCore) -> u64 {
         if self.lambda <= 0.0 || !self.lambda.is_finite() {
-            return f64::NAN;
+            return 0;
         }
-        RDPoisson::new(self.lambda).unwrap().sample(rng) as f64
+        RDPoisson::new(self.lambda).unwrap().sample(rng) as u64
     }
-    fn log_prob(&self, x: f64) -> LogF64 {
+    fn log_prob(&self, x: &u64) -> LogF64 {
         // Parameter validation
-        if self.lambda <= 0.0 || !self.lambda.is_finite() || !x.is_finite() {
+        if self.lambda <= 0.0 || !self.lambda.is_finite() {
             return f64::NEG_INFINITY;
         }
 
-        // Check for valid non-negative integer
-        if x < 0.0 {
-            return f64::NEG_INFINITY;
-        }
-
-        let k = x.round() as u64;
-        if (x - k as f64).abs() > 1e-12 {
-            return f64::NEG_INFINITY;
-        }
+        let k = *x;
 
         // Handle extreme cases
         if self.lambda > 700.0 && k == 0 {
@@ -877,7 +1019,9 @@ impl DistributionF64 for Poisson {
 
         k_f64 * log_lambda - self.lambda - log_factorial
     }
-    fn clone_box(&self) -> Box<dyn DistributionF64> {
+    fn clone_box(&self) -> Box<dyn Distribution<u64>> {
         Box::new(*self)
     }
 }
+
+

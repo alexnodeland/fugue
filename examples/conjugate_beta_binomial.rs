@@ -11,7 +11,7 @@ fn beta_binomial_model(n: u64, k: u64) -> Model<f64> {
             beta: 2.0,
         },
     )
-    .bind(move |p| observe(addr!("obs"), Binomial { n, p }, k as f64).bind(move |_| pure(p)))
+    .bind(move |p| observe(addr!("obs"), Binomial { n, p }, k).bind(move |_| pure(p)))
 }
 
 #[derive(Parser, Debug)]

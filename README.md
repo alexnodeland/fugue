@@ -10,7 +10,7 @@ A **production-ready**, **monadic probabilistic programming library** for Rust. 
 ## ✨ Features
 
 - 🎯 **Monadic PPL**: Compose probabilistic programs using pure functional abstractions
-- 🔢 **Rich Distributions**: 10+ built-in probability distributions with validation
+- 🔢 **Type-Safe Distributions**: 10+ built-in probability distributions with natural return types
 - 🎰 **Multiple Inference Methods**: MCMC, SMC, Variational Inference, ABC
 - 📊 **Comprehensive Diagnostics**: R-hat convergence, effective sample size, Geweke tests
 - 🛡️ **Numerically Stable**: Production-ready numerical algorithms with validation
@@ -81,6 +81,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## 🎯 Type Safety Revolution
+
+Fugue features a **fully type-safe distribution system** that eliminates common probabilistic programming pitfalls:
+
+### Before (Error-Prone)
+```rust
+sample(addr!("coin"), Bernoulli { p: 0.5 })
+    .bind(|coin_result| {
+        // ❌ Error-prone: floating point comparison
+        if coin_result == 1.0 { 
+            pure("heads") 
+        } else { 
+            pure("tails") 
+        }
+    })
+```
+
+### After (Type-Safe)
+```rust
+sample(addr!("coin"), Bernoulli { p: 0.5 })
+    .bind(|is_heads| {
+        // ✅ Natural: direct boolean usage, compiler-enforced
+        if is_heads { 
+            pure("heads") 
+        } else { 
+            pure("tails") 
+        }
+    })
+```
+
+### 🔥 Key Improvements
+- **Bernoulli** → `bool` (no more `== 1.0` comparisons)
+- **Poisson/Binomial** → `u64` (natural counting, no casting)
+- **Categorical** → `usize` (safe array indexing)
+- **Compiler guarantees** type correctness throughout
+
 ## 📚 Core Concepts
 
 ### Models as First-Class Values
@@ -93,16 +129,28 @@ use fugue::*;
 // Pure deterministic computation
 let model1 = pure(42.0);
 
-// Probabilistic sampling
-let model2 = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 });
+// Type-safe probabilistic sampling
+let normal_sample: Model<f64> = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 });
+let coin_flip: Model<bool> = sample(addr!("coin"), Bernoulli { p: 0.5 });
+let event_count: Model<u64> = sample(addr!("count"), Poisson { lambda: 3.0 });
+let category_choice: Model<usize> = sample(addr!("choice"), Categorical { 
+    probs: vec![0.3, 0.5, 0.2] 
+});
 
-// Conditioning on observations
-let model3 = observe(addr!("y"), Normal { mu: 0.0, sigma: 1.0 }, 2.5);
+// Type-safe observations
+let obs1 = observe(addr!("y"), Normal { mu: 0.0, sigma: 1.0 }, 2.5);       // f64
+let obs2 = observe(addr!("success"), Bernoulli { p: 0.7 }, true);          // bool
+let obs3 = observe(addr!("events"), Poisson { lambda: 4.0 }, 7u64);        // u64
+let obs4 = observe(addr!("pick"), Categorical { probs: vec![0.4, 0.6] }, 1usize); // usize
 
-// Monadic composition
-let composed = model2.bind(|x| {
-    sample(addr!("y"), Normal { mu: x, sigma: 0.5 })
-        .map(move |y| x + y)
+// Monadic composition with type safety
+let composed = coin_flip.bind(|is_heads| {
+    if is_heads {
+        sample(addr!("bonus"), Poisson { lambda: 5.0 })
+            .map(|count| format!("Heads! Bonus: {}", count))
+    } else {
+        pure("Tails!".to_string())
+    }
 });
 ```
 
@@ -112,8 +160,8 @@ Write probabilistic programs in an imperative style:
 
 ```rust
 let mixture_model = prob! {
-    let z <- sample(addr!("component"), Bernoulli { p: 0.3 });
-    let mu = if z > 0.5 { -2.0 } else { 2.0 };
+    let z <- sample(addr!("component"), Bernoulli { p: 0.3 });  // Returns bool!
+    let mu = if z { -2.0 } else { 2.0 };  // Natural boolean usage
     let x <- sample(addr!("x"), Normal { mu, sigma: 1.0 });
     observe(addr!("y"), Normal { mu: x, sigma: 0.1 }, observed_value);
     pure(x)
@@ -205,18 +253,26 @@ let samples = abc_rejection(
 
 ## 📊 Built-in Distributions
 
-| **Distribution** | **Parameters** | **Support** | **Usage** |
-|------------------|----------------|-------------|-----------|
-| `Normal` | `mu`, `sigma` | ℝ | `Normal { mu: 0.0, sigma: 1.0 }` |
-| `LogNormal` | `mu`, `sigma` | ℝ⁺ | `LogNormal { mu: 0.0, sigma: 1.0 }` |
-| `Uniform` | `low`, `high` | [low, high] | `Uniform { low: 0.0, high: 1.0 }` |
-| `Exponential` | `rate` | ℝ⁺ | `Exponential { rate: 1.0 }` |
-| `Beta` | `alpha`, `beta` | [0, 1] | `Beta { alpha: 2.0, beta: 3.0 }` |
-| `Gamma` | `shape`, `rate` | ℝ⁺ | `Gamma { shape: 2.0, rate: 1.0 }` |
-| `Bernoulli` | `p` | {0, 1} | `Bernoulli { p: 0.3 }` |
-| `Binomial` | `n`, `p` | {0, 1, ..., n} | `Binomial { n: 10, p: 0.5 }` |
-| `Categorical` | `probs` | {0, 1, ..., k-1} | `Categorical::new(vec![0.2, 0.3, 0.5])` |
-| `Poisson` | `rate` | ℕ | `Poisson { rate: 2.0 }` |
+| **Distribution** | **Parameters** | **Return Type** | **Support** | **Usage** |
+|------------------|----------------|-----------------|-------------|-----------|
+| `Normal` | `mu`, `sigma` | `f64` | ℝ | `Normal { mu: 0.0, sigma: 1.0 }` |
+| `LogNormal` | `mu`, `sigma` | `f64` | ℝ⁺ | `LogNormal { mu: 0.0, sigma: 1.0 }` |
+| `Uniform` | `low`, `high` | `f64` | [low, high] | `Uniform { low: 0.0, high: 1.0 }` |
+| `Exponential` | `rate` | `f64` | ℝ⁺ | `Exponential { rate: 1.0 }` |
+| `Beta` | `alpha`, `beta` | `f64` | [0, 1] | `Beta { alpha: 2.0, beta: 3.0 }` |
+| `Gamma` | `shape`, `rate` | `f64` | ℝ⁺ | `Gamma { shape: 2.0, rate: 1.0 }` |
+| `Bernoulli` | `p` | **`bool`** | {false, true} | `Bernoulli { p: 0.3 }` |
+| `Binomial` | `n`, `p` | **`u64`** | {0, 1, ..., n} | `Binomial { n: 10, p: 0.5 }` |
+| `Categorical` | `probs` | **`usize`** | {0, 1, ..., k-1} | `Categorical { probs: vec![0.2, 0.3, 0.5] }` |
+| `Poisson` | `lambda` | **`u64`** | ℕ | `Poisson { lambda: 2.0 }` |
+
+### 🎯 Type Safety Benefits
+
+- **`Bernoulli`** returns `bool` - no more `if sample == 1.0` comparisons!
+- **`Poisson`/`Binomial`** return `u64` - natural counting with no casting needed
+- **`Categorical`** returns `usize` - safe array indexing without conversion
+- **Continuous distributions** return `f64` as appropriate
+- **Compiler guarantees** - type errors caught at compile time
 
 All distributions include automatic parameter validation and numerical stability checks.
 
@@ -224,25 +280,39 @@ All distributions include automatic parameter validation and numerical stability
 
 ### Custom Interpreters
 
-Implement your own model interpreters:
+Implement your own model interpreters with full type safety:
 
 ```rust
 struct CustomHandler {
     // Your state here
 }
 
-impl<A> Handler<A> for CustomHandler {
-    fn handle_sample(&mut self, addr: Address, dist: Box<dyn DistributionF64>) -> f64 {
-        // Custom sampling logic
+impl Handler for CustomHandler {
+    fn on_sample_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>) -> f64 {
+        // Handle continuous distributions
     }
     
-    fn handle_observe(&mut self, addr: Address, dist: Box<dyn DistributionF64>, value: f64) {
-        // Custom observation handling
+    fn on_sample_bool(&mut self, addr: &Address, dist: &dyn Distribution<bool>) -> bool {
+        // Handle Bernoulli - returns bool directly!
     }
     
-    fn handle_factor(&mut self, logw: LogF64) {
-        // Custom factor accumulation
+    fn on_sample_u64(&mut self, addr: &Address, dist: &dyn Distribution<u64>) -> u64 {
+        // Handle Poisson/Binomial - returns counts as u64
     }
+    
+    fn on_sample_usize(&mut self, addr: &Address, dist: &dyn Distribution<usize>) -> usize {
+        // Handle Categorical - returns indices as usize
+    }
+    
+    fn on_observe_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>, value: f64) {
+        // Observe continuous values
+    }
+    
+    fn on_observe_bool(&mut self, addr: &Address, dist: &dyn Distribution<bool>, value: bool) {
+        // Observe boolean outcomes
+    }
+    
+    // ... other methods for u64, usize observations and factors
 }
 ```
 
@@ -263,9 +333,12 @@ let hierarchical = prob! {
 ### Memory-Efficient Trace Manipulation
 
 ```rust
-// Efficient trace operations
+// Efficient trace operations with type-safe values
 let mut trace = Trace::default();
-trace.insert_choice(addr!("x"), ChoiceValue::F64(1.5), 0.0);
+trace.insert_choice(addr!("x"), ChoiceValue::F64(1.5), 0.0);       // Continuous
+trace.insert_choice(addr!("coin"), ChoiceValue::Bool(true), -0.5);  // Boolean
+trace.insert_choice(addr!("count"), ChoiceValue::U64(7), -2.1);     // Count
+trace.insert_choice(addr!("choice"), ChoiceValue::Usize(2), -1.6);  // Index
 
 // Trace validation and debugging
 trace.validate()?;
@@ -281,12 +354,15 @@ Explore the [`examples/`](examples/) directory for complete working examples:
 - **[`exponential_hazard.rs`](examples/exponential_hazard.rs)** - Survival analysis with exponential distributions
 - **[`conjugate_beta_binomial.rs`](examples/conjugate_beta_binomial.rs)** - Beta-Binomial conjugate analysis
 - **[`improved_gaussian_mean.rs`](examples/improved_gaussian_mean.rs)** - Advanced MCMC with full diagnostics
+- **[`fully_type_safe.rs`](examples/fully_type_safe.rs)** - **NEW**: Demonstrates type-safe distributions
+- **[`simple_mixture.rs`](examples/simple_mixture.rs)** - Updated with type-safe boolean usage
 
 Run examples with:
 
 ```bash
 cargo run --example gaussian_mean -- --obs 2.5 --seed 42
 cargo run --example improved_gaussian_mean -- --obs 1.5 --n-samples 2000 --validate
+cargo run --example fully_type_safe -- --obs 2.0  # See type-safe distributions in action!
 ```
 
 ## 🧪 Validation & Testing

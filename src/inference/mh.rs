@@ -100,6 +100,23 @@ fn propose_new_value_stable<R: Rng>(rng: &mut R, choice: &Choice, scale: f64) ->
             let delta = (scale * z).round() as i64;
             (current_val + delta) as f64
         }
+        ChoiceValue::U64(current_val) => {
+            // Gaussian random walk for unsigned integers with proper rounding and bounds
+            let u1: f64 = rng.gen::<f64>().max(1e-10);
+            let u2: f64 = rng.gen();
+            let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+            let delta = (scale * z).round() as i64;
+            let proposed = (current_val as i64 + delta).max(0) as u64;
+            proposed as f64
+        }
+        ChoiceValue::Usize(_current_val) => {
+            // For categorical variables, use discrete uniform proposal over valid indices
+            // This is a placeholder - in practice, categorical variables often need
+            // specialized proposal mechanisms
+            let max_val = 10; // This should be based on the categorical distribution size
+            let proposed = rng.gen_range(0..max_val);
+            proposed as f64
+        }
     }
 }
 

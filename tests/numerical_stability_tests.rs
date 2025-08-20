@@ -18,7 +18,7 @@ fn test_extreme_normal_parameters() {
         sigma: 1e-10,
     };
     let sample = small_sigma.sample(&mut rng);
-    let log_prob = small_sigma.log_prob(sample);
+    let log_prob = small_sigma.log_prob(&sample);
     assert!(sample.is_finite());
     assert!(log_prob.is_finite() || log_prob == f64::NEG_INFINITY);
 
@@ -28,7 +28,7 @@ fn test_extreme_normal_parameters() {
         sigma: 1e10,
     };
     let sample = large_sigma.sample(&mut rng);
-    let log_prob = large_sigma.log_prob(sample);
+    let log_prob = large_sigma.log_prob(&sample);
     assert!(sample.is_finite());
     assert!(log_prob.is_finite());
 
@@ -37,9 +37,9 @@ fn test_extreme_normal_parameters() {
         mu: 0.0,
         sigma: 1.0,
     };
-    assert_eq!(normal.log_prob(1e10), f64::NEG_INFINITY);
-    assert_eq!(normal.log_prob(-1e10), f64::NEG_INFINITY);
-    assert_eq!(normal.log_prob(f64::NAN), f64::NEG_INFINITY);
+    assert_eq!(normal.log_prob(&1e10), f64::NEG_INFINITY);
+    assert_eq!(normal.log_prob(&-1e10), f64::NEG_INFINITY);
+    assert_eq!(normal.log_prob(&f64::NAN), f64::NEG_INFINITY);
 }
 
 #[test]
@@ -52,12 +52,12 @@ fn test_invalid_distribution_parameters() {
         sigma: -1.0,
     };
     assert!(invalid_normal.sample(&mut rng).is_nan());
-    assert_eq!(invalid_normal.log_prob(0.0), f64::NEG_INFINITY);
+    assert_eq!(invalid_normal.log_prob(&0.0), f64::NEG_INFINITY);
 
     // Exponential with invalid rate
     let invalid_exp = Exponential { rate: -1.0 };
     assert!(invalid_exp.sample(&mut rng).is_nan());
-    assert_eq!(invalid_exp.log_prob(1.0), f64::NEG_INFINITY);
+    assert_eq!(invalid_exp.log_prob(&1.0), f64::NEG_INFINITY);
 
     // Beta with invalid parameters
     let invalid_beta = Beta {
@@ -65,7 +65,7 @@ fn test_invalid_distribution_parameters() {
         beta: 2.0,
     };
     assert!(invalid_beta.sample(&mut rng).is_nan());
-    assert_eq!(invalid_beta.log_prob(0.5), f64::NEG_INFINITY);
+    assert_eq!(invalid_beta.log_prob(&0.5), f64::NEG_INFINITY);
 }
 
 #[test]
@@ -144,30 +144,36 @@ fn test_mcmc_with_degenerate_cases() {
 fn test_categorical_edge_cases() {
     let mut rng = StdRng::seed_from_u64(42);
 
-    // Empty probabilities vector
+    // Empty probabilities vector - should default to index 0
     let empty_cat = Categorical { probs: vec![] };
-    assert!(empty_cat.sample(&mut rng).is_nan());
-    assert_eq!(empty_cat.log_prob(0.0), f64::NEG_INFINITY);
+    let sample_result = empty_cat.sample(&mut rng);
+    // For empty categorical, we return 0 as default (see implementation)
+    assert_eq!(sample_result, 0);
+    // Out of bounds access should return NEG_INFINITY
+    assert_eq!(empty_cat.log_prob(&0), f64::NEG_INFINITY);
 
-    // Unnormalized probabilities
+    // Unnormalized probabilities - should default to index 0
     let unnorm_cat = Categorical {
         probs: vec![2.0, 3.0, 5.0],
     }; // Sum = 10
-    assert!(unnorm_cat.sample(&mut rng).is_nan());
+    let unnorm_sample = unnorm_cat.sample(&mut rng);
+    // For invalid categorical, we return 0 as default (see implementation)
+    assert_eq!(unnorm_sample, 0);
 
-    // Negative probabilities
+    // Negative probabilities - should default to index 0
     let neg_cat = Categorical {
         probs: vec![0.5, -0.2, 0.7],
     };
-    assert!(neg_cat.sample(&mut rng).is_nan());
+    let neg_sample = neg_cat.sample(&mut rng);
+    assert_eq!(neg_sample, 0);
 
     // Valid categorical
     let valid_cat = Categorical {
         probs: vec![0.3, 0.3, 0.4],
     };
     let sample = valid_cat.sample(&mut rng);
-    assert!(sample.is_finite());
-    assert!(sample >= 0.0 && sample < 3.0);
+    // sample is now naturally usize
+    assert!(sample < 3);
 }
 
 #[test]

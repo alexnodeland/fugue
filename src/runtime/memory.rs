@@ -4,7 +4,7 @@
 //! allocation overhead and improve cache locality in probabilistic computation.
 
 use crate::core::address::Address;
-use crate::core::distribution::DistributionF64;
+use crate::core::distribution::Distribution;
 use crate::runtime::trace::{Choice, ChoiceValue, Trace};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -112,6 +112,42 @@ impl TraceBuilder {
         self.log_prior += log_prob;
     }
 
+    pub fn add_sample_bool(&mut self, addr: Address, value: bool, log_prob: f64) {
+        self.choices.insert(
+            addr.clone(),
+            Choice {
+                addr,
+                value: ChoiceValue::Bool(value),
+                logp: log_prob,
+            },
+        );
+        self.log_prior += log_prob;
+    }
+
+    pub fn add_sample_u64(&mut self, addr: Address, value: u64, log_prob: f64) {
+        self.choices.insert(
+            addr.clone(),
+            Choice {
+                addr,
+                value: ChoiceValue::U64(value),
+                logp: log_prob,
+            },
+        );
+        self.log_prior += log_prob;
+    }
+
+    pub fn add_sample_usize(&mut self, addr: Address, value: usize, log_prob: f64) {
+        self.choices.insert(
+            addr.clone(),
+            Choice {
+                addr,
+                value: ChoiceValue::Usize(value),
+                logp: log_prob,
+            },
+        );
+        self.log_prior += log_prob;
+    }
+
     pub fn add_observation(&mut self, log_likelihood: f64) {
         self.log_likelihood += log_likelihood;
     }
@@ -170,15 +206,51 @@ pub struct PooledPriorHandler<'a, R: rand::RngCore> {
 }
 
 impl<'a, R: rand::RngCore> crate::runtime::handler::Handler for PooledPriorHandler<'a, R> {
-    fn on_sample(&mut self, addr: &Address, dist: &dyn DistributionF64) -> f64 {
+    fn on_sample_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>) -> f64 {
         let x = dist.sample(self.rng);
-        let lp = dist.log_prob(x);
+        let lp = dist.log_prob(&x);
         self.trace_builder.add_sample(addr.clone(), x, lp);
         x
     }
 
-    fn on_observe(&mut self, _: &Address, dist: &dyn DistributionF64, value: f64) {
-        let log_likelihood = dist.log_prob(value);
+    fn on_sample_bool(&mut self, addr: &Address, dist: &dyn Distribution<bool>) -> bool {
+        let x = dist.sample(self.rng);
+        let lp = dist.log_prob(&x);
+        self.trace_builder.add_sample_bool(addr.clone(), x, lp);
+        x
+    }
+
+    fn on_sample_u64(&mut self, addr: &Address, dist: &dyn Distribution<u64>) -> u64 {
+        let x = dist.sample(self.rng);
+        let lp = dist.log_prob(&x);
+        self.trace_builder.add_sample_u64(addr.clone(), x, lp);
+        x
+    }
+
+    fn on_sample_usize(&mut self, addr: &Address, dist: &dyn Distribution<usize>) -> usize {
+        let x = dist.sample(self.rng);
+        let lp = dist.log_prob(&x);
+        self.trace_builder.add_sample_usize(addr.clone(), x, lp);
+        x
+    }
+
+    fn on_observe_f64(&mut self, _: &Address, dist: &dyn Distribution<f64>, value: f64) {
+        let log_likelihood = dist.log_prob(&value);
+        self.trace_builder.add_observation(log_likelihood);
+    }
+
+    fn on_observe_bool(&mut self, _: &Address, dist: &dyn Distribution<bool>, value: bool) {
+        let log_likelihood = dist.log_prob(&value);
+        self.trace_builder.add_observation(log_likelihood);
+    }
+
+    fn on_observe_u64(&mut self, _: &Address, dist: &dyn Distribution<u64>, value: u64) {
+        let log_likelihood = dist.log_prob(&value);
+        self.trace_builder.add_observation(log_likelihood);
+    }
+
+    fn on_observe_usize(&mut self, _: &Address, dist: &dyn Distribution<usize>, value: usize) {
+        let log_likelihood = dist.log_prob(&value);
         self.trace_builder.add_observation(log_likelihood);
     }
 

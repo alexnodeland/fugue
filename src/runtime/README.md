@@ -4,15 +4,25 @@ The runtime module provides interpretation and execution of probabilistic models
 
 ## Components
 
-### `handler.rs` - Handler Interface
+### `handler.rs` - Type-Safe Handler Interface
 
-- `Handler` trait: Defines how to interpret model effects (sample, observe, factor)
+- `Handler` trait: Defines how to interpret model effects with full type safety
 - `run` function: Executes a model with a handler, returning value and trace
 
 ```rust
 pub trait Handler {
-    fn on_sample(&mut self, addr: &Address, dist: &dyn DistributionF64) -> f64;
-    fn on_observe(&mut self, addr: &Address, dist: &dyn DistributionF64, value: f64);
+    // Type-specific sampling handlers
+    fn on_sample_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>) -> f64;
+    fn on_sample_bool(&mut self, addr: &Address, dist: &dyn Distribution<bool>) -> bool;
+    fn on_sample_u64(&mut self, addr: &Address, dist: &dyn Distribution<u64>) -> u64;
+    fn on_sample_usize(&mut self, addr: &Address, dist: &dyn Distribution<usize>) -> usize;
+    
+    // Type-specific observation handlers
+    fn on_observe_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>, value: f64);
+    fn on_observe_bool(&mut self, addr: &Address, dist: &dyn Distribution<bool>, value: bool);
+    fn on_observe_u64(&mut self, addr: &Address, dist: &dyn Distribution<u64>, value: u64);
+    fn on_observe_usize(&mut self, addr: &Address, dist: &dyn Distribution<usize>, value: usize);
+    
     fn on_factor(&mut self, logw: f64);
     fn finish(self) -> Trace where Self: Sized;
 }
@@ -40,8 +50,8 @@ let (value3, trace3) = run(ScoreGivenTrace{base: trace, trace: Trace::default()}
 ### `trace.rs` - Execution Traces
 
 - `Trace`: Records choices and accumulated log-weights
-- `Choice`: Individual random choice with address, value, and log-probability
-- `ChoiceValue`: Supports F64, I64, Bool values
+- `Choice`: Individual random choice with address, value, and log-probability  
+- `ChoiceValue`: Type-safe value storage - supports `F64`, `Bool`, `U64`, `Usize`, `I64`
 
 ```rust
 #[derive(Clone, Debug, Default)]

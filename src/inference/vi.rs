@@ -221,7 +221,7 @@ impl VariationalParam {
                 let raw_value = approx_mu + approx_sigma * z;
                 let value = raw_value.clamp(0.001, 0.999);
 
-                let _log_prob = Beta { alpha, beta }.log_prob(value);
+                let _log_prob = Beta { alpha, beta }.log_prob(&value);
                 (value, z)
             }
         }
@@ -243,11 +243,11 @@ impl VariationalParam {
         match self {
             VariationalParam::Normal { mu, log_sigma } => {
                 let sigma = log_sigma.exp();
-                Normal { mu: *mu, sigma }.log_prob(x)
+                Normal { mu: *mu, sigma }.log_prob(&x)
             }
             VariationalParam::LogNormal { mu, log_sigma } => {
                 let sigma = log_sigma.exp();
-                LogNormal { mu: *mu, sigma }.log_prob(x)
+                LogNormal { mu: *mu, sigma }.log_prob(&x)
             }
             VariationalParam::Beta {
                 log_alpha,
@@ -255,7 +255,7 @@ impl VariationalParam {
             } => {
                 let alpha = log_alpha.exp();
                 let beta = log_beta.exp();
-                Beta { alpha, beta }.log_prob(x)
+                Beta { alpha, beta }.log_prob(&x)
             }
         }
     }
@@ -344,6 +344,20 @@ impl MeanFieldGuide {
                     // Use Normal for integers (continuous relaxation)
                     VariationalParam::Normal {
                         mu: val as f64,
+                        log_sigma: 1.0_f64.ln(),
+                    }
+                }
+                ChoiceValue::U64(val) => {
+                    // Use LogNormal for unsigned integers (always positive)
+                    VariationalParam::LogNormal {
+                        mu: (val as f64).ln(),
+                        log_sigma: 1.0_f64.ln(),
+                    }
+                }
+                ChoiceValue::Usize(val) => {
+                    // Use LogNormal for categorical indices (always positive)
+                    VariationalParam::LogNormal {
+                        mu: (val as f64 + 1.0).ln(), // +1 to avoid log(0)
                         log_sigma: 1.0_f64.ln(),
                     }
                 }

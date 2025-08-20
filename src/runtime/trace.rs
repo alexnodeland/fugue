@@ -76,11 +76,15 @@ use std::collections::BTreeMap;
 /// ```
 #[derive(Clone, Debug, PartialEq)]
 pub enum ChoiceValue {
-    /// Floating-point value (used by all current distributions).
+    /// Floating-point value (continuous distributions).
     F64(f64),
-    /// Integer value (for future discrete distributions).
+    /// Signed integer value.
     I64(i64),
-    /// Boolean value (for future boolean distributions).
+    /// Unsigned integer value (Poisson, Binomial counts).
+    U64(u64),
+    /// Array index value (Categorical choices).
+    Usize(usize),
+    /// Boolean value (Bernoulli outcomes).
     Bool(bool),
 }
 

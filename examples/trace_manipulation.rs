@@ -32,6 +32,8 @@ fn print_trace(trace: &Trace, label: &str) {
         match choice.value {
             ChoiceValue::F64(v) => println!("    {}: {:.4} (logp: {:.4})", addr, v, choice.logp),
             ChoiceValue::I64(v) => println!("    {}: {} (logp: {:.4})", addr, v, choice.logp),
+            ChoiceValue::U64(v) => println!("    {}: {} (logp: {:.4})", addr, v, choice.logp),
+            ChoiceValue::Usize(v) => println!("    {}: {} (logp: {:.4})", addr, v, choice.logp),
             ChoiceValue::Bool(v) => println!("    {}: {} (logp: {:.4})", addr, v, choice.logp),
         }
     }
@@ -112,7 +114,7 @@ fn demonstrate_trace_utilities(seed: u64) {
             mu: 0.0,
             sigma: 2.0,
         }
-        .log_prob(new_mu);
+        .log_prob(&new_mu);
         println!("  Modified mu from {:.4} to {:.4}", old_mu, new_mu);
     }
 

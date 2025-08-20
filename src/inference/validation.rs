@@ -16,7 +16,7 @@ use rand::Rng;
 /// the theoretical distribution using the two-sample KS test.
 pub fn ks_test_distribution<R: Rng>(
     rng: &mut R,
-    dist: &dyn DistributionF64,
+    dist: &dyn Distribution<f64>,
     reference_samples: &[f64],
     n_samples: usize,
     alpha: f64,

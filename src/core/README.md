@@ -16,16 +16,33 @@ let a2 = addr!("x", 5);         // Address("x#5")
 let a3 = scoped_addr!("layer1", "weight"); // Address("layer1::weight")
 ```
 
-### `distribution.rs` - Probability Distributions
+### `distribution.rs` - Type-Safe Probability Distributions
 
-- `DistributionF64` trait: Common interface for continuous distributions
+- `Distribution<T>` trait: Generic interface for distributions over any type `T`
+- **Type-safe sampling**: Each distribution returns its natural type
+  - `Bernoulli` → `bool` (no more f64 comparisons!)
+  - `Poisson`, `Binomial` → `u64` (natural counting)
+  - `Categorical` → `usize` (safe array indexing)
+  - `Normal`, `Beta`, etc. → `f64` (continuous values)
 - Built-in distributions: Normal, Uniform, LogNormal, Exponential, Beta, Gamma, Bernoulli, Categorical, Binomial, Poisson
 - All distributions support sampling and log-density evaluation
 
 ```rust
+// Continuous distribution
 let normal = Normal{mu: 0.0, sigma: 1.0};
-let x = normal.sample(&mut rng);
-let logp = normal.log_prob(x);
+let x: f64 = normal.sample(&mut rng);
+let logp = normal.log_prob(&x);
+
+// Discrete distributions now type-safe!
+let coin = Bernoulli{p: 0.5};
+let flip: bool = coin.sample(&mut rng);  // Returns bool directly!
+let prob = coin.log_prob(&flip);
+
+let counter = Poisson{lambda: 3.0};
+let count: u64 = counter.sample(&mut rng);  // Returns u64 directly!
+
+let choice = Categorical{probs: vec![0.3, 0.5, 0.2]};
+let idx: usize = choice.sample(&mut rng);  // Returns usize for safe indexing!
 ```
 
 ### `model.rs` - Monadic Model Representation
@@ -37,8 +54,10 @@ let logp = normal.log_prob(x);
 
 ```rust
 let model = prob! {
-    let mu <- sample(addr!("mu"), Normal{mu: 0.0, sigma: 1.0});
-    observe(addr!("y"), Normal{mu, sigma: 1.0}, 2.5);
+    let mu <- sample(addr!("mu"), Normal{mu: 0.0, sigma: 1.0});  // Returns f64
+    let is_outlier <- sample(addr!("outlier"), Bernoulli{p: 0.1});  // Returns bool!
+    let sigma = if is_outlier { 5.0 } else { 1.0 };  // Natural boolean usage
+    observe(addr!("y"), Normal{mu, sigma}, 2.5);
     pure(mu)
 };
 ```

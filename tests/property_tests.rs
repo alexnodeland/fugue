@@ -164,8 +164,8 @@ proptest! {
     #[test]
     fn normal_symmetry(mu in -5.0..5.0f64, sigma in 0.1..5.0f64, offset in 0.1..2.0f64) {
         let dist = Normal{mu, sigma};
-        let lp1 = dist.log_prob(mu + offset);
-        let lp2 = dist.log_prob(mu - offset);
+        let lp1 = dist.log_prob(&(mu + offset));
+        let lp2 = dist.log_prob(&(mu - offset));
 
         prop_assert!((lp1 - lp2).abs() < 1e-10);
     }
@@ -177,14 +177,14 @@ proptest! {
 
         // Inside support should have finite log prob
         let inside = (low + high) / 2.0;
-        let lp_inside = dist.log_prob(inside);
+        let lp_inside = dist.log_prob(&inside);
         prop_assert!(lp_inside.is_finite());
 
         // Outside support should have -inf log prob
         let outside_low = low - 1.0;
         let outside_high = high + 1.0;
-        prop_assert_eq!(dist.log_prob(outside_low), f64::NEG_INFINITY);
-        prop_assert_eq!(dist.log_prob(outside_high), f64::NEG_INFINITY);
+        prop_assert_eq!(dist.log_prob(&outside_low), f64::NEG_INFINITY);
+        prop_assert_eq!(dist.log_prob(&outside_high), f64::NEG_INFINITY);
     }
 
     #[test]
@@ -192,13 +192,12 @@ proptest! {
         let dist = Bernoulli{p};
 
         // Valid outcomes
-        let lp0 = dist.log_prob(0.0);
-        let lp1 = dist.log_prob(1.0);
+        let lp0 = dist.log_prob(&false);  // Use natural bool values
+        let lp1 = dist.log_prob(&true);
         prop_assert!(lp0.is_finite());
         prop_assert!(lp1.is_finite());
 
-        // Invalid outcome
-        let lp_invalid = dist.log_prob(0.5);
-        prop_assert_eq!(lp_invalid, f64::NEG_INFINITY);
+        // No invalid outcomes for bool - only true/false are valid
+        // This test is no longer applicable since Bernoulli only accepts bool values
     }
 }

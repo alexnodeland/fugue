@@ -66,7 +66,7 @@
 //! });
 //! ```
 use crate::core::address::Address;
-use crate::core::distribution::{DistributionF64, LogF64};
+use crate::core::distribution::{Distribution, LogF64};
 
 /// Core model type representing probabilistic computations.
 ///
@@ -98,28 +98,88 @@ use crate::core::distribution::{DistributionF64, LogF64};
 pub enum Model<A> {
     /// A deterministic computation yielding a pure value.
     Pure(A),
-    /// Sample from a distribution at the given address.
-    SampleF {
+    /// Sample from an f64 distribution (continuous distributions).
+    SampleF64 {
         /// Unique identifier for this sampling site.
         addr: Address,
         /// Distribution to sample from.
-        dist: Box<dyn DistributionF64>,
+        dist: Box<dyn Distribution<f64>>,
         /// Continuation function to apply to the sampled value.
         k: Box<dyn FnOnce(f64) -> Model<A> + Send + 'static>,
     },
-    /// Observe/condition on a value at the given address.
-    ObserveF {
+    /// Sample from a bool distribution (Bernoulli).
+    SampleBool {
+        /// Unique identifier for this sampling site.
+        addr: Address,
+        /// Distribution to sample from.
+        dist: Box<dyn Distribution<bool>>,
+        /// Continuation function to apply to the sampled value.
+        k: Box<dyn FnOnce(bool) -> Model<A> + Send + 'static>,
+    },
+    /// Sample from a u64 distribution (Poisson, Binomial).
+    SampleU64 {
+        /// Unique identifier for this sampling site.
+        addr: Address,
+        /// Distribution to sample from.
+        dist: Box<dyn Distribution<u64>>,
+        /// Continuation function to apply to the sampled value.
+        k: Box<dyn FnOnce(u64) -> Model<A> + Send + 'static>,
+    },
+    /// Sample from a usize distribution (Categorical).
+    SampleUsize {
+        /// Unique identifier for this sampling site.
+        addr: Address,
+        /// Distribution to sample from.
+        dist: Box<dyn Distribution<usize>>,
+        /// Continuation function to apply to the sampled value.
+        k: Box<dyn FnOnce(usize) -> Model<A> + Send + 'static>,
+    },
+    /// Observe/condition on an f64 value.
+    ObserveF64 {
         /// Unique identifier for this observation site.
         addr: Address,
         /// Distribution that generates the observed value.
-        dist: Box<dyn DistributionF64>,
+        dist: Box<dyn Distribution<f64>>,
         /// The observed value to condition on.
         value: f64,
         /// Continuation function (always receives unit).
         k: Box<dyn FnOnce(()) -> Model<A> + Send + 'static>,
     },
+    /// Observe/condition on a bool value.
+    ObserveBool {
+        /// Unique identifier for this observation site.
+        addr: Address,
+        /// Distribution that generates the observed value.
+        dist: Box<dyn Distribution<bool>>,
+        /// The observed value to condition on.
+        value: bool,
+        /// Continuation function (always receives unit).
+        k: Box<dyn FnOnce(()) -> Model<A> + Send + 'static>,
+    },
+    /// Observe/condition on a u64 value.
+    ObserveU64 {
+        /// Unique identifier for this observation site.
+        addr: Address,
+        /// Distribution that generates the observed value.
+        dist: Box<dyn Distribution<u64>>,
+        /// The observed value to condition on.
+        value: u64,
+        /// Continuation function (always receives unit).
+        k: Box<dyn FnOnce(()) -> Model<A> + Send + 'static>,
+    },
+    /// Observe/condition on a usize value.
+    ObserveUsize {
+        /// Unique identifier for this observation site.
+        addr: Address,
+        /// Distribution that generates the observed value.
+        dist: Box<dyn Distribution<usize>>,
+        /// The observed value to condition on.
+        value: usize,
+        /// Continuation function (always receives unit).
+        k: Box<dyn FnOnce(()) -> Model<A> + Send + 'static>,
+    },
     /// Add a log-weight factor to the model.
-    FactorF {
+    Factor {
         /// Log-weight to add to the model's total weight.
         logw: LogF64,
         /// Continuation function (always receives unit).
@@ -147,19 +207,7 @@ pub fn pure<A>(a: A) -> Model<A> {
     Model::Pure(a)
 }
 
-/// Create a sampling site that draws a value from a probability distribution.
-///
-/// This is a fundamental operation for building probabilistic models. Each sampling site
-/// must have a unique address to enable conditioning, inference, and replay.
-///
-/// # Arguments
-///
-/// * `addr` - Unique address identifying this sampling site
-/// * `dist` - Probability distribution to sample from
-///
-/// # Returns
-///
-/// A `Model<f64>` that, when executed, samples a value from the given distribution.
+/// Sample from an f64 distribution (continuous distributions).
 ///
 /// # Examples
 ///
@@ -167,58 +215,249 @@ pub fn pure<A>(a: A) -> Model<A> {
 /// use fugue::*;
 ///
 /// // Sample from a standard normal distribution
-/// let model = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 });
+/// let model = sample_f64(addr!("x"), Normal { mu: 0.0, sigma: 1.0 });
 ///
 /// // Sample from a uniform distribution
-/// let model = sample(addr!("u"), Uniform { low: 0.0, high: 1.0 });
-///
-/// // Sample with indexed addresses for multiple samples
-/// let model = sample(addr!("data", 0), Normal { mu: 0.0, sigma: 1.0 });
+/// let model = sample_f64(addr!("u"), Uniform { low: 0.0, high: 1.0 });
 /// ```
-pub fn sample(addr: Address, dist: impl DistributionF64 + 'static) -> Model<f64> {
-    Model::SampleF {
+pub fn sample_f64(addr: Address, dist: impl Distribution<f64> + 'static) -> Model<f64> {
+    Model::SampleF64 {
         addr,
         dist: Box::new(dist),
         k: Box::new(pure),
     }
 }
 
-/// Create an observation site that conditions the model on observed data.
-///
-/// This operation allows incorporating observed data into probabilistic models by conditioning
-/// on the fact that a particular random variable took on a specific observed value.
-/// The log-probability of the observation under the given distribution contributes to the
-/// model's overall log-weight.
-///
-/// # Arguments
-///
-/// * `addr` - Unique address identifying this observation site
-/// * `dist` - Probability distribution that generated the observed value
-/// * `value` - The observed value to condition on
-///
-/// # Returns
-///
-/// A `Model<()>` that adds the log-probability of the observation to the model's weight.
+/// Sample from a bool distribution (Bernoulli).
 ///
 /// # Examples
 ///
 /// ```rust
 /// use fugue::*;
 ///
-/// // Observe that y = 2.5 given a normal distribution
-/// let model = observe(addr!("y"), Normal { mu: 1.0, sigma: 0.5 }, 2.5);
-///
-/// // Condition on multiple observations
-/// let model = observe(addr!("y1"), Normal { mu: 0.0, sigma: 1.0 }, 1.2)
-///     .bind(|_| observe(addr!("y2"), Normal { mu: 0.0, sigma: 1.0 }, -0.8));
+/// // Type-safe boolean sampling
+/// let model = sample_bool(addr!("coin"), Bernoulli { p: 0.5 });
+/// let result = model.bind(|heads| {
+///     if heads {
+///         pure("Heads!".to_string())
+///     } else {
+///         pure("Tails!".to_string())
+///     }
+/// });
 /// ```
-pub fn observe(addr: Address, dist: impl DistributionF64 + 'static, value: f64) -> Model<()> {
-    Model::ObserveF {
+pub fn sample_bool(addr: Address, dist: impl Distribution<bool> + 'static) -> Model<bool> {
+    Model::SampleBool {
         addr,
         dist: Box::new(dist),
-        value,
         k: Box::new(pure),
     }
+}
+
+/// Sample from a u64 distribution (Poisson, Binomial).
+///
+/// # Examples
+///
+/// ```rust
+/// use fugue::*;
+///
+/// // Type-safe count sampling
+/// let model = sample_u64(addr!("count"), Poisson { lambda: 3.0 });
+/// let result = model.bind(|count| {
+///     pure(format!("Count: {}", count))
+/// });
+/// ```
+pub fn sample_u64(addr: Address, dist: impl Distribution<u64> + 'static) -> Model<u64> {
+    Model::SampleU64 {
+        addr,
+        dist: Box::new(dist),
+        k: Box::new(pure),
+    }
+}
+
+/// Sample from a usize distribution (Categorical).
+///
+/// # Examples
+///
+/// ```rust
+/// use fugue::*;
+///
+/// // Type-safe categorical sampling
+/// let options = vec!["red", "green", "blue"];
+/// let model = sample_usize(addr!("choice"), Categorical {
+///     probs: vec![0.5, 0.3, 0.2]
+/// });
+/// let result = model.bind(move |choice_idx| {
+///     let color = options[choice_idx]; // Direct indexing!
+///     pure(color.to_string())
+/// });
+/// ```
+pub fn sample_usize(addr: Address, dist: impl Distribution<usize> + 'static) -> Model<usize> {
+    Model::SampleUsize {
+        addr,
+        dist: Box::new(dist),
+        k: Box::new(pure),
+    }
+}
+
+/// Sample from a distribution (generic version - chooses the right variant automatically).
+///
+/// This is the main sampling function that works with any distribution type.
+/// The return type is inferred from the distribution type.
+///
+/// # Examples
+///
+/// ```rust
+/// use fugue::*;
+///
+/// // Automatically returns f64 for continuous distributions
+/// let normal_sample: Model<f64> = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 });
+///
+/// // Automatically returns bool for Bernoulli
+/// let coin_flip: Model<bool> = sample(addr!("coin"), Bernoulli { p: 0.5 });
+///
+/// // Automatically returns u64 for Poisson
+/// let count: Model<u64> = sample(addr!("count"), Poisson { lambda: 3.0 });
+///
+/// // Automatically returns usize for Categorical
+/// let choice: Model<usize> = sample(addr!("choice"), Categorical {
+///     probs: vec![0.3, 0.5, 0.2]
+/// });
+/// ```
+pub fn sample<T>(addr: Address, dist: impl Distribution<T> + 'static) -> Model<T>
+where
+    T: SampleType,
+{
+    T::make_sample_model(addr, Box::new(dist))
+}
+
+/// Trait for types that can be sampled in Models.
+/// This enables automatic dispatch to the right Model variant.
+pub trait SampleType: 'static + Send + Sync + Sized {
+    fn make_sample_model(addr: Address, dist: Box<dyn Distribution<Self>>) -> Model<Self>;
+    fn make_observe_model(
+        addr: Address,
+        dist: Box<dyn Distribution<Self>>,
+        value: Self,
+    ) -> Model<()>;
+}
+
+impl SampleType for f64 {
+    fn make_sample_model(addr: Address, dist: Box<dyn Distribution<f64>>) -> Model<f64> {
+        Model::SampleF64 {
+            addr,
+            dist,
+            k: Box::new(pure),
+        }
+    }
+    fn make_observe_model(
+        addr: Address,
+        dist: Box<dyn Distribution<f64>>,
+        value: f64,
+    ) -> Model<()> {
+        Model::ObserveF64 {
+            addr,
+            dist,
+            value,
+            k: Box::new(pure),
+        }
+    }
+}
+
+impl SampleType for bool {
+    fn make_sample_model(addr: Address, dist: Box<dyn Distribution<bool>>) -> Model<bool> {
+        Model::SampleBool {
+            addr,
+            dist,
+            k: Box::new(pure),
+        }
+    }
+    fn make_observe_model(
+        addr: Address,
+        dist: Box<dyn Distribution<bool>>,
+        value: bool,
+    ) -> Model<()> {
+        Model::ObserveBool {
+            addr,
+            dist,
+            value,
+            k: Box::new(pure),
+        }
+    }
+}
+
+impl SampleType for u64 {
+    fn make_sample_model(addr: Address, dist: Box<dyn Distribution<u64>>) -> Model<u64> {
+        Model::SampleU64 {
+            addr,
+            dist,
+            k: Box::new(pure),
+        }
+    }
+    fn make_observe_model(
+        addr: Address,
+        dist: Box<dyn Distribution<u64>>,
+        value: u64,
+    ) -> Model<()> {
+        Model::ObserveU64 {
+            addr,
+            dist,
+            value,
+            k: Box::new(pure),
+        }
+    }
+}
+
+impl SampleType for usize {
+    fn make_sample_model(addr: Address, dist: Box<dyn Distribution<usize>>) -> Model<usize> {
+        Model::SampleUsize {
+            addr,
+            dist,
+            k: Box::new(pure),
+        }
+    }
+    fn make_observe_model(
+        addr: Address,
+        dist: Box<dyn Distribution<usize>>,
+        value: usize,
+    ) -> Model<()> {
+        Model::ObserveUsize {
+            addr,
+            dist,
+            value,
+            k: Box::new(pure),
+        }
+    }
+}
+
+/// Observe a value from a distribution (generic version).
+///
+/// This function automatically chooses the right observation variant based on the
+/// distribution type and observed value type.
+///
+/// # Examples
+///
+/// ```rust
+/// use fugue::*;
+///
+/// // Observe f64 value from continuous distribution
+/// let model = observe(addr!("y"), Normal { mu: 1.0, sigma: 0.5 }, 2.5);
+///
+/// // Observe bool value from Bernoulli
+/// let model = observe(addr!("coin"), Bernoulli { p: 0.6 }, true);
+///
+/// // Observe u64 count from Poisson
+/// let model = observe(addr!("count"), Poisson { lambda: 3.0 }, 5u64);
+///
+/// // Observe usize choice from Categorical
+/// let model = observe(addr!("choice"), Categorical {
+///     probs: vec![0.3, 0.5, 0.2]
+/// }, 1usize);
+/// ```
+pub fn observe<T>(addr: Address, dist: impl Distribution<T> + 'static, value: T) -> Model<()>
+where
+    T: SampleType,
+{
+    T::make_observe_model(addr, Box::new(dist), value)
 }
 
 /// Add an unnormalized log-weight factor to the model.
@@ -256,11 +495,12 @@ pub fn observe(addr: Address, dist: impl DistributionF64 + 'static, value: f64) 
 /// let soft_constraint = factor(-0.5 * x * x); // Gaussian-like penalty
 /// ```
 pub fn factor(logw: LogF64) -> Model<()> {
-    Model::FactorF {
+    Model::Factor {
         logw,
         k: Box::new(pure),
     }
 }
+
 /// Monadic operations for composing and transforming models.
 ///
 /// This trait provides the fundamental monadic operations that enable compositional
@@ -357,25 +597,73 @@ impl<A: 'static> ModelExt<A> for Model<A> {
     fn bind<B>(self, k: impl FnOnce(A) -> Model<B> + Send + 'static) -> Model<B> {
         match self {
             Model::Pure(a) => k(a),
-            Model::SampleF { addr, dist, k: k1 } => Model::SampleF {
+            Model::SampleF64 { addr, dist, k: k1 } => Model::SampleF64 {
                 addr,
                 dist,
                 k: Box::new(move |x| k1(x).bind(k)),
             },
-            Model::ObserveF {
+            Model::SampleBool { addr, dist, k: k1 } => Model::SampleBool {
+                addr,
+                dist,
+                k: Box::new(move |x| k1(x).bind(k)),
+            },
+            Model::SampleU64 { addr, dist, k: k1 } => Model::SampleU64 {
+                addr,
+                dist,
+                k: Box::new(move |x| k1(x).bind(k)),
+            },
+            Model::SampleUsize { addr, dist, k: k1 } => Model::SampleUsize {
+                addr,
+                dist,
+                k: Box::new(move |x| k1(x).bind(k)),
+            },
+            Model::ObserveF64 {
                 addr,
                 dist,
                 value,
                 k: k1,
-            } => Model::ObserveF {
+            } => Model::ObserveF64 {
                 addr,
                 dist,
                 value,
-                k: Box::new(move |u| k1(u).bind(k)),
+                k: Box::new(move |()| k1(()).bind(k)),
             },
-            Model::FactorF { logw, k: k1 } => Model::FactorF {
+            Model::ObserveBool {
+                addr,
+                dist,
+                value,
+                k: k1,
+            } => Model::ObserveBool {
+                addr,
+                dist,
+                value,
+                k: Box::new(move |()| k1(()).bind(k)),
+            },
+            Model::ObserveU64 {
+                addr,
+                dist,
+                value,
+                k: k1,
+            } => Model::ObserveU64 {
+                addr,
+                dist,
+                value,
+                k: Box::new(move |()| k1(()).bind(k)),
+            },
+            Model::ObserveUsize {
+                addr,
+                dist,
+                value,
+                k: k1,
+            } => Model::ObserveUsize {
+                addr,
+                dist,
+                value,
+                k: Box::new(move |()| k1(()).bind(k)),
+            },
+            Model::Factor { logw, k: k1 } => Model::Factor {
                 logw,
-                k: Box::new(move |u| k1(u).bind(k)),
+                k: Box::new(move |()| k1(()).bind(k)),
             },
         }
     }

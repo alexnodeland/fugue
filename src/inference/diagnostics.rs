@@ -72,6 +72,8 @@ pub fn extract_values(traces: &[Trace], addr: &Address) -> Vec<f64> {
         .filter_map(|choice| match choice.value {
             ChoiceValue::F64(v) => Some(v),
             ChoiceValue::I64(v) => Some(v as f64),
+            ChoiceValue::U64(v) => Some(v as f64),
+            ChoiceValue::Usize(v) => Some(v as f64),
             ChoiceValue::Bool(v) => Some(if v { 1.0 } else { 0.0 }),
         })
         .collect()

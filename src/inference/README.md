@@ -103,9 +103,22 @@ Example custom handler:
 pub struct CustomHandler { /* ... */ }
 
 impl Handler for CustomHandler {
-    fn on_sample(&mut self, addr: &Address, dist: &dyn DistributionF64) -> f64 {
-        // Custom sampling logic
+    fn on_sample_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>) -> f64 {
+        // Custom sampling logic for continuous distributions
     }
-    // ... other methods
+    
+    fn on_sample_bool(&mut self, addr: &Address, dist: &dyn Distribution<bool>) -> bool {
+        // Custom sampling logic for Bernoulli (returns bool!)
+    }
+    
+    fn on_sample_u64(&mut self, addr: &Address, dist: &dyn Distribution<u64>) -> u64 {
+        // Custom sampling logic for Poisson/Binomial (returns u64!)
+    }
+    
+    fn on_sample_usize(&mut self, addr: &Address, dist: &dyn Distribution<usize>) -> usize {
+        // Custom sampling logic for Categorical (returns usize!)
+    }
+    
+    // ... observation and factor methods
 }
 ```

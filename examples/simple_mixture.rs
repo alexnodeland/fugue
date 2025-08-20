@@ -29,7 +29,7 @@ fn mixture_model(obs: f64) -> Model<(f64, f64)> {
             )
             .bind(move |mu2| {
                 sample(addr!("component"), Bernoulli { p: weight }).bind(move |comp| {
-                    let mu = if comp == 1.0 { mu2 } else { mu1 };
+                    let mu = if comp { mu2 } else { mu1 };
                     observe(addr!("y"), Normal { mu, sigma: 1.0 }, obs)
                         .bind(move |_| pure((mu1, mu2)))
                 })

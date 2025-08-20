@@ -76,7 +76,7 @@
 /// assert!(score_trace.total_log_weight().is_finite());
 /// ```
 use crate::core::address::Address;
-use crate::core::distribution::DistributionF64;
+use crate::core::distribution::Distribution;
 use crate::runtime::handler::Handler;
 use crate::runtime::trace::{Choice, ChoiceValue, Trace};
 use rand::RngCore;
@@ -127,9 +127,9 @@ pub struct PriorHandler<'r, R: RngCore> {
 }
 
 impl<'r, R: RngCore> Handler for PriorHandler<'r, R> {
-    fn on_sample(&mut self, addr: &Address, dist: &dyn DistributionF64) -> f64 {
+    fn on_sample_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>) -> f64 {
         let x = dist.sample(self.rng);
-        let lp = dist.log_prob(x);
+        let lp = dist.log_prob(&x);
         self.trace.log_prior += lp;
         self.trace.choices.insert(
             addr.clone(),
@@ -142,8 +142,65 @@ impl<'r, R: RngCore> Handler for PriorHandler<'r, R> {
         x
     }
 
-    fn on_observe(&mut self, _: &Address, dist: &dyn DistributionF64, value: f64) {
-        self.trace.log_likelihood += dist.log_prob(value);
+    fn on_sample_bool(&mut self, addr: &Address, dist: &dyn Distribution<bool>) -> bool {
+        let x = dist.sample(self.rng);
+        let lp = dist.log_prob(&x);
+        self.trace.log_prior += lp;
+        self.trace.choices.insert(
+            addr.clone(),
+            Choice {
+                addr: addr.clone(),
+                value: ChoiceValue::Bool(x),
+                logp: lp,
+            },
+        );
+        x
+    }
+
+    fn on_sample_u64(&mut self, addr: &Address, dist: &dyn Distribution<u64>) -> u64 {
+        let x = dist.sample(self.rng);
+        let lp = dist.log_prob(&x);
+        self.trace.log_prior += lp;
+        self.trace.choices.insert(
+            addr.clone(),
+            Choice {
+                addr: addr.clone(),
+                value: ChoiceValue::U64(x),
+                logp: lp,
+            },
+        );
+        x
+    }
+
+    fn on_sample_usize(&mut self, addr: &Address, dist: &dyn Distribution<usize>) -> usize {
+        let x = dist.sample(self.rng);
+        let lp = dist.log_prob(&x);
+        self.trace.log_prior += lp;
+        self.trace.choices.insert(
+            addr.clone(),
+            Choice {
+                addr: addr.clone(),
+                value: ChoiceValue::Usize(x),
+                logp: lp,
+            },
+        );
+        x
+    }
+
+    fn on_observe_f64(&mut self, _: &Address, dist: &dyn Distribution<f64>, value: f64) {
+        self.trace.log_likelihood += dist.log_prob(&value);
+    }
+
+    fn on_observe_bool(&mut self, _: &Address, dist: &dyn Distribution<bool>, value: bool) {
+        self.trace.log_likelihood += dist.log_prob(&value);
+    }
+
+    fn on_observe_u64(&mut self, _: &Address, dist: &dyn Distribution<u64>, value: u64) {
+        self.trace.log_likelihood += dist.log_prob(&value);
+    }
+
+    fn on_observe_usize(&mut self, _: &Address, dist: &dyn Distribution<usize>, value: usize) {
+        self.trace.log_likelihood += dist.log_prob(&value);
     }
 
     fn on_factor(&mut self, logw: f64) {
@@ -209,7 +266,7 @@ pub struct ReplayHandler<'r, R: RngCore> {
 }
 
 impl<'r, R: RngCore> Handler for ReplayHandler<'r, R> {
-    fn on_sample(&mut self, addr: &Address, dist: &dyn DistributionF64) -> f64 {
+    fn on_sample_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>) -> f64 {
         let x = if let Some(c) = self.base.choices.get(addr) {
             match c.value {
                 ChoiceValue::F64(v) => v,
@@ -218,7 +275,7 @@ impl<'r, R: RngCore> Handler for ReplayHandler<'r, R> {
         } else {
             dist.sample(self.rng)
         };
-        let lp = dist.log_prob(x);
+        let lp = dist.log_prob(&x);
         self.trace.log_prior += lp;
         self.trace.choices.insert(
             addr.clone(),
@@ -231,8 +288,86 @@ impl<'r, R: RngCore> Handler for ReplayHandler<'r, R> {
         x
     }
 
-    fn on_observe(&mut self, _: &Address, dist: &dyn DistributionF64, value: f64) {
-        self.trace.log_likelihood += dist.log_prob(value);
+    fn on_sample_bool(&mut self, addr: &Address, dist: &dyn Distribution<bool>) -> bool {
+        let x = if let Some(c) = self.base.choices.get(addr) {
+            match c.value {
+                ChoiceValue::Bool(v) => v,
+                _ => panic!("expected bool at {}", addr),
+            }
+        } else {
+            dist.sample(self.rng)
+        };
+        let lp = dist.log_prob(&x);
+        self.trace.log_prior += lp;
+        self.trace.choices.insert(
+            addr.clone(),
+            Choice {
+                addr: addr.clone(),
+                value: ChoiceValue::Bool(x),
+                logp: lp,
+            },
+        );
+        x
+    }
+
+    fn on_sample_u64(&mut self, addr: &Address, dist: &dyn Distribution<u64>) -> u64 {
+        let x = if let Some(c) = self.base.choices.get(addr) {
+            match c.value {
+                ChoiceValue::U64(v) => v,
+                _ => panic!("expected u64 at {}", addr),
+            }
+        } else {
+            dist.sample(self.rng)
+        };
+        let lp = dist.log_prob(&x);
+        self.trace.log_prior += lp;
+        self.trace.choices.insert(
+            addr.clone(),
+            Choice {
+                addr: addr.clone(),
+                value: ChoiceValue::U64(x),
+                logp: lp,
+            },
+        );
+        x
+    }
+
+    fn on_sample_usize(&mut self, addr: &Address, dist: &dyn Distribution<usize>) -> usize {
+        let x = if let Some(c) = self.base.choices.get(addr) {
+            match c.value {
+                ChoiceValue::Usize(v) => v,
+                _ => panic!("expected usize at {}", addr),
+            }
+        } else {
+            dist.sample(self.rng)
+        };
+        let lp = dist.log_prob(&x);
+        self.trace.log_prior += lp;
+        self.trace.choices.insert(
+            addr.clone(),
+            Choice {
+                addr: addr.clone(),
+                value: ChoiceValue::Usize(x),
+                logp: lp,
+            },
+        );
+        x
+    }
+
+    fn on_observe_f64(&mut self, _: &Address, dist: &dyn Distribution<f64>, value: f64) {
+        self.trace.log_likelihood += dist.log_prob(&value);
+    }
+
+    fn on_observe_bool(&mut self, _: &Address, dist: &dyn Distribution<bool>, value: bool) {
+        self.trace.log_likelihood += dist.log_prob(&value);
+    }
+
+    fn on_observe_u64(&mut self, _: &Address, dist: &dyn Distribution<u64>, value: u64) {
+        self.trace.log_likelihood += dist.log_prob(&value);
+    }
+
+    fn on_observe_usize(&mut self, _: &Address, dist: &dyn Distribution<usize>, value: usize) {
+        self.trace.log_likelihood += dist.log_prob(&value);
     }
 
     fn on_factor(&mut self, logw: f64) {
@@ -301,7 +436,7 @@ pub struct ScoreGivenTrace {
 }
 
 impl Handler for ScoreGivenTrace {
-    fn on_sample(&mut self, addr: &Address, dist: &dyn DistributionF64) -> f64 {
+    fn on_sample_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>) -> f64 {
         let c = self
             .base
             .choices
@@ -311,14 +446,74 @@ impl Handler for ScoreGivenTrace {
             ChoiceValue::F64(v) => v,
             _ => panic!("expected f64 at {}", addr),
         };
-        let lp = dist.log_prob(x);
+        let lp = dist.log_prob(&x);
         self.trace.log_prior += lp;
         self.trace.choices.insert(addr.clone(), c.clone());
         x
     }
 
-    fn on_observe(&mut self, _: &Address, dist: &dyn DistributionF64, value: f64) {
-        self.trace.log_likelihood += dist.log_prob(value);
+    fn on_sample_bool(&mut self, addr: &Address, dist: &dyn Distribution<bool>) -> bool {
+        let c = self
+            .base
+            .choices
+            .get(addr)
+            .unwrap_or_else(|| panic!("missing value for site {} in base trace", addr));
+        let x = match c.value {
+            ChoiceValue::Bool(v) => v,
+            _ => panic!("expected bool at {}", addr),
+        };
+        let lp = dist.log_prob(&x);
+        self.trace.log_prior += lp;
+        self.trace.choices.insert(addr.clone(), c.clone());
+        x
+    }
+
+    fn on_sample_u64(&mut self, addr: &Address, dist: &dyn Distribution<u64>) -> u64 {
+        let c = self
+            .base
+            .choices
+            .get(addr)
+            .unwrap_or_else(|| panic!("missing value for site {} in base trace", addr));
+        let x = match c.value {
+            ChoiceValue::U64(v) => v,
+            _ => panic!("expected u64 at {}", addr),
+        };
+        let lp = dist.log_prob(&x);
+        self.trace.log_prior += lp;
+        self.trace.choices.insert(addr.clone(), c.clone());
+        x
+    }
+
+    fn on_sample_usize(&mut self, addr: &Address, dist: &dyn Distribution<usize>) -> usize {
+        let c = self
+            .base
+            .choices
+            .get(addr)
+            .unwrap_or_else(|| panic!("missing value for site {} in base trace", addr));
+        let x = match c.value {
+            ChoiceValue::Usize(v) => v,
+            _ => panic!("expected usize at {}", addr),
+        };
+        let lp = dist.log_prob(&x);
+        self.trace.log_prior += lp;
+        self.trace.choices.insert(addr.clone(), c.clone());
+        x
+    }
+
+    fn on_observe_f64(&mut self, _: &Address, dist: &dyn Distribution<f64>, value: f64) {
+        self.trace.log_likelihood += dist.log_prob(&value);
+    }
+
+    fn on_observe_bool(&mut self, _: &Address, dist: &dyn Distribution<bool>, value: bool) {
+        self.trace.log_likelihood += dist.log_prob(&value);
+    }
+
+    fn on_observe_u64(&mut self, _: &Address, dist: &dyn Distribution<u64>, value: u64) {
+        self.trace.log_likelihood += dist.log_prob(&value);
+    }
+
+    fn on_observe_usize(&mut self, _: &Address, dist: &dyn Distribution<usize>, value: usize) {
+        self.trace.log_likelihood += dist.log_prob(&value);
     }
 
     fn on_factor(&mut self, logw: f64) {
