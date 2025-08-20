@@ -436,7 +436,27 @@ cargo test --doc
 
 ## 📖 Documentation
 
-- **[API Documentation](https://docs.rs/.../fugue)** - Complete API reference
+### 🚀 Getting Started
+- **[📚 Complete Documentation](docs/README.md)** - Comprehensive guides and tutorials
+- **[⚡ Installation Guide](docs/getting-started/installation.md)** - Get up and running quickly
+- **[🎯 Your First Model](docs/getting-started/your-first-model.md)** - Build your first probabilistic model
+
+### 📚 Learning Resources
+- **[🎓 Tutorials](docs/tutorials/)** - Step-by-step learning:
+  - [Bayesian Coin Flip](docs/tutorials/bayesian-coin-flip.md) (Beginner)
+  - [Linear Regression](docs/tutorials/linear-regression.md) (Intermediate)
+  - [Mixture Models](docs/tutorials/mixture-models.md) (Intermediate)
+  - [Hierarchical Models](docs/tutorials/hierarchical-models.md) (Advanced)
+
+- **[🛠️ How-To Guides](docs/how-to/)** - Practical solutions:
+  - [Working with Distributions](docs/how-to/working-with-distributions.md)
+  - [Using Macros](docs/how-to/using-macros.md) (`prob!`, `plate!`, `addr!`)
+  - [Trace Manipulation](docs/how-to/trace-manipulation.md)
+  - [Custom Handlers](docs/how-to/custom-handlers.md)
+  - [Debugging Models](docs/how-to/debugging-models.md)
+
+### 📖 Reference
+- **[API Documentation](https://docs.rs/fugue)** - Complete API reference
 - **[Examples](examples/)** - Practical usage examples
 - **[Core Module Guide](src/core/README.md)** - Deep dive into Model types
 - **[Inference Guide](src/inference/README.md)** - Inference algorithms overview
