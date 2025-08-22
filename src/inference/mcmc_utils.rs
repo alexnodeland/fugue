@@ -92,7 +92,7 @@ impl DiminishingAdaptation {
         } else {
             1.0 // Reset to default if numerical issues
         };
-        
+
         // Update cached log scale to match the clamped scale
         if *scale == 1.0 {
             *log_scale = 0.0; // ln(1.0) = 0.0

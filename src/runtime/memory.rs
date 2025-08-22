@@ -439,28 +439,28 @@ mod memory_tests {
     #[test]
     fn test_trace_pool_stats() {
         let mut pool = TracePool::new(2);
-        
+
         // Test hit/miss tracking
         let t1 = pool.get(); // miss
         let t2 = pool.get(); // miss
         assert_eq!(pool.stats().misses, 2);
         assert_eq!(pool.stats().hit_ratio(), 0.0);
-        
+
         pool.return_trace(t1); // return
         let _t3 = pool.get(); // hit
         assert_eq!(pool.stats().hits, 1);
         assert_eq!(pool.stats().returns, 1);
         assert!(pool.stats().hit_ratio() > 0.0);
-        
+
         // Test overflow (drop) - need to fill pool first
         pool.return_trace(t2); // return (pool now has 1 item)
         let another_trace = pool.get(); // get the returned trace (hit)
         pool.return_trace(another_trace); // return it (pool now has 1 item)
-        
+
         // Add one more to make pool full (capacity 2)
         let extra_trace = Trace::default();
         pool.return_trace(extra_trace); // pool now has 2 items (full)
-        
+
         // Now this should be dropped
         let mut dummy_trace = Trace::default();
         dummy_trace.log_prior = 1.0; // Make it non-empty
@@ -471,17 +471,17 @@ mod memory_tests {
     #[test]
     fn test_trace_pool_shrinking() {
         let mut pool = TracePool::with_bounds(10, 3);
-        
+
         // Fill pool beyond minimum
         for _ in 0..8 {
             pool.return_trace(Trace::default());
         }
         assert_eq!(pool.len(), 8);
-        
+
         // Shrink should reduce to minimum
         pool.shrink();
         assert_eq!(pool.len(), 3);
-        
+
         // Shrink to specific size
         for _ in 0..5 {
             pool.return_trace(Trace::default());
@@ -511,15 +511,15 @@ mod memory_tests {
         // unnecessary address clones
         let start = Instant::now();
         let mut builder = TraceBuilder::new();
-        
+
         for i in 0..10000 {
             let addr = addr!("test", i);
             builder.add_sample(addr, i as f64, -0.5);
         }
-        
+
         let trace = builder.build();
         let duration = start.elapsed();
-        
+
         assert_eq!(trace.choices.len(), 10000);
         // This is a smoke test - in practice you'd compare with a baseline
         println!("Built trace with 10k choices in {:?}", duration);
@@ -528,16 +528,16 @@ mod memory_tests {
     #[test]
     fn test_mixed_value_types() {
         let mut builder = TraceBuilder::new();
-        
+
         // Test all supported value types
         builder.add_sample(addr!("f64"), 1.5, -0.5);
         builder.add_sample_bool(addr!("bool"), true, -0.693);
         builder.add_sample_u64(addr!("u64"), 42, -1.0);
         builder.add_sample_usize(addr!("usize"), 3, -1.2);
-        
+
         let trace = builder.build();
         assert_eq!(trace.choices.len(), 4);
-        
+
         // Verify values are stored correctly
         assert_eq!(trace.choices[&addr!("f64")].value, ChoiceValue::F64(1.5));
         assert_eq!(trace.choices[&addr!("bool")].value, ChoiceValue::Bool(true));
@@ -553,26 +553,29 @@ mod memory_tests {
             base.insert_choice(addr!("x", i), ChoiceValue::F64(i as f64), -0.5);
         }
         let cow_base = CowTrace::from_trace(base);
-        
+
         // Create many clones (should share memory)
         let mut clones = Vec::new();
         for _ in 0..100 {
             clones.push(cow_base.clone());
         }
-        
+
         // All clones should share the same Arc
         for clone in &clones {
             assert!(Arc::ptr_eq(&cow_base.choices, &clone.choices));
         }
-        
+
         // Modifying one clone should not affect others
         let mut modified = clones[0].clone();
-        modified.insert_choice(addr!("new"), Choice {
-            addr: addr!("new"),
-            value: ChoiceValue::F64(999.0),
-            logp: -2.0,
-        });
-        
+        modified.insert_choice(
+            addr!("new"),
+            Choice {
+                addr: addr!("new"),
+                value: ChoiceValue::F64(999.0),
+                logp: -2.0,
+            },
+        );
+
         // The modified clone should have different data
         assert!(!Arc::ptr_eq(&cow_base.choices, &modified.choices));
         // But other clones should still share with base
@@ -582,23 +585,23 @@ mod memory_tests {
     #[test]
     fn test_pool_stats_accuracy() {
         let mut pool = TracePool::new(5);
-        
+
         // Pattern: get 10, return 5, get 10 more
         // First 10 gets: all misses
         for _ in 0..10 {
             pool.get(); // 10 misses
         }
-        
-        // Return 5 traces (pool capacity is 5, so all should be accepted)  
+
+        // Return 5 traces (pool capacity is 5, so all should be accepted)
         for _ in 0..5 {
             pool.return_trace(Trace::default()); // 5 returns
         }
-        
+
         // Next 10 gets: first 5 should be hits, next 5 should be misses
         for _ in 0..10 {
             pool.get(); // 5 hits + 5 misses
         }
-        
+
         let stats = pool.stats();
         assert_eq!(stats.misses, 15); // 10 + 5
         assert_eq!(stats.hits, 5);

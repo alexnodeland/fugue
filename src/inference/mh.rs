@@ -7,16 +7,16 @@
 //! - **Single-site updates**: Updates one random variable at a time for better mixing
 //! - **Type-safe proposals**: Preserves original types (bool, u64, usize, etc.) during proposals
 //! - **Type-aware proposals**: Uses ProposalStrategy traits based on value types
-//! 
+//!
 //! ## Limitations
 //!
 //! The current implementation uses **type-aware** rather than **distribution-aware** proposals.
 //! This means all `f64` values get Gaussian proposals regardless of their source distribution:
-//! 
+//!
 //! - `Beta(2, 2)` → `f64` → Gaussian proposals (can violate [0,1] bounds)
 //! - `Normal(0, 1)` → `f64` → Gaussian proposals (appropriate)
 //! - Custom distributions → Type-based proposals (may be suboptimal)
-//! 
+//!
 //! For specialized distributions requiring custom proposals (logit-transform for Beta,
 //! circular proposals for von Mises, etc.), consider implementing custom MCMC algorithms
 //! or contributing distribution-aware proposal extensions.
