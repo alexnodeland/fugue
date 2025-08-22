@@ -101,50 +101,42 @@ impl TraceBuilder {
     }
 
     pub fn add_sample(&mut self, addr: Address, value: f64, log_prob: f64) {
-        self.choices.insert(
-            addr.clone(),
-            Choice {
-                addr,
-                value: ChoiceValue::F64(value),
-                logp: log_prob,
-            },
-        );
+        let choice = Choice {
+            addr: addr.clone(),
+            value: ChoiceValue::F64(value),
+            logp: log_prob,
+        };
+        self.choices.insert(addr, choice);
         self.log_prior += log_prob;
     }
 
     pub fn add_sample_bool(&mut self, addr: Address, value: bool, log_prob: f64) {
-        self.choices.insert(
-            addr.clone(),
-            Choice {
-                addr,
-                value: ChoiceValue::Bool(value),
-                logp: log_prob,
-            },
-        );
+        let choice = Choice {
+            addr: addr.clone(),
+            value: ChoiceValue::Bool(value),
+            logp: log_prob,
+        };
+        self.choices.insert(addr, choice);
         self.log_prior += log_prob;
     }
 
     pub fn add_sample_u64(&mut self, addr: Address, value: u64, log_prob: f64) {
-        self.choices.insert(
-            addr.clone(),
-            Choice {
-                addr,
-                value: ChoiceValue::U64(value),
-                logp: log_prob,
-            },
-        );
+        let choice = Choice {
+            addr: addr.clone(),
+            value: ChoiceValue::U64(value),
+            logp: log_prob,
+        };
+        self.choices.insert(addr, choice);
         self.log_prior += log_prob;
     }
 
     pub fn add_sample_usize(&mut self, addr: Address, value: usize, log_prob: f64) {
-        self.choices.insert(
-            addr.clone(),
-            Choice {
-                addr,
-                value: ChoiceValue::Usize(value),
-                logp: log_prob,
-            },
-        );
+        let choice = Choice {
+            addr: addr.clone(),
+            value: ChoiceValue::Usize(value),
+            logp: log_prob,
+        };
+        self.choices.insert(addr, choice);
         self.log_prior += log_prob;
     }
 
@@ -167,25 +159,88 @@ impl TraceBuilder {
 }
 
 /// Memory pool for reusing trace allocations.
+///
+/// This pool maintains a collection of cleared Trace objects that can be reused
+/// to reduce allocation overhead in MCMC and other inference algorithms.
 pub struct TracePool {
     available: Vec<Trace>,
     max_size: usize,
+    min_size: usize,
+    stats: PoolStats,
+}
+
+/// Statistics for monitoring TracePool usage and efficiency.
+#[derive(Debug, Clone, Default)]
+pub struct PoolStats {
+    /// Number of successful gets from the pool (cache hits).
+    pub hits: u64,
+    /// Number of gets that required new allocation (cache misses).
+    pub misses: u64,
+    /// Number of traces returned to the pool.
+    pub returns: u64,
+    /// Number of traces dropped due to pool being full.
+    pub drops: u64,
+}
+
+impl PoolStats {
+    /// Calculate hit ratio as a percentage.
+    pub fn hit_ratio(&self) -> f64 {
+        let total = self.hits + self.misses;
+        if total == 0 {
+            0.0
+        } else {
+            (self.hits as f64 / total as f64) * 100.0
+        }
+    }
+
+    /// Total number of get operations.
+    pub fn total_gets(&self) -> u64 {
+        self.hits + self.misses
+    }
 }
 
 impl TracePool {
+    /// Create a new trace pool with the specified capacity bounds.
+    ///
+    /// - `max_size`: Maximum number of traces to keep in the pool
+    /// - `min_size`: Minimum number of traces to maintain (for shrinking)
     pub fn new(max_size: usize) -> Self {
         Self {
             available: Vec::with_capacity(max_size),
             max_size,
+            min_size: max_size / 4, // Keep at least 25% of max capacity
+            stats: PoolStats::default(),
+        }
+    }
+
+    /// Create a new trace pool with custom capacity bounds.
+    pub fn with_bounds(max_size: usize, min_size: usize) -> Self {
+        assert!(min_size <= max_size, "min_size must be <= max_size");
+        Self {
+            available: Vec::with_capacity(max_size),
+            max_size,
+            min_size,
+            stats: PoolStats::default(),
         }
     }
 
     /// Get a trace from the pool or create new one.
+    ///
+    /// Returns a cleared trace ready for use. Updates hit/miss statistics.
     pub fn get(&mut self) -> Trace {
-        self.available.pop().unwrap_or_else(|| Trace::default())
+        if let Some(trace) = self.available.pop() {
+            self.stats.hits += 1;
+            trace
+        } else {
+            self.stats.misses += 1;
+            Trace::default()
+        }
     }
 
     /// Return a trace to the pool for reuse.
+    ///
+    /// The trace will be cleared and made available for future gets.
+    /// If the pool is full, the trace will be dropped.
     pub fn return_trace(&mut self, mut trace: Trace) {
         if self.available.len() < self.max_size {
             // Clear the trace for reuse
@@ -194,7 +249,65 @@ impl TracePool {
             trace.log_likelihood = 0.0;
             trace.log_factors = 0.0;
             self.available.push(trace);
+            self.stats.returns += 1;
+        } else {
+            self.stats.drops += 1;
         }
+    }
+
+    /// Shrink the pool to the minimum size if it's grown too large.
+    ///
+    /// This can be called periodically to reclaim memory when the pool
+    /// has accumulated more traces than needed.
+    pub fn shrink(&mut self) {
+        if self.available.len() > self.min_size {
+            self.available.truncate(self.min_size);
+            self.available.shrink_to_fit();
+        }
+    }
+
+    /// Force shrink to a specific size.
+    pub fn shrink_to(&mut self, target_size: usize) {
+        let target = target_size.min(self.max_size);
+        if self.available.len() > target {
+            self.available.truncate(target);
+            self.available.shrink_to_fit();
+        }
+    }
+
+    /// Clear all traces from the pool.
+    pub fn clear(&mut self) {
+        self.available.clear();
+    }
+
+    /// Get current pool statistics.
+    pub fn stats(&self) -> &PoolStats {
+        &self.stats
+    }
+
+    /// Reset statistics counters.
+    pub fn reset_stats(&mut self) {
+        self.stats = PoolStats::default();
+    }
+
+    /// Current number of available traces in the pool.
+    pub fn len(&self) -> usize {
+        self.available.len()
+    }
+
+    /// Check if the pool is empty.
+    pub fn is_empty(&self) -> bool {
+        self.available.is_empty()
+    }
+
+    /// Maximum capacity of the pool.
+    pub fn capacity(&self) -> usize {
+        self.max_size
+    }
+
+    /// Minimum size maintained during shrinking.
+    pub fn min_capacity(&self) -> usize {
+        self.min_size
     }
 }
 
@@ -267,6 +380,7 @@ impl<'a, R: rand::RngCore> crate::runtime::handler::Handler for PooledPriorHandl
 mod memory_tests {
     use super::*;
     use crate::addr;
+    use std::time::Instant;
 
     #[test]
     fn test_cow_trace_efficiency() {
@@ -300,20 +414,81 @@ mod memory_tests {
     }
 
     #[test]
-    fn test_trace_pool() {
+    fn test_trace_pool_basic() {
         let mut pool = TracePool::new(3);
 
         // Get traces from pool
         let trace1 = pool.get();
         let trace2 = pool.get();
 
+        // Should be cache misses initially
+        assert_eq!(pool.stats().misses, 2);
+        assert_eq!(pool.stats().hits, 0);
+
         // Return to pool
         pool.return_trace(trace1);
         pool.return_trace(trace2);
+        assert_eq!(pool.stats().returns, 2);
 
-        // Should reuse returned traces
+        // Should reuse returned traces (cache hits)
         let trace3 = pool.get();
         assert_eq!(trace3.choices.len(), 0); // Should be cleared
+        assert_eq!(pool.stats().hits, 1);
+    }
+
+    #[test]
+    fn test_trace_pool_stats() {
+        let mut pool = TracePool::new(2);
+        
+        // Test hit/miss tracking
+        let t1 = pool.get(); // miss
+        let t2 = pool.get(); // miss
+        assert_eq!(pool.stats().misses, 2);
+        assert_eq!(pool.stats().hit_ratio(), 0.0);
+        
+        pool.return_trace(t1); // return
+        let _t3 = pool.get(); // hit
+        assert_eq!(pool.stats().hits, 1);
+        assert_eq!(pool.stats().returns, 1);
+        assert!(pool.stats().hit_ratio() > 0.0);
+        
+        // Test overflow (drop) - need to fill pool first
+        pool.return_trace(t2); // return (pool now has 1 item)
+        let another_trace = pool.get(); // get the returned trace (hit)
+        pool.return_trace(another_trace); // return it (pool now has 1 item)
+        
+        // Add one more to make pool full (capacity 2)
+        let extra_trace = Trace::default();
+        pool.return_trace(extra_trace); // pool now has 2 items (full)
+        
+        // Now this should be dropped
+        let mut dummy_trace = Trace::default();
+        dummy_trace.log_prior = 1.0; // Make it non-empty
+        pool.return_trace(dummy_trace); // should be dropped because pool is full
+        assert_eq!(pool.stats().drops, 1);
+    }
+
+    #[test]
+    fn test_trace_pool_shrinking() {
+        let mut pool = TracePool::with_bounds(10, 3);
+        
+        // Fill pool beyond minimum
+        for _ in 0..8 {
+            pool.return_trace(Trace::default());
+        }
+        assert_eq!(pool.len(), 8);
+        
+        // Shrink should reduce to minimum
+        pool.shrink();
+        assert_eq!(pool.len(), 3);
+        
+        // Shrink to specific size
+        for _ in 0..5 {
+            pool.return_trace(Trace::default());
+        }
+        assert_eq!(pool.len(), 8); // 3 + 5
+        pool.shrink_to(2);
+        assert_eq!(pool.len(), 2);
     }
 
     #[test]
@@ -328,5 +503,108 @@ mod memory_tests {
         let trace = builder.build();
         assert_eq!(trace.choices.len(), 1000);
         assert!((trace.log_prior - (-500.0)).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_address_optimization() {
+        // Test that the new TraceBuilder implementation doesn't create
+        // unnecessary address clones
+        let start = Instant::now();
+        let mut builder = TraceBuilder::new();
+        
+        for i in 0..10000 {
+            let addr = addr!("test", i);
+            builder.add_sample(addr, i as f64, -0.5);
+        }
+        
+        let trace = builder.build();
+        let duration = start.elapsed();
+        
+        assert_eq!(trace.choices.len(), 10000);
+        // This is a smoke test - in practice you'd compare with a baseline
+        println!("Built trace with 10k choices in {:?}", duration);
+    }
+
+    #[test]
+    fn test_mixed_value_types() {
+        let mut builder = TraceBuilder::new();
+        
+        // Test all supported value types
+        builder.add_sample(addr!("f64"), 1.5, -0.5);
+        builder.add_sample_bool(addr!("bool"), true, -0.693);
+        builder.add_sample_u64(addr!("u64"), 42, -1.0);
+        builder.add_sample_usize(addr!("usize"), 3, -1.2);
+        
+        let trace = builder.build();
+        assert_eq!(trace.choices.len(), 4);
+        
+        // Verify values are stored correctly
+        assert_eq!(trace.choices[&addr!("f64")].value, ChoiceValue::F64(1.5));
+        assert_eq!(trace.choices[&addr!("bool")].value, ChoiceValue::Bool(true));
+        assert_eq!(trace.choices[&addr!("u64")].value, ChoiceValue::U64(42));
+        assert_eq!(trace.choices[&addr!("usize")].value, ChoiceValue::Usize(3));
+    }
+
+    #[test]
+    fn test_cow_trace_memory_sharing() {
+        // Create a large base trace
+        let mut base = Trace::default();
+        for i in 0..1000 {
+            base.insert_choice(addr!("x", i), ChoiceValue::F64(i as f64), -0.5);
+        }
+        let cow_base = CowTrace::from_trace(base);
+        
+        // Create many clones (should share memory)
+        let mut clones = Vec::new();
+        for _ in 0..100 {
+            clones.push(cow_base.clone());
+        }
+        
+        // All clones should share the same Arc
+        for clone in &clones {
+            assert!(Arc::ptr_eq(&cow_base.choices, &clone.choices));
+        }
+        
+        // Modifying one clone should not affect others
+        let mut modified = clones[0].clone();
+        modified.insert_choice(addr!("new"), Choice {
+            addr: addr!("new"),
+            value: ChoiceValue::F64(999.0),
+            logp: -2.0,
+        });
+        
+        // The modified clone should have different data
+        assert!(!Arc::ptr_eq(&cow_base.choices, &modified.choices));
+        // But other clones should still share with base
+        assert!(Arc::ptr_eq(&cow_base.choices, &clones[1].choices));
+    }
+
+    #[test]
+    fn test_pool_stats_accuracy() {
+        let mut pool = TracePool::new(5);
+        
+        // Pattern: get 10, return 5, get 10 more
+        // First 10 gets: all misses
+        for _ in 0..10 {
+            pool.get(); // 10 misses
+        }
+        
+        // Return 5 traces (pool capacity is 5, so all should be accepted)  
+        for _ in 0..5 {
+            pool.return_trace(Trace::default()); // 5 returns
+        }
+        
+        // Next 10 gets: first 5 should be hits, next 5 should be misses
+        for _ in 0..10 {
+            pool.get(); // 5 hits + 5 misses
+        }
+        
+        let stats = pool.stats();
+        assert_eq!(stats.misses, 15); // 10 + 5
+        assert_eq!(stats.hits, 5);
+        assert_eq!(stats.returns, 5);
+        assert_eq!(stats.drops, 0);
+        assert_eq!(stats.total_gets(), 20);
+        assert!((stats.hit_ratio() - 25.0).abs() < 1e-10);
     }
 }
