@@ -404,7 +404,7 @@ pub fn print_diagnostics(chains: &[Vec<Trace>]) {
     println!("{}", "-".repeat(80));
 
     for addr in &all_addresses {
-        let summary = summarize_f64_parameter(chains, &addr);
+        let summary = summarize_f64_parameter(chains, addr);
         println!(
             "{:<15} {:>8.3} {:>8.3} {:>8.3} {:>8.3} {:>8.3} {:>8.3} {:>8.0}",
             addr.to_string(),

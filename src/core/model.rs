@@ -777,7 +777,7 @@ pub fn traverse_vec<T, A: Send + 'static>(
     items: Vec<T>,
     f: impl Fn(T) -> Model<A> + Send + Sync + 'static,
 ) -> Model<Vec<A>> {
-    sequence_vec(items.into_iter().map(|t| f(t)).collect())
+    sequence_vec(items.into_iter().map(f).collect())
 }
 
 /// Conditional execution: fail with zero probability when predicate is false.

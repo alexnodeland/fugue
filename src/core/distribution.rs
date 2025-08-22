@@ -310,7 +310,7 @@ impl Distribution<f64> for Normal {
         }
 
         // Use precomputed constant for better precision
-        const LN_2PI: f64 = 1.8378770664093454835606594728112; // ln(2π)
+        const LN_2PI: f64 = 1.837_877_066_409_345_6; // ln(2π)
         -0.5 * z * z - self.sigma.ln() - 0.5 * LN_2PI
     }
     fn clone_box(&self) -> Box<dyn Distribution<f64>> {
@@ -518,7 +518,7 @@ impl Distribution<f64> for LogNormal {
         }
 
         // Stable computation: log_prob = -0.5*z² - ln(x) - ln(σ) - 0.5*ln(2π)
-        const LN_2PI: f64 = 1.8378770664093454835606594728112; // ln(2π)
+        const LN_2PI: f64 = 1.837_877_066_409_345_6; // ln(2π)
         -0.5 * z * z - lx - self.sigma.ln() - 0.5 * LN_2PI
     }
     fn clone_box(&self) -> Box<dyn Distribution<f64>> {
@@ -670,7 +670,7 @@ pub struct Bernoulli {
 impl Bernoulli {
     /// Create a new Bernoulli distribution with validated parameters.
     pub fn new(p: f64) -> crate::error::FugueResult<Self> {
-        if !p.is_finite() || p < 0.0 || p > 1.0 {
+        if !p.is_finite() || !(0.0..=1.0).contains(&p) {
             return Err(crate::error::FugueError::InvalidParameters {
                 distribution: "Bernoulli".to_string(),
                 reason: "Probability must be in [0, 1]".to_string(),
@@ -1183,7 +1183,7 @@ pub struct Binomial {
 impl Binomial {
     /// Create a new Binomial distribution with validated parameters.
     pub fn new(n: u64, p: f64) -> crate::error::FugueResult<Self> {
-        if !p.is_finite() || p < 0.0 || p > 1.0 {
+        if !p.is_finite() || !(0.0..=1.0).contains(&p) {
             return Err(crate::error::FugueError::InvalidParameters {
                 distribution: "Binomial".to_string(),
                 reason: "Probability must be in [0, 1]".to_string(),
@@ -1204,7 +1204,7 @@ impl Binomial {
 }
 impl Distribution<u64> for Binomial {
     fn sample(&self, rng: &mut dyn RngCore) -> u64 {
-        RDBinomial::new(self.n, self.p).unwrap().sample(rng) as u64
+        RDBinomial::new(self.n, self.p).unwrap().sample(rng)
     }
     fn log_prob(&self, x: &u64) -> LogF64 {
         let k = *x;

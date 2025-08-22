@@ -184,7 +184,7 @@ impl VariationalParam {
                 let u2: f64 = rng.gen();
                 let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
                 let value = mu + sigma * z;
-                const LN_2PI: f64 = 1.8378770664093454835606594728112;
+                const LN_2PI: f64 = 1.837_877_066_409_345_6;
                 let _log_prob = -0.5 * z * z - log_sigma - 0.5 * LN_2PI;
                 (value, z)
             }
@@ -196,7 +196,7 @@ impl VariationalParam {
                 let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
                 let log_value = mu + sigma * z;
                 let value = log_value.exp();
-                const LN_2PI: f64 = 1.8378770664093454835606594728112;
+                const LN_2PI: f64 = 1.837_877_066_409_345_6;
                 let _log_prob = -0.5 * z * z - log_sigma - 0.5 * LN_2PI - log_value;
                 (value, z)
             }
@@ -296,6 +296,12 @@ impl VariationalParam {
 pub struct MeanFieldGuide {
     /// Map from addresses to their variational parameters.
     pub params: HashMap<Address, VariationalParam>,
+}
+
+impl Default for MeanFieldGuide {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MeanFieldGuide {
@@ -439,12 +445,12 @@ pub fn optimize_meanfield_vi<A, R: Rng>(
                     if let Some(VariationalParam::Normal { mu: mu_plus, .. }) =
                         guide_plus.params.get_mut(_addr)
                     {
-                        *mu_plus = *mu_plus + eps;
+                        *mu_plus += eps;
                     }
                     let elbo_plus = elbo_with_guide(rng, &model_fn, &guide_plus, 10);
                     let grad_mu = (elbo_plus - current_elbo) / eps;
 
-                    *mu = *mu + learning_rate * grad_mu;
+                    *mu += learning_rate * grad_mu;
                 }
                 VariationalParam::LogNormal { mu, log_sigma: _ } => {
                     // Similar finite difference for LogNormal parameters
@@ -453,12 +459,12 @@ pub fn optimize_meanfield_vi<A, R: Rng>(
                     if let Some(VariationalParam::LogNormal { mu: mu_plus, .. }) =
                         guide_plus.params.get_mut(_addr)
                     {
-                        *mu_plus = *mu_plus + eps;
+                        *mu_plus += eps;
                     }
                     let elbo_plus = elbo_with_guide(rng, &model_fn, &guide_plus, 10);
                     let grad_mu = (elbo_plus - current_elbo) / eps;
 
-                    *mu = *mu + learning_rate * grad_mu;
+                    *mu += learning_rate * grad_mu;
                 }
                 VariationalParam::Beta {
                     log_alpha,
@@ -472,12 +478,12 @@ pub fn optimize_meanfield_vi<A, R: Rng>(
                         ..
                     }) = guide_plus.params.get_mut(_addr)
                     {
-                        *alpha_plus = *alpha_plus + eps;
+                        *alpha_plus += eps;
                     }
                     let elbo_plus = elbo_with_guide(rng, &model_fn, &guide_plus, 10);
                     let grad_alpha = (elbo_plus - current_elbo) / eps;
 
-                    *log_alpha = *log_alpha + learning_rate * grad_alpha;
+                    *log_alpha += learning_rate * grad_alpha;
                 }
             }
         }

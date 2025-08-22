@@ -4,8 +4,10 @@
 //! capabilities of the improved Fugue implementation.
 
 use clap::Parser;
-use fugue::*;
-// removed unused import
+use fugue::{
+    inference::validation::ConjugateNormalConfig,
+    *,
+};
 use rand::{rngs::StdRng, SeedableRng};
 
 /// Model for Gaussian mean estimation with known variance.
@@ -181,12 +183,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let validation = test_conjugate_normal_model(
             &mut StdRng::seed_from_u64(args.seed.unwrap_or(42)),
             mcmc_test,
-            0.0,      // prior_mu
-            5.0,      // prior_sigma
-            1.0,      // likelihood_sigma
-            args.obs, // observation
-            args.n_samples,
-            args.n_warmup,
+            ConjugateNormalConfig {
+                prior_mu: 0.0,
+                prior_sigma: 5.0,
+                likelihood_sigma: 1.0,
+                observation: args.obs,
+                n_samples: args.n_samples,
+                n_warmup: args.n_warmup,
+            },
         );
 
         validation.print_summary();

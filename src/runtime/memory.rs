@@ -21,6 +21,12 @@ pub struct CowTrace {
     log_factors: f64,
 }
 
+impl Default for CowTrace {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CowTrace {
     /// Create a new copy-on-write trace.
     pub fn new() -> Self {
@@ -83,6 +89,12 @@ pub struct TraceBuilder {
     log_prior: f64,
     log_likelihood: f64,
     log_factors: f64,
+}
+
+impl Default for TraceBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TraceBuilder {

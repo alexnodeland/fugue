@@ -68,6 +68,23 @@ fn ks_statistic(sample1: &[f64], sample2: &[f64]) -> f64 {
     max_diff
 }
 
+/// Configuration for conjugate normal model validation.
+#[derive(Debug, Clone)]
+pub struct ConjugateNormalConfig {
+    /// Prior mean
+    pub prior_mu: f64,
+    /// Prior standard deviation
+    pub prior_sigma: f64,
+    /// Likelihood standard deviation
+    pub likelihood_sigma: f64,
+    /// Observed data point
+    pub observation: f64,
+    /// Number of MCMC samples
+    pub n_samples: usize,
+    /// Number of warmup/burn-in samples
+    pub n_warmup: usize,
+}
+
 /// Test MCMC implementation against known analytical posterior.
 ///
 /// For conjugate models where the posterior is known analytically,
@@ -75,25 +92,20 @@ fn ks_statistic(sample1: &[f64], sample2: &[f64]) -> f64 {
 pub fn test_conjugate_normal_model<R: Rng>(
     rng: &mut R,
     mcmc_fn: impl Fn(&mut R, usize, usize) -> Vec<(f64, Trace)>,
-    prior_mu: f64,
-    prior_sigma: f64,
-    likelihood_sigma: f64,
-    observation: f64,
-    n_samples: usize,
-    n_warmup: usize,
+    config: ConjugateNormalConfig,
 ) -> ValidationResult {
     // Analytical posterior for normal-normal conjugate model
-    let prior_precision = 1.0 / (prior_sigma * prior_sigma);
-    let likelihood_precision = 1.0 / (likelihood_sigma * likelihood_sigma);
+    let prior_precision = 1.0 / (config.prior_sigma * config.prior_sigma);
+    let likelihood_precision = 1.0 / (config.likelihood_sigma * config.likelihood_sigma);
 
     let posterior_precision = prior_precision + likelihood_precision;
     let posterior_variance = 1.0 / posterior_precision;
     let posterior_sigma = posterior_variance.sqrt();
     let posterior_mu =
-        posterior_variance * (prior_precision * prior_mu + likelihood_precision * observation);
+        posterior_variance * (prior_precision * config.prior_mu + likelihood_precision * config.observation);
 
     // Run MCMC
-    let samples = mcmc_fn(rng, n_samples, n_warmup);
+    let samples = mcmc_fn(rng, config.n_samples, config.n_warmup);
     let mu_samples: Vec<f64> = samples
         .iter()
         .filter_map(|(_, trace)| trace.choices.get(&addr!("mu")))
@@ -128,7 +140,7 @@ pub fn test_conjugate_normal_model<R: Rng>(
 
     let mean_ok = mean_error < 2.0 * se_mean;
     let var_ok = var_error < 2.0 * se_var;
-    let ess_ok = ess > n_samples as f64 * 0.1; // At least 10% efficiency
+    let ess_ok = ess > config.n_samples as f64 * 0.1; // At least 10% efficiency
 
     ValidationResult::Success {
         mean_error,
