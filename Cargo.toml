@@ -16,14 +16,19 @@ all-features = true
 # Use nightly for better documentation features
 rustdoc-args = ["--cfg", "docsrs"]
 
+
 [dependencies]
+# Core dependencies
 rand = "0.8"
 rand_distr = "0.4"
 libm = "0.2"
 
-[dev-dependencies]
+[dev-dependencies]  
+# CLI dependencies
 clap = { version = "4", features = ["derive"] }
+# Testing dependencies  
 proptest = "1.0"
+# Benchmarking dependencies
 criterion = { version = "0.5", features = ["html_reports"] }
 
 [[bench]]
