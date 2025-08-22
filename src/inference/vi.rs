@@ -179,7 +179,6 @@ impl VariationalParam {
         match self {
             VariationalParam::Normal { mu, log_sigma } => {
                 let sigma = log_sigma.exp();
-                let _eps: f64 = rng.gen::<f64>() * 2.0 - 1.0;
                 // Simple standard normal sampling
                 let u1: f64 = rng.gen::<f64>().max(1e-10);
                 let u2: f64 = rng.gen();
@@ -191,7 +190,6 @@ impl VariationalParam {
             }
             VariationalParam::LogNormal { mu, log_sigma } => {
                 let sigma = log_sigma.exp();
-                let _eps: f64 = rng.gen::<f64>() * 2.0 - 1.0;
                 // Simple standard normal sampling
                 let u1: f64 = rng.gen::<f64>().max(1e-10);
                 let u2: f64 = rng.gen();
@@ -213,7 +211,6 @@ impl VariationalParam {
                 let approx_var = (alpha * beta) / ((alpha + beta).powi(2) * (alpha + beta + 1.0));
                 let approx_sigma = approx_var.sqrt();
 
-                let _eps: f64 = rng.gen::<f64>() * 2.0 - 1.0;
                 // Simple standard normal sampling
                 let u1: f64 = rng.gen::<f64>().max(1e-10);
                 let u2: f64 = rng.gen();
