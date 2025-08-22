@@ -5,7 +5,21 @@
 //!
 //! - **Adaptive scaling**: Automatically tunes proposal step sizes to achieve target acceptance rates
 //! - **Single-site updates**: Updates one random variable at a time for better mixing
-//! - **Random-walk proposals**: Uses Gaussian perturbations centered on current values
+//! - **Type-safe proposals**: Preserves original types (bool, u64, usize, etc.) during proposals
+//! - **Type-aware proposals**: Uses ProposalStrategy traits based on value types
+//! 
+//! ## Limitations
+//!
+//! The current implementation uses **type-aware** rather than **distribution-aware** proposals.
+//! This means all `f64` values get Gaussian proposals regardless of their source distribution:
+//! 
+//! - `Beta(2, 2)` → `f64` → Gaussian proposals (can violate [0,1] bounds)
+//! - `Normal(0, 1)` → `f64` → Gaussian proposals (appropriate)
+//! - Custom distributions → Type-based proposals (may be suboptimal)
+//! 
+//! For specialized distributions requiring custom proposals (logit-transform for Beta,
+//! circular proposals for von Mises, etc.), consider implementing custom MCMC algorithms
+//! or contributing distribution-aware proposal extensions.
 //! - **Acceptance rate monitoring**: Tracks and optimizes per-site acceptance rates
 //!
 //! ## Algorithm Overview
@@ -140,58 +154,49 @@ impl ProposalStrategy<usize> for UniformCategoricalProposal {
     }
 }
 
-/// Generate numerically stable proposal values for MCMC.
+/// Unified proposal system using ProposalStrategy traits.
 ///
-/// This function creates proposal values using proper random walk distributions
-/// with improved numerical stability and boundary handling.
-fn propose_new_value_stable<R: Rng>(rng: &mut R, choice: &Choice, scale: f64) -> f64 {
+/// This function uses the appropriate ProposalStrategy for each type,
+/// ensuring type safety and allowing for distribution-aware proposals.
+fn propose_using_strategies<R: RngCore>(rng: &mut R, choice: &Choice, scale: f64) -> ChoiceValue {
     match choice.value {
         ChoiceValue::F64(current_val) => {
-            // Gaussian random walk proposal using Box-Muller
-            let u1: f64 = rng.gen::<f64>().max(1e-10); // Avoid log(0)
-            let u2: f64 = rng.gen();
-            let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
-            current_val + scale * z
+            let strategy = GaussianWalkProposal;
+            let proposed = strategy.propose(current_val, scale, rng);
+            ChoiceValue::F64(proposed)
         }
         ChoiceValue::Bool(current_val) => {
-            // Symmetric flip proposal for boolean
-            if rng.gen::<f64>() < 0.5 {
-                if current_val {
-                    0.0
-                } else {
-                    1.0
-                }
-            } else {
-                if current_val {
-                    1.0
-                } else {
-                    0.0
-                }
-            }
-        }
-        ChoiceValue::I64(current_val) => {
-            // Gaussian random walk for integers with proper rounding
-            let u1: f64 = rng.gen::<f64>().max(1e-10);
-            let u2: f64 = rng.gen();
-            let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
-            let delta = (scale * z).round() as i64;
-            (current_val + delta) as f64
+            let strategy = FlipProposal;
+            let proposed = strategy.propose(current_val, scale, rng);
+            ChoiceValue::Bool(proposed)
         }
         ChoiceValue::U64(current_val) => {
-            // Gaussian random walk for unsigned integers with proper rounding and bounds
-            let u1: f64 = rng.gen::<f64>().max(1e-10);
-            let u2: f64 = rng.gen();
-            let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
-            let delta = (scale * z).round() as i64;
-            let proposed = (current_val as i64 + delta).max(0) as u64;
-            proposed as f64
+            let strategy = DiscreteWalkProposal;
+            let proposed = strategy.propose(current_val, scale, rng);
+            ChoiceValue::U64(proposed)
+        }
+        ChoiceValue::I64(current_val) => {
+            // Convert to u64, propose, then convert back with proper bounds
+            let as_u64 = current_val.max(0) as u64;
+            let strategy = DiscreteWalkProposal;
+            let proposed_u64 = strategy.propose(as_u64, scale, rng);
+            // Convert back to i64, handling potential overflow
+            let proposed = proposed_u64.min(i64::MAX as u64) as i64;
+            // Apply the original sign pattern if current_val was negative
+            let final_proposed = if current_val < 0 && proposed > 0 && rng.gen::<bool>() {
+                -proposed
+            } else {
+                proposed
+            };
+            ChoiceValue::I64(final_proposed)
         }
         ChoiceValue::Usize(current_val) => {
-            // For categorical variables, propose uniform over reasonable range
-            // In practice, this should use the actual distribution size
-            let max_val = (current_val + 5).max(10); // Heuristic: assume at least 10 categories
-            let proposed = rng.gen_range(0..max_val);
-            proposed as f64
+            // Use uniform categorical proposal with reasonable heuristic
+            let strategy = UniformCategoricalProposal {
+                n_categories: None, // Will use heuristic
+            };
+            let proposed = strategy.propose(current_val, scale, rng);
+            ChoiceValue::Usize(proposed)
         }
     }
 }
@@ -271,18 +276,18 @@ pub fn adaptive_single_site_mh<A, R: Rng>(
     let site_idx = rng.gen_range(0..sites.len());
     let selected_site = sites[site_idx].clone();
 
-    // Get current choice and propose new value
+    // Get current choice and propose new value using ProposalStrategy traits
     let current_choice = &current.choices[&selected_site];
     let scale = adaptation.get_scale(&selected_site);
-    let proposed_val = propose_new_value_stable(rng, current_choice, scale);
+    let proposed_value = propose_using_strategies(rng, current_choice, scale);
 
-    // Create proposed trace
+    // Create proposed trace - preserving type safety
     let mut proposed_trace = current.clone();
     proposed_trace
         .choices
         .get_mut(&selected_site)
         .unwrap()
-        .value = ChoiceValue::F64(proposed_val);
+        .value = proposed_value;
 
     // Score both traces
     let (_a_cur, cur_scored) = run(
