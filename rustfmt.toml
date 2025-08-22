@@ -1,0 +1,20 @@
+# Fugue project rustfmt configuration
+# This file defines consistent formatting rules including import organization
+# 
+# NOTE: Advanced import organization features (imports_granularity, group_imports, etc.)
+# require nightly Rust. This config uses stable-compatible settings.
+
+# Import organization (stable features only)
+reorder_imports = true               # Sort imports alphabetically (stable)
+
+# General formatting preferences
+max_width = 100                      # Reasonable line width
+tab_spaces = 4                       # Standard Rust indentation
+newline_style = "Unix"              # Consistent line endings (if supported)
+
+# Keep other settings at sensible defaults
+use_small_heuristics = "Default"
+match_block_trailing_comma = false
+use_try_shorthand = false
+use_field_init_shorthand = false
+edition = "2021"
