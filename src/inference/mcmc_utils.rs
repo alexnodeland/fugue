@@ -14,8 +14,9 @@ use std::collections::HashMap;
 /// stationary distribution.
 #[derive(Debug, Clone)]
 pub struct DiminishingAdaptation {
-    /// Current proposal scales for each site
-    pub scales: HashMap<Address, f64>,
+    /// Current proposal scales and their cached logarithms for each site
+    /// Stored as (scale, log_scale) to avoid expensive ln() computations
+    pub scales: HashMap<Address, (f64, f64)>,
     /// Acceptance counts for each site
     pub accept_counts: HashMap<Address, usize>,
     /// Total proposal counts for each site
@@ -48,7 +49,7 @@ impl DiminishingAdaptation {
 
     /// Get current scale for a site, initializing if necessary.
     pub fn get_scale(&mut self, addr: &Address) -> f64 {
-        *self.scales.entry(addr.clone()).or_insert(1.0)
+        self.scales.entry(addr.clone()).or_insert((1.0, 0.0)).0
     }
 
     /// Update adaptation based on acceptance outcome.
@@ -77,20 +78,27 @@ impl DiminishingAdaptation {
         // Diminishing step size: α_n = 1/n^γ
         let step_size = 1.0 / (total_count as f64).powf(self.gamma);
 
-        // Update scale using stochastic approximation
-        let scale = self.scales.entry(addr.clone()).or_insert(1.0);
-        let log_scale = scale.ln();
+        // Update scale using stochastic approximation with cached log scale
+        let entry = self.scales.entry(addr.clone()).or_insert((1.0, 0.0));
+        let (ref mut scale, ref mut log_scale) = *entry;
 
         // Update: log(scale_{n+1}) = log(scale_n) + α_n * (accept_rate - target_rate)
-        let new_log_scale = log_scale + step_size * (accept_rate - self.target_rate);
+        *log_scale += step_size * (accept_rate - self.target_rate);
 
         // Keep scale in reasonable bounds and ensure positivity
-        let new_scale = new_log_scale.exp();
+        let new_scale = log_scale.exp();
         *scale = if new_scale.is_finite() && new_scale > 0.0 {
             new_scale.clamp(0.001, 100.0)
         } else {
             1.0 // Reset to default if numerical issues
         };
+        
+        // Update cached log scale to match the clamped scale
+        if *scale == 1.0 {
+            *log_scale = 0.0; // ln(1.0) = 0.0
+        } else {
+            *log_scale = scale.ln(); // Recompute only when we had to clamp
+        }
     }
 
     /// Check if adaptation should continue.
@@ -104,7 +112,7 @@ impl DiminishingAdaptation {
     pub fn get_stats(&self) -> Vec<(Address, f64, f64, usize)> {
         self.scales
             .iter()
-            .map(|(addr, &scale)| {
+            .map(|(addr, &(scale, _log_scale))| {
                 let accepts = *self.accept_counts.get(addr).unwrap_or(&0);
                 let total = *self.total_counts.get(addr).unwrap_or(&0);
                 let rate = if total > 0 {
