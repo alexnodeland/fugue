@@ -264,16 +264,19 @@ impl Normal {
     /// ```
     pub fn new(mu: f64, sigma: f64) -> crate::error::FugueResult<Self> {
         if !mu.is_finite() {
-            return Err(crate::error::FugueError::InvalidParameters {
-                distribution: "Normal".to_string(),
-                reason: "Mean (mu) must be finite".to_string(),
-            });
+            return Err(crate::error::FugueError::invalid_parameters(
+                "Normal", 
+                "Mean (mu) must be finite", 
+                crate::error::ErrorCode::InvalidMean
+            ).with_context("mu", format!("{}", mu)));
         }
         if sigma <= 0.0 || !sigma.is_finite() {
-            return Err(crate::error::FugueError::InvalidParameters {
-                distribution: "Normal".to_string(),
-                reason: "Standard deviation (sigma) must be positive and finite".to_string(),
-            });
+            return Err(crate::error::FugueError::invalid_parameters(
+                "Normal", 
+                "Standard deviation (sigma) must be positive and finite", 
+                crate::error::ErrorCode::InvalidVariance
+            ).with_context("sigma", format!("{}", sigma))
+             .with_context("expected", "> 0.0 and finite"));
         }
         Ok(Normal { mu, sigma })
     }
@@ -362,16 +365,20 @@ impl Uniform {
     /// Create a new Uniform distribution with validated parameters.
     pub fn new(low: f64, high: f64) -> crate::error::FugueResult<Self> {
         if !low.is_finite() || !high.is_finite() {
-            return Err(crate::error::FugueError::InvalidParameters {
-                distribution: "Uniform".to_string(),
-                reason: "Bounds must be finite".to_string(),
-            });
+            return Err(crate::error::FugueError::invalid_parameters(
+                "Uniform", 
+                "Bounds must be finite", 
+                crate::error::ErrorCode::InvalidRange
+            ).with_context("low", format!("{}", low))
+             .with_context("high", format!("{}", high)));
         }
         if low >= high {
-            return Err(crate::error::FugueError::InvalidParameters {
-                distribution: "Uniform".to_string(),
-                reason: "Lower bound must be less than upper bound".to_string(),
-            });
+            return Err(crate::error::FugueError::invalid_parameters(
+                "Uniform", 
+                "Lower bound must be less than upper bound", 
+                crate::error::ErrorCode::InvalidRange
+            ).with_context("low", format!("{}", low))
+             .with_context("high", format!("{}", high)));
         }
         Ok(Uniform { low, high })
     }
@@ -468,16 +475,19 @@ impl LogNormal {
     /// Create a new LogNormal distribution with validated parameters.
     pub fn new(mu: f64, sigma: f64) -> crate::error::FugueResult<Self> {
         if !mu.is_finite() {
-            return Err(crate::error::FugueError::InvalidParameters {
-                distribution: "LogNormal".to_string(),
-                reason: "Mean (mu) must be finite".to_string(),
-            });
+            return Err(crate::error::FugueError::invalid_parameters(
+                "LogNormal", 
+                "Mean (mu) must be finite", 
+                crate::error::ErrorCode::InvalidMean
+            ).with_context("mu", format!("{}", mu)));
         }
         if sigma <= 0.0 || !sigma.is_finite() {
-            return Err(crate::error::FugueError::InvalidParameters {
-                distribution: "LogNormal".to_string(),
-                reason: "Standard deviation (sigma) must be positive and finite".to_string(),
-            });
+            return Err(crate::error::FugueError::invalid_parameters(
+                "LogNormal", 
+                "Standard deviation (sigma) must be positive and finite", 
+                crate::error::ErrorCode::InvalidVariance
+            ).with_context("sigma", format!("{}", sigma))
+             .with_context("expected", "> 0.0 and finite"));
         }
         Ok(LogNormal { mu, sigma })
     }
@@ -568,10 +578,12 @@ impl Exponential {
     /// Create a new Exponential distribution with validated parameters.
     pub fn new(rate: f64) -> crate::error::FugueResult<Self> {
         if rate <= 0.0 || !rate.is_finite() {
-            return Err(crate::error::FugueError::InvalidParameters {
-                distribution: "Exponential".to_string(),
-                reason: "Rate parameter must be positive and finite".to_string(),
-            });
+            return Err(crate::error::FugueError::invalid_parameters(
+                "Exponential", 
+                "Rate parameter must be positive and finite", 
+                crate::error::ErrorCode::InvalidRate
+            ).with_context("rate", format!("{}", rate))
+             .with_context("expected", "> 0.0 and finite"));
         }
         Ok(Exponential { rate })
     }
@@ -671,10 +683,12 @@ impl Bernoulli {
     /// Create a new Bernoulli distribution with validated parameters.
     pub fn new(p: f64) -> crate::error::FugueResult<Self> {
         if !p.is_finite() || !(0.0..=1.0).contains(&p) {
-            return Err(crate::error::FugueError::InvalidParameters {
-                distribution: "Bernoulli".to_string(),
-                reason: "Probability must be in [0, 1]".to_string(),
-            });
+            return Err(crate::error::FugueError::invalid_parameters(
+                "Bernoulli", 
+                "Probability must be in [0, 1]", 
+                crate::error::ErrorCode::InvalidProbability
+            ).with_context("p", format!("{}", p))
+             .with_context("expected", "[0.0, 1.0]"));
         }
         Ok(Bernoulli { p })
     }
@@ -779,29 +793,33 @@ impl Categorical {
     /// Create a new Categorical distribution with validated parameters.
     pub fn new(probs: Vec<f64>) -> crate::error::FugueResult<Self> {
         if probs.is_empty() {
-            return Err(crate::error::FugueError::InvalidParameters {
-                distribution: "Categorical".to_string(),
-                reason: "Probability vector cannot be empty".to_string(),
-            });
+            return Err(crate::error::FugueError::invalid_parameters(
+                "Categorical", 
+                "Probability vector cannot be empty", 
+                crate::error::ErrorCode::InvalidProbability
+            ).with_context("length", "0"));
         }
 
         let sum: f64 = probs.iter().sum();
         if (sum - 1.0).abs() > 1e-6 {
-            return Err(crate::error::FugueError::InvalidParameters {
-                distribution: "Categorical".to_string(),
-                reason: format!("Probabilities must sum to 1.0, got {:.6}", sum),
-            });
+            return Err(crate::error::FugueError::invalid_parameters(
+                "Categorical", 
+                "Probabilities must sum to 1.0", 
+                crate::error::ErrorCode::InvalidProbability
+            ).with_context("sum", format!("{:.6}", sum))
+             .with_context("expected", "1.0")
+             .with_context("tolerance", "1e-6"));
         }
 
         for (i, &p) in probs.iter().enumerate() {
             if !p.is_finite() || p < 0.0 {
-                return Err(crate::error::FugueError::InvalidParameters {
-                    distribution: "Categorical".to_string(),
-                    reason: format!(
-                        "Probability at index {} must be non-negative and finite, got {}",
-                        i, p
-                    ),
-                });
+                return Err(crate::error::FugueError::invalid_parameters(
+                    "Categorical", 
+                    "All probabilities must be non-negative and finite", 
+                    crate::error::ErrorCode::InvalidProbability
+                ).with_context("index", format!("{}", i))
+                 .with_context("value", format!("{}", p))
+                 .with_context("expected", ">= 0.0 and finite"));
             }
         }
 
@@ -811,10 +829,11 @@ impl Categorical {
     /// Create a uniform categorical distribution over k categories.
     pub fn uniform(k: usize) -> crate::error::FugueResult<Self> {
         if k == 0 {
-            return Err(crate::error::FugueError::InvalidParameters {
-                distribution: "Categorical".to_string(),
-                reason: "Number of categories must be positive".to_string(),
-            });
+            return Err(crate::error::FugueError::invalid_parameters(
+                "Categorical", 
+                "Number of categories must be positive", 
+                crate::error::ErrorCode::InvalidCount
+            ).with_context("k", "0"));
         }
 
         let prob = 1.0 / k as f64;
@@ -929,16 +948,20 @@ impl Beta {
     /// Create a new Beta distribution with validated parameters.
     pub fn new(alpha: f64, beta: f64) -> crate::error::FugueResult<Self> {
         if alpha <= 0.0 || !alpha.is_finite() {
-            return Err(crate::error::FugueError::InvalidParameters {
-                distribution: "Beta".to_string(),
-                reason: "Alpha parameter must be positive and finite".to_string(),
-            });
+            return Err(crate::error::FugueError::invalid_parameters(
+                "Beta", 
+                "Alpha parameter must be positive and finite", 
+                crate::error::ErrorCode::InvalidShape
+            ).with_context("alpha", format!("{}", alpha))
+             .with_context("expected", "> 0.0 and finite"));
         }
         if beta <= 0.0 || !beta.is_finite() {
-            return Err(crate::error::FugueError::InvalidParameters {
-                distribution: "Beta".to_string(),
-                reason: "Beta parameter must be positive and finite".to_string(),
-            });
+            return Err(crate::error::FugueError::invalid_parameters(
+                "Beta", 
+                "Beta parameter must be positive and finite", 
+                crate::error::ErrorCode::InvalidShape
+            ).with_context("beta", format!("{}", beta))
+             .with_context("expected", "> 0.0 and finite"));
         }
         Ok(Beta { alpha, beta })
     }
@@ -1048,16 +1071,20 @@ impl Gamma {
     /// Create a new Gamma distribution with validated parameters.
     pub fn new(shape: f64, rate: f64) -> crate::error::FugueResult<Self> {
         if shape <= 0.0 || !shape.is_finite() {
-            return Err(crate::error::FugueError::InvalidParameters {
-                distribution: "Gamma".to_string(),
-                reason: "Shape parameter must be positive and finite".to_string(),
-            });
+            return Err(crate::error::FugueError::invalid_parameters(
+                "Gamma", 
+                "Shape parameter must be positive and finite", 
+                crate::error::ErrorCode::InvalidShape
+            ).with_context("shape", format!("{}", shape))
+             .with_context("expected", "> 0.0 and finite"));
         }
         if rate <= 0.0 || !rate.is_finite() {
-            return Err(crate::error::FugueError::InvalidParameters {
-                distribution: "Gamma".to_string(),
-                reason: "Rate parameter must be positive and finite".to_string(),
-            });
+            return Err(crate::error::FugueError::invalid_parameters(
+                "Gamma", 
+                "Rate parameter must be positive and finite", 
+                crate::error::ErrorCode::InvalidRate
+            ).with_context("rate", format!("{}", rate))
+             .with_context("expected", "> 0.0 and finite"));
         }
         Ok(Gamma { shape, rate })
     }
@@ -1184,10 +1211,12 @@ impl Binomial {
     /// Create a new Binomial distribution with validated parameters.
     pub fn new(n: u64, p: f64) -> crate::error::FugueResult<Self> {
         if !p.is_finite() || !(0.0..=1.0).contains(&p) {
-            return Err(crate::error::FugueError::InvalidParameters {
-                distribution: "Binomial".to_string(),
-                reason: "Probability must be in [0, 1]".to_string(),
-            });
+            return Err(crate::error::FugueError::invalid_parameters(
+                "Binomial", 
+                "Probability must be in [0, 1]", 
+                crate::error::ErrorCode::InvalidProbability
+            ).with_context("p", format!("{}", p))
+             .with_context("expected", "[0.0, 1.0]"));
         }
         Ok(Binomial { n, p })
     }
@@ -1286,10 +1315,12 @@ impl Poisson {
     /// Create a new Poisson distribution with validated parameters.
     pub fn new(lambda: f64) -> crate::error::FugueResult<Self> {
         if lambda <= 0.0 || !lambda.is_finite() {
-            return Err(crate::error::FugueError::InvalidParameters {
-                distribution: "Poisson".to_string(),
-                reason: "Rate parameter lambda must be positive and finite".to_string(),
-            });
+            return Err(crate::error::FugueError::invalid_parameters(
+                "Poisson", 
+                "Rate parameter lambda must be positive and finite", 
+                crate::error::ErrorCode::InvalidRate
+            ).with_context("lambda", format!("{}", lambda))
+             .with_context("expected", "> 0.0 and finite"));
         }
         Ok(Poisson { lambda })
     }

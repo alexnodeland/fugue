@@ -134,7 +134,7 @@ pub use runtime::trace::{Choice, ChoiceValue, Trace};
 
 // Re-export key inference methods
 pub use core::numerical::{log1p_exp, log_sum_exp, normalize_log_probs, safe_ln};
-pub use error::{FugueError, FugueResult, Validate};
+pub use error::{ErrorCategory, ErrorCode, ErrorContext, FugueError, FugueResult, Validate};
 pub use inference::abc::{
     abc_rejection, abc_scalar_summary, abc_smc, DistanceFunction, EuclideanDistance,
 };

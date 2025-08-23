@@ -324,20 +324,21 @@ impl Trace {
         let choice = self
             .choices
             .get(addr)
-            .ok_or_else(|| FugueError::TraceError {
-                operation: "get_f64".to_string(),
-                address: Some(addr.clone()),
-                reason: "Address not found in trace".to_string(),
-            })?;
+            .ok_or_else(|| FugueError::trace_error(
+                "get_f64",
+                Some(addr.clone()),
+                "Address not found in trace",
+                crate::error::ErrorCode::TraceAddressNotFound,
+            ))?;
 
         choice
             .value
             .as_f64()
-            .ok_or_else(|| FugueError::TypeMismatch {
-                address: addr.clone(),
-                expected: "f64".to_string(),
-                found: choice.value.type_name().to_string(),
-            })
+            .ok_or_else(|| FugueError::type_mismatch(
+                addr.clone(),
+                "f64",
+                choice.value.type_name(),
+            ))
     }
 
     /// Type-safe accessor that returns a Result for better error handling.
@@ -345,20 +346,21 @@ impl Trace {
         let choice = self
             .choices
             .get(addr)
-            .ok_or_else(|| FugueError::TraceError {
-                operation: "get_bool".to_string(),
-                address: Some(addr.clone()),
-                reason: "Address not found in trace".to_string(),
-            })?;
+            .ok_or_else(|| FugueError::trace_error(
+                "get_bool",
+                Some(addr.clone()),
+                "Address not found in trace",
+                crate::error::ErrorCode::TraceAddressNotFound,
+            ))?;
 
         choice
             .value
             .as_bool()
-            .ok_or_else(|| FugueError::TypeMismatch {
-                address: addr.clone(),
-                expected: "bool".to_string(),
-                found: choice.value.type_name().to_string(),
-            })
+            .ok_or_else(|| FugueError::type_mismatch(
+                addr.clone(),
+                "bool",
+                choice.value.type_name(),
+            ))
     }
 
     /// Type-safe accessor that returns a Result for better error handling.
@@ -366,20 +368,21 @@ impl Trace {
         let choice = self
             .choices
             .get(addr)
-            .ok_or_else(|| FugueError::TraceError {
-                operation: "get_u64".to_string(),
-                address: Some(addr.clone()),
-                reason: "Address not found in trace".to_string(),
-            })?;
+            .ok_or_else(|| FugueError::trace_error(
+                "get_u64",
+                Some(addr.clone()),
+                "Address not found in trace",
+                crate::error::ErrorCode::TraceAddressNotFound,
+            ))?;
 
         choice
             .value
             .as_u64()
-            .ok_or_else(|| FugueError::TypeMismatch {
-                address: addr.clone(),
-                expected: "u64".to_string(),
-                found: choice.value.type_name().to_string(),
-            })
+            .ok_or_else(|| FugueError::type_mismatch(
+                addr.clone(),
+                "u64",
+                choice.value.type_name(),
+            ))
     }
 
     /// Type-safe accessor that returns a Result for better error handling.
@@ -387,20 +390,21 @@ impl Trace {
         let choice = self
             .choices
             .get(addr)
-            .ok_or_else(|| FugueError::TraceError {
-                operation: "get_usize".to_string(),
-                address: Some(addr.clone()),
-                reason: "Address not found in trace".to_string(),
-            })?;
+            .ok_or_else(|| FugueError::trace_error(
+                "get_usize",
+                Some(addr.clone()),
+                "Address not found in trace",
+                crate::error::ErrorCode::TraceAddressNotFound,
+            ))?;
 
         choice
             .value
             .as_usize()
-            .ok_or_else(|| FugueError::TypeMismatch {
-                address: addr.clone(),
-                expected: "usize".to_string(),
-                found: choice.value.type_name().to_string(),
-            })
+            .ok_or_else(|| FugueError::type_mismatch(
+                addr.clone(),
+                "usize",
+                choice.value.type_name(),
+            ))
     }
 
     /// Type-safe accessor that returns a Result for better error handling.
@@ -408,20 +412,21 @@ impl Trace {
         let choice = self
             .choices
             .get(addr)
-            .ok_or_else(|| FugueError::TraceError {
-                operation: "get_i64".to_string(),
-                address: Some(addr.clone()),
-                reason: "Address not found in trace".to_string(),
-            })?;
+            .ok_or_else(|| FugueError::trace_error(
+                "get_i64",
+                Some(addr.clone()),
+                "Address not found in trace",
+                crate::error::ErrorCode::TraceAddressNotFound,
+            ))?;
 
         choice
             .value
             .as_i64()
-            .ok_or_else(|| FugueError::TypeMismatch {
-                address: addr.clone(),
-                expected: "i64".to_string(),
-                found: choice.value.type_name().to_string(),
-            })
+            .ok_or_else(|| FugueError::type_mismatch(
+                addr.clone(),
+                "i64",
+                choice.value.type_name(),
+            ))
     }
 
     /// Insert a typed choice into the trace.
