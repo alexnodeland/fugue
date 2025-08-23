@@ -39,9 +39,9 @@
 //!
 //! // Define a simple model
 //! let model_fn = || {
-//!     sample(addr!("mu"), Normal { mu: 0.0, sigma: 1.0 })
+//!     sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
 //!         .bind(|mu| {
-//!             observe(addr!("y"), Normal { mu, sigma: 0.5 }, 2.0)
+//!             observe(addr!("y"), Normal::new(mu, 0.5).unwrap(), 2.0)
 //!                 .map(move |_| mu)
 //!         })
 //! };
@@ -56,7 +56,8 @@
 //! assert!(ess > 0.0);
 //! ```
 use crate::core::model::Model;
-use crate::inference::mh::{adaptive_single_site_mh, AdaptiveScales};
+use crate::inference::mcmc_utils::DiminishingAdaptation;
+use crate::inference::mh::adaptive_single_site_mh;
 use crate::runtime::handler::run;
 use crate::runtime::interpreters::PriorHandler;
 use crate::runtime::trace::Trace;
@@ -351,9 +352,9 @@ pub fn resample_particles<R: Rng>(
 ///
 /// // Simple model for testing
 /// let model_fn = || {
-///     sample(addr!("mu"), Normal { mu: 0.0, sigma: 1.0 })
+///     sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
 ///         .bind(|mu| {
-///             observe(addr!("y"), Normal { mu, sigma: 0.5 }, 1.8)
+///             observe(addr!("y"), Normal::new(mu, 0.5).unwrap(), 1.8)
 ///                 .map(move |_| mu)
 ///         })
 /// };
@@ -397,11 +398,11 @@ pub fn adaptive_smc<A, R: Rng>(
 
         // Optional rejuvenation with MCMC
         if config.rejuvenation_steps > 0 {
-            let mut scales = AdaptiveScales::new();
+            let mut adaptation = DiminishingAdaptation::new(0.44, 0.7);
             for particle in &mut particles {
                 for _ in 0..config.rejuvenation_steps {
                     let (_, new_trace) =
-                        adaptive_single_site_mh(rng, &model_fn, &particle.trace, &mut scales);
+                        adaptive_single_site_mh(rng, &model_fn, &particle.trace, &mut adaptation);
                     particle.trace = new_trace;
                     particle.log_weight = particle.trace.total_log_weight();
                 }
@@ -415,16 +416,43 @@ pub fn adaptive_smc<A, R: Rng>(
     particles
 }
 
-/// Normalize particle weights.
+/// Normalize particle weights using numerically stable log-sum-exp.
+///
+/// This function properly handles extreme log-weights without underflow or overflow,
+/// which is critical for reliable SMC performance.
 pub fn normalize_particles(particles: &mut [Particle]) {
-    let max_w = particles
-        .iter()
-        .map(|p| p.log_weight)
-        .fold(f64::NEG_INFINITY, f64::max);
-    let sum: f64 = particles.iter().map(|p| (p.log_weight - max_w).exp()).sum();
+    use crate::core::numerical::log_sum_exp;
 
-    for p in particles {
-        p.weight = (p.log_weight - max_w).exp() / sum;
+    if particles.is_empty() {
+        return;
+    }
+
+    // Collect log weights
+    let log_weights: Vec<f64> = particles.iter().map(|p| p.log_weight).collect();
+
+    // Compute log normalizing constant stably
+    let log_norm = log_sum_exp(&log_weights);
+
+    // Handle degenerate case where all weights are -∞
+    if log_norm.is_infinite() && log_norm < 0.0 {
+        let n = particles.len();
+        for p in particles {
+            p.weight = 1.0 / n as f64; // Uniform weights as fallback
+        }
+        return;
+    }
+
+    // Normalize weights stably
+    for (p, &log_w) in particles.iter_mut().zip(&log_weights) {
+        p.weight = (log_w - log_norm).exp();
+    }
+
+    // Ensure weights sum to 1.0 (handle small numerical errors)
+    let weight_sum: f64 = particles.iter().map(|p| p.weight).sum();
+    if weight_sum > 0.0 {
+        for p in particles {
+            p.weight /= weight_sum;
+        }
     }
 }
 

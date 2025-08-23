@@ -11,9 +11,9 @@
 /// use fugue::*;
 ///
 /// let model = prob! {
-///     let mu <- sample(addr!("mu"), Normal{mu: 0.0, sigma: 1.0});
-///     let sigma <- sample(addr!("sigma"), LogNormal{mu: 0.0, sigma: 1.0});
-///     observe(addr!("y"), Normal{mu, sigma}, 2.5);
+///     let mu <- sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap());
+///     let sigma <- sample(addr!("sigma"), LogNormal::new(0.0, 1.0).unwrap());
+///     observe(addr!("y"), Normal::new(mu, sigma).unwrap(), 2.5);
 ///     pure((mu, sigma))
 /// };
 /// ```
@@ -44,7 +44,7 @@ macro_rules! prob {
 /// use fugue::*;
 ///
 /// let model = plate!(i in 0..10 => {
-///     sample(addr!("x", i), Normal{mu: 0.0, sigma: 1.0})
+///     sample(addr!("x", i), Normal::new(0.0, 1.0).unwrap())
 /// });
 /// ```
 #[macro_export]

@@ -4,14 +4,9 @@ use rand::{rngs::StdRng, SeedableRng};
 
 /// Simple Beta-Binomial conjugate model.
 fn beta_binomial_model(n: u64, k: u64) -> Model<f64> {
-    sample(
-        addr!("p"),
-        Beta {
-            alpha: 2.0,
-            beta: 2.0,
-        },
-    )
-    .bind(move |p| observe(addr!("obs"), Binomial { n, p }, k as f64).bind(move |_| pure(p)))
+    sample(addr!("p"), Beta::new(2.0, 2.0).unwrap()).bind(move |p| {
+        observe(addr!("obs"), Binomial::new(n, p).unwrap(), k).bind(move |_| pure(p))
+    })
 }
 
 #[derive(Parser, Debug)]

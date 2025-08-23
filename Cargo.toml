@@ -1,9 +1,9 @@
 [package]
 name = "fugue"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
-description = "Monadic-style PPL with effects/handlers, traces, and pluggable inference."
+description = "Production-ready monadic PPL with numerically stable inference, comprehensive diagnostics, and memory optimization."
 readme = "README.md"
 keywords = ["probabilistic-programming", "ppl", "monad", "effects", "traces"]
 categories = ["science", "mathematics"]
@@ -16,11 +16,25 @@ all-features = true
 # Use nightly for better documentation features
 rustdoc-args = ["--cfg", "docsrs"]
 
+
 [dependencies]
+# Core dependencies
 rand = "0.8"
 rand_distr = "0.4"
 libm = "0.2"
 
-[dev-dependencies]
+[dev-dependencies]  
+# CLI dependencies
 clap = { version = "4", features = ["derive"] }
+# Testing dependencies  
 proptest = "1.0"
+# Benchmarking dependencies
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "memory_benchmarks"
+harness = false
+
+[[bench]]
+name = "mcmc_benchmarks"
+harness = false

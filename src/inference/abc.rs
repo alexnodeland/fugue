@@ -39,10 +39,10 @@
 //! // Simple ABC example for illustration
 //! let mut rng = StdRng::seed_from_u64(42);
 //! let observed_data = vec![2.0];
-//! 
+//!
 //! let samples = abc_scalar_summary(
 //!     &mut rng,
-//!     || sample(addr!("mu"), Normal { mu: 0.0, sigma: 2.0 }),
+//!     || sample(addr!("mu"), Normal::new(0.0, 2.0).unwrap()),
 //!     |trace| {
 //!         if let Some(choice) = trace.choices.get(&addr!("mu")) {
 //!             if let ChoiceValue::F64(mu) = choice.value {
@@ -54,7 +54,7 @@
 //!     0.5, // tolerance
 //!     10   // max samples
 //! );
-//! 
+//!
 //! assert!(!samples.is_empty());
 //! ```
 
@@ -263,7 +263,7 @@ impl DistanceFunction<Vec<f64>> for SummaryStatsDistance {
 ///
 /// let samples = abc_scalar_summary(
 ///     &mut rng,
-///     || sample(addr!("mu"), Normal { mu: 0.0, sigma: 2.0 }),
+///     || sample(addr!("mu"), Normal::new(0.0, 2.0).unwrap()),
 ///     |trace| {
 ///         if let Some(choice) = trace.choices.get(&addr!("mu")) {
 ///             if let ChoiceValue::F64(mu) = choice.value {
@@ -354,7 +354,7 @@ pub fn abc_rejection<A, T, R: Rng>(
 /// # Examples
 ///
 /// ```rust
-/// use fugue::*;
+/// use fugue::{inference::abc::ABCSMCConfig, *};
 /// use rand::rngs::StdRng;
 /// use rand::SeedableRng;
 ///
@@ -364,7 +364,7 @@ pub fn abc_rejection<A, T, R: Rng>(
 ///
 /// let samples = abc_smc(
 ///     &mut rng,
-///     || sample(addr!("mu"), Normal { mu: 0.0, sigma: 1.0 }),
+///     || sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap()),
 ///     |trace| {
 ///         if let Some(choice) = trace.choices.get(&addr!("mu")) {
 ///             if let ChoiceValue::F64(mu) = choice.value {
@@ -374,24 +374,35 @@ pub fn abc_rejection<A, T, R: Rng>(
 ///     },
 ///     &observed,
 ///     &EuclideanDistance,
-///     1.0,           // initial tolerance
-///     &[0.5],        // tolerance schedule (single step)
-///     5,             // particles per round (small for test)
+///     ABCSMCConfig {
+///         initial_tolerance: 1.0,
+///         tolerance_schedule: vec![0.5],
+///         particles_per_round: 5,
+///     },
 /// );
 /// assert!(!samples.is_empty());
 /// ```
+/// Configuration for ABC-SMC algorithm.
+#[derive(Debug, Clone)]
+pub struct ABCSMCConfig {
+    /// Initial tolerance for distance threshold
+    pub initial_tolerance: f64,
+    /// Schedule of decreasing tolerances across rounds  
+    pub tolerance_schedule: Vec<f64>,
+    /// Number of particles to generate per round
+    pub particles_per_round: usize,
+}
+
 pub fn abc_smc<A, T, R: Rng>(
     rng: &mut R,
     model_fn: impl Fn() -> Model<A>,
     simulator: impl Fn(&Trace) -> T,
     observed_data: &T,
     distance_fn: &dyn DistanceFunction<T>,
-    initial_tolerance: f64,
-    tolerance_schedule: &[f64],
-    particles_per_round: usize,
+    config: ABCSMCConfig,
 ) -> Vec<Trace> {
     let mut current_particles;
-    let mut current_tolerance = initial_tolerance;
+    let mut current_tolerance = config.initial_tolerance;
 
     // Initial round: ABC rejection
     current_particles = abc_rejection(
@@ -401,18 +412,18 @@ pub fn abc_smc<A, T, R: Rng>(
         observed_data,
         distance_fn,
         current_tolerance,
-        particles_per_round,
+        config.particles_per_round,
     );
 
     // Sequential rounds with decreasing tolerance
-    for &new_tolerance in tolerance_schedule {
+    for &new_tolerance in &config.tolerance_schedule {
         if new_tolerance >= current_tolerance {
             continue; // Skip if tolerance doesn't decrease
         }
 
         let mut new_particles = Vec::new();
 
-        while new_particles.len() < particles_per_round {
+        while new_particles.len() < config.particles_per_round {
             // Sample a particle to perturb
             let base_idx = rng.gen_range(0..current_particles.len());
             let base_trace = &current_particles[base_idx];
@@ -497,7 +508,7 @@ pub fn abc_smc<A, T, R: Rng>(
 ///
 /// let samples = abc_scalar_summary(
 ///     &mut rng,
-///     || sample(addr!("mu"), Normal { mu: 0.0, sigma: 2.0 }),
+///     || sample(addr!("mu"), Normal::new(0.0, 2.0).unwrap()),
 ///     |trace| {
 ///         // Extract mu parameter and return it as summary
 ///         if let Some(choice) = trace.choices.get(&addr!("mu")) {

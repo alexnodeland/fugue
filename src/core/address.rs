@@ -83,11 +83,11 @@ impl Display for Address {
 /// let data_1 = addr!("data", 1);
 ///
 /// // Use in models
-/// let model = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 })
+/// let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
 ///     .bind(|x| {
 ///         // Index can be dynamic
 ///         let i = 42;
-///         sample(addr!("y", i), Normal { mu: x, sigma: 0.1 })
+///         sample(addr!("y", i), Normal::new(x, 0.1).unwrap())
 ///     });
 /// ```
 #[macro_export]

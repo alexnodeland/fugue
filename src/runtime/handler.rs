@@ -8,12 +8,20 @@
 //!
 //! ## Handler Pattern
 //!
-//! Handlers implement the algebraic effects pattern, where each effect
-//! (`sample`, `observe`, `factor`) is handled by a specific method. This design
-//! enables:
+//! Handlers implement the algebraic effects pattern with **full type safety**.
+//! Each effect is handled by type-specific methods that match the natural return
+//! types of distributions:
+//! - `on_sample_f64` for continuous distributions (Normal, Beta, etc.)
+//! - `on_sample_bool` for Bernoulli (returns bool directly!)
+//! - `on_sample_u64` for count distributions (Poisson, Binomial)
+//! - `on_sample_usize` for categorical distributions (safe indexing!)
+//!
+//! This design enables:
+//! - **Type Safety**: Handlers work with natural types, not just f64
 //! - **Modularity**: Different handlers for different purposes
 //! - **Composability**: Handlers can be combined and extended
 //! - **Testability**: Effects can be mocked and controlled
+//! - **Performance**: Zero overhead from unnecessary type conversions
 //!
 //! ## Execution Model
 //!
@@ -28,22 +36,28 @@
 //! use rand::rngs::StdRng;
 //! use rand::SeedableRng;
 //!
-//! // Run a model with prior sampling
-//! let model = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 });
+//! // Run type-safe models with prior sampling
+//! let normal_model: Model<f64> = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
+//! let coin_model: Model<bool> = sample(addr!("coin"), Bernoulli::new(0.5).unwrap());
+//! let count_model: Model<u64> = sample(addr!("events"), Poisson::new(3.0).unwrap());
+//!
 //! let mut rng = StdRng::seed_from_u64(42);
+//!
+//! // Handler automatically dispatches to correct type-specific method
 //! let (value, trace) = runtime::handler::run(
 //!     PriorHandler {
 //!         rng: &mut rng,
 //!         trace: Trace::default(),
 //!     },
-//!     model,
+//!     coin_model, // Handler calls on_sample_bool, returns bool
 //! );
-//! println!("Sampled value: {}, log-weight: {}", value, trace.total_log_weight());
+//! println!("Coin flip: {}, log-weight: {}", value, trace.total_log_weight());
 //! ```
 use crate::core::address::Address;
-use crate::core::distribution::DistributionF64;
+use crate::core::distribution::Distribution;
 use crate::core::model::Model;
 use crate::runtime::trace::Trace;
+
 /// Trait for handling probabilistic effects during model execution.
 ///
 /// Handlers define the interpretation of the three fundamental effects in probabilistic
@@ -54,8 +68,19 @@ use crate::runtime::trace::Trace;
 ///
 /// # Required Methods
 ///
-/// - [`on_sample`](Self::on_sample): Handle sampling from a distribution
-/// - [`on_observe`](Self::on_observe): Handle conditioning on observed data
+/// ## Sampling Methods (Type-Specific)
+/// - [`on_sample_f64`](Self::on_sample_f64): Handle f64 sampling (continuous distributions)
+/// - [`on_sample_bool`](Self::on_sample_bool): Handle bool sampling (Bernoulli)
+/// - [`on_sample_u64`](Self::on_sample_u64): Handle u64 sampling (Poisson, Binomial)  
+/// - [`on_sample_usize`](Self::on_sample_usize): Handle usize sampling (Categorical)
+///
+/// ## Observation Methods (Type-Specific)
+/// - [`on_observe_f64`](Self::on_observe_f64): Handle f64 observations
+/// - [`on_observe_bool`](Self::on_observe_bool): Handle bool observations
+/// - [`on_observe_u64`](Self::on_observe_u64): Handle u64 observations
+/// - [`on_observe_usize`](Self::on_observe_usize): Handle usize observations
+///
+/// ## Other Methods
 /// - [`on_factor`](Self::on_factor): Handle arbitrary log-weight contributions
 /// - [`finish`](Self::finish): Finalize and return the accumulated trace
 ///
@@ -73,37 +98,34 @@ use crate::runtime::trace::Trace;
 ///     trace: Trace::default(),
 /// };
 ///
-/// let model = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 });
+/// let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
 /// let (result, trace) = runtime::handler::run(handler, model);
 /// ```
 pub trait Handler {
-    /// Handle a sampling operation.
-    ///
-    /// This method is called when the model encounters a `sample` operation.
-    /// The handler decides what value to return and may record the choice in a trace.
-    ///
-    /// # Arguments
-    ///
-    /// * `addr` - Address identifying the sampling site
-    /// * `dist` - Distribution to sample from
-    ///
-    /// # Returns
-    ///
-    /// The value to use for this sampling site.
-    fn on_sample(&mut self, addr: &Address, dist: &dyn DistributionF64) -> f64;
-    
-    /// Handle an observation operation.
-    ///
-    /// This method is called when the model encounters an `observe` operation.
-    /// The handler typically adds the log-probability of the observation to the trace.
-    ///
-    /// # Arguments
-    ///
-    /// * `addr` - Address identifying the observation site
-    /// * `dist` - Distribution that generated the observed value
-    /// * `value` - The observed value
-    fn on_observe(&mut self, addr: &Address, dist: &dyn DistributionF64, value: f64);
-    
+    /// Handle an f64 sampling operation (continuous distributions).
+    fn on_sample_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>) -> f64;
+
+    /// Handle a bool sampling operation (Bernoulli).
+    fn on_sample_bool(&mut self, addr: &Address, dist: &dyn Distribution<bool>) -> bool;
+
+    /// Handle a u64 sampling operation (Poisson, Binomial).
+    fn on_sample_u64(&mut self, addr: &Address, dist: &dyn Distribution<u64>) -> u64;
+
+    /// Handle a usize sampling operation (Categorical).
+    fn on_sample_usize(&mut self, addr: &Address, dist: &dyn Distribution<usize>) -> usize;
+
+    /// Handle an f64 observation operation.
+    fn on_observe_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>, value: f64);
+
+    /// Handle a bool observation operation.
+    fn on_observe_bool(&mut self, addr: &Address, dist: &dyn Distribution<bool>, value: bool);
+
+    /// Handle a u64 observation operation.
+    fn on_observe_u64(&mut self, addr: &Address, dist: &dyn Distribution<u64>, value: u64);
+
+    /// Handle a usize observation operation.
+    fn on_observe_usize(&mut self, addr: &Address, dist: &dyn Distribution<usize>, value: usize);
+
     /// Handle a factor operation.
     ///
     /// This method is called when the model encounters a `factor` operation.
@@ -113,7 +135,7 @@ pub trait Handler {
     ///
     /// * `logw` - Log-weight to add to the model's total weight
     fn on_factor(&mut self, logw: f64);
-    
+
     /// Finalize the handler and return the accumulated trace.
     ///
     /// This method is called after model execution completes to retrieve
@@ -131,9 +153,15 @@ pub trait Handler {
 ///
 /// The execution proceeds by pattern matching on the model structure:
 /// - `Pure` values are returned directly
-/// - `SampleF` operations are handled by calling `handler.on_sample`
-/// - `ObserveF` operations are handled by calling `handler.on_observe`
-/// - `FactorF` operations are handled by calling `handler.on_factor`
+/// - `SampleF64` operations are handled by calling `handler.on_sample_f64`
+/// - `SampleBool` operations are handled by calling `handler.on_sample_bool`
+/// - `SampleU64` operations are handled by calling `handler.on_sample_u64`
+/// - `SampleUsize` operations are handled by calling `handler.on_sample_usize`
+/// - `ObserveF64` operations are handled by calling `handler.on_observe_f64`
+/// - `ObserveBool` operations are handled by calling `handler.on_observe_bool`
+/// - `ObserveU64` operations are handled by calling `handler.on_observe_u64`
+/// - `ObserveUsize` operations are handled by calling `handler.on_observe_usize`
+/// - `Factor` operations are handled by calling `handler.on_factor`
 ///
 /// # Arguments
 ///
@@ -154,7 +182,7 @@ pub trait Handler {
 /// use rand::SeedableRng;
 ///
 /// // Execute a simple model
-/// let model = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 })
+/// let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
 ///     .map(|x| x * 2.0);
 ///
 /// let mut rng = StdRng::seed_from_u64(42);
@@ -170,20 +198,59 @@ pub fn run<A>(mut h: impl Handler, m: Model<A>) -> (A, Trace) {
     fn go<A>(h: &mut impl Handler, m: Model<A>) -> A {
         match m {
             Model::Pure(a) => a,
-            Model::SampleF { addr, dist, k } => {
-                let x = h.on_sample(&addr, &*dist);
+            Model::SampleF64 { addr, dist, k } => {
+                let x = h.on_sample_f64(&addr, &*dist);
                 go(h, k(x))
             }
-            Model::ObserveF {
+            Model::SampleBool { addr, dist, k } => {
+                let x = h.on_sample_bool(&addr, &*dist);
+                go(h, k(x))
+            }
+            Model::SampleU64 { addr, dist, k } => {
+                let x = h.on_sample_u64(&addr, &*dist);
+                go(h, k(x))
+            }
+            Model::SampleUsize { addr, dist, k } => {
+                let x = h.on_sample_usize(&addr, &*dist);
+                go(h, k(x))
+            }
+            Model::ObserveF64 {
                 addr,
                 dist,
                 value,
                 k,
             } => {
-                h.on_observe(&addr, &*dist, value);
+                h.on_observe_f64(&addr, &*dist, value);
                 go(h, k(()))
             }
-            Model::FactorF { logw, k } => {
+            Model::ObserveBool {
+                addr,
+                dist,
+                value,
+                k,
+            } => {
+                h.on_observe_bool(&addr, &*dist, value);
+                go(h, k(()))
+            }
+            Model::ObserveU64 {
+                addr,
+                dist,
+                value,
+                k,
+            } => {
+                h.on_observe_u64(&addr, &*dist, value);
+                go(h, k(()))
+            }
+            Model::ObserveUsize {
+                addr,
+                dist,
+                value,
+                k,
+            } => {
+                h.on_observe_usize(&addr, &*dist, value);
+                go(h, k(()))
+            }
+            Model::Factor { logw, k } => {
                 h.on_factor(logw);
                 go(h, k(()))
             }

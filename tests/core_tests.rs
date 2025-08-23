@@ -27,14 +27,8 @@ fn model_pure_and_map() {
 #[test]
 fn model_sampling_and_observe() {
     // mu ~ N(0, 1); observe y ~ N(mu, 1) at 0.0
-    let m = sample(
-        addr!("mu"),
-        Normal {
-            mu: 0.0,
-            sigma: 1.0,
-        },
-    )
-    .bind(|mu| observe(addr!("y"), Normal { mu, sigma: 1.0 }, 0.0).bind(move |_| pure(mu)));
+    let m = sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
+        .bind(|mu| observe(addr!("y"), Normal::new(mu, 1.0).unwrap(), 0.0).bind(move |_| pure(mu)));
     let mut rng = StdRng::seed_from_u64(7);
     let (_mu, t) = runtime::handler::run(
         runtime::interpreters::PriorHandler {

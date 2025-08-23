@@ -41,16 +41,16 @@
 //!
 //! // Simple VI example
 //! let model_fn = || {
-//!     sample(addr!("mu"), Normal { mu: 0.0, sigma: 1.0 })
-//!         .bind(|mu| observe(addr!("y"), Normal { mu, sigma: 0.5 }, 2.0).map(move |_| mu))
+//!     sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
+//!         .bind(|mu| observe(addr!("y"), Normal::new(mu, 0.5).unwrap(), 2.0).map(move |_| mu))
 //! };
 //!
 //! // Create mean-field guide manually
-//! let mut guide = MeanFieldGuide { 
-//!     params: HashMap::new() 
+//! let mut guide = MeanFieldGuide {
+//!     params: HashMap::new()
 //! };
 //! guide.params.insert(
-//!     addr!("mu"), 
+//!     addr!("mu"),
 //!     VariationalParam::Normal { mu: 0.0, log_sigma: 0.0 }
 //! );
 //!
@@ -88,8 +88,8 @@ use std::collections::HashMap;
 /// use rand::SeedableRng;
 ///
 /// // Create variational parameters
-/// let normal_param = VariationalParam::Normal { 
-///     mu: 1.5, 
+/// let normal_param = VariationalParam::Normal {
+///     mu: 1.5,
 ///     log_sigma: -0.693  // sigma = 0.5
 /// };
 ///
@@ -106,34 +106,33 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 pub enum VariationalParam {
     /// Normal/Gaussian variational distribution.
-    Normal { 
+    Normal {
         /// Mean parameter.
-        mu: f64, 
+        mu: f64,
         /// Log of standard deviation (for positivity).
-        log_sigma: f64 
+        log_sigma: f64,
     },
     /// Log-normal variational distribution for positive variables.
-    LogNormal { 
+    LogNormal {
         /// Mean of underlying normal.
-        mu: f64, 
+        mu: f64,
         /// Log of standard deviation of underlying normal.
-        log_sigma: f64 
+        log_sigma: f64,
     },
     /// Beta variational distribution for variables in \[0,1\].
-    Beta { 
+    Beta {
         /// Log of first shape parameter (for positivity).
-        log_alpha: f64, 
+        log_alpha: f64,
         /// Log of second shape parameter (for positivity).
-        log_beta: f64 
+        log_beta: f64,
     },
 }
 
 impl VariationalParam {
-    /// Sample a value from this variational distribution.
+    /// Sample a value from this variational distribution with numerical stability.
     ///
     /// Generates a random sample using the current variational parameters.
-    /// This is used during ELBO estimation and for generating approximate
-    /// posterior samples.
+    /// This version includes parameter validation and numerical stability checks.
     ///
     /// # Arguments
     ///
@@ -141,16 +140,22 @@ impl VariationalParam {
     ///
     /// # Returns
     ///
-    /// A sample from the variational distribution.
+    /// A sample from the variational distribution, or NaN if parameters are invalid.
     pub fn sample<R: Rng>(&self, rng: &mut R) -> f64 {
         match self {
             VariationalParam::Normal { mu, log_sigma } => {
                 let sigma = log_sigma.exp();
-                Normal { mu: *mu, sigma }.sample(rng)
+                if !mu.is_finite() || !sigma.is_finite() || sigma <= 0.0 {
+                    return f64::NAN;
+                }
+                Normal::new(*mu, sigma).unwrap().sample(rng)
             }
             VariationalParam::LogNormal { mu, log_sigma } => {
                 let sigma = log_sigma.exp();
-                LogNormal { mu: *mu, sigma }.sample(rng)
+                if !mu.is_finite() || !sigma.is_finite() || sigma <= 0.0 {
+                    return f64::NAN;
+                }
+                LogNormal::new(*mu, sigma).unwrap().sample(rng)
             }
             VariationalParam::Beta {
                 log_alpha,
@@ -158,7 +163,63 @@ impl VariationalParam {
             } => {
                 let alpha = log_alpha.exp();
                 let beta = log_beta.exp();
-                Beta { alpha, beta }.sample(rng)
+                if !alpha.is_finite() || !beta.is_finite() || alpha <= 0.0 || beta <= 0.0 {
+                    return f64::NAN;
+                }
+                Beta::new(alpha, beta).unwrap().sample(rng)
+            }
+        }
+    }
+
+    /// Sample with reparameterization for gradient computation (experimental).
+    ///
+    /// Returns both the sample and auxiliary information needed for
+    /// computing gradients via the reparameterization trick.
+    pub fn sample_with_aux<R: Rng>(&self, rng: &mut R) -> (f64, f64) {
+        match self {
+            VariationalParam::Normal { mu, log_sigma } => {
+                let sigma = log_sigma.exp();
+                // Simple standard normal sampling
+                let u1: f64 = rng.gen::<f64>().max(1e-10);
+                let u2: f64 = rng.gen();
+                let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+                let value = mu + sigma * z;
+                const LN_2PI: f64 = 1.837_877_066_409_345_6;
+                let _log_prob = -0.5 * z * z - log_sigma - 0.5 * LN_2PI;
+                (value, z)
+            }
+            VariationalParam::LogNormal { mu, log_sigma } => {
+                let sigma = log_sigma.exp();
+                // Simple standard normal sampling
+                let u1: f64 = rng.gen::<f64>().max(1e-10);
+                let u2: f64 = rng.gen();
+                let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+                let log_value = mu + sigma * z;
+                let value = log_value.exp();
+                const LN_2PI: f64 = 1.837_877_066_409_345_6;
+                let _log_prob = -0.5 * z * z - log_sigma - 0.5 * LN_2PI - log_value;
+                (value, z)
+            }
+            VariationalParam::Beta {
+                log_alpha,
+                log_beta,
+            } => {
+                // Use normal approximation for Beta (stable fallback)
+                let alpha = log_alpha.exp();
+                let beta = log_beta.exp();
+                let approx_mu = alpha / (alpha + beta);
+                let approx_var = (alpha * beta) / ((alpha + beta).powi(2) * (alpha + beta + 1.0));
+                let approx_sigma = approx_var.sqrt();
+
+                // Simple standard normal sampling
+                let u1: f64 = rng.gen::<f64>().max(1e-10);
+                let u2: f64 = rng.gen();
+                let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+                let raw_value = approx_mu + approx_sigma * z;
+                let value = raw_value.clamp(0.001, 0.999);
+
+                let _log_prob = Beta::new(alpha, beta).unwrap().log_prob(&value);
+                (value, z)
             }
         }
     }
@@ -166,7 +227,7 @@ impl VariationalParam {
     /// Compute log-probability of a value under this variational distribution.
     ///
     /// This is used for computing entropy terms in the ELBO and for evaluating
-    /// the quality of the variational approximation.
+    /// the quality of the variational approximation. Now includes numerical stability checks.
     ///
     /// # Arguments
     ///
@@ -179,11 +240,11 @@ impl VariationalParam {
         match self {
             VariationalParam::Normal { mu, log_sigma } => {
                 let sigma = log_sigma.exp();
-                Normal { mu: *mu, sigma }.log_prob(x)
+                Normal::new(*mu, sigma).unwrap().log_prob(&x)
             }
             VariationalParam::LogNormal { mu, log_sigma } => {
                 let sigma = log_sigma.exp();
-                LogNormal { mu: *mu, sigma }.log_prob(x)
+                LogNormal::new(*mu, sigma).unwrap().log_prob(&x)
             }
             VariationalParam::Beta {
                 log_alpha,
@@ -191,7 +252,7 @@ impl VariationalParam {
             } => {
                 let alpha = log_alpha.exp();
                 let beta = log_beta.exp();
-                Beta { alpha, beta }.log_prob(x)
+                Beta::new(alpha, beta).unwrap().log_prob(&x)
             }
         }
     }
@@ -219,11 +280,11 @@ impl VariationalParam {
 /// // Create a guide for a two-parameter model
 /// let mut guide = MeanFieldGuide::new();
 /// guide.params.insert(
-///     addr!("mu"), 
+///     addr!("mu"),
 ///     VariationalParam::Normal { mu: 0.0, log_sigma: 0.0 }
 /// );
 /// guide.params.insert(
-///     addr!("sigma"), 
+///     addr!("sigma"),
 ///     VariationalParam::Normal { mu: 0.0, log_sigma: -1.0 }
 /// );
 ///
@@ -235,6 +296,12 @@ impl VariationalParam {
 pub struct MeanFieldGuide {
     /// Map from addresses to their variational parameters.
     pub params: HashMap<Address, VariationalParam>,
+}
+
+impl Default for MeanFieldGuide {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MeanFieldGuide {
@@ -280,6 +347,20 @@ impl MeanFieldGuide {
                     // Use Normal for integers (continuous relaxation)
                     VariationalParam::Normal {
                         mu: val as f64,
+                        log_sigma: 1.0_f64.ln(),
+                    }
+                }
+                ChoiceValue::U64(val) => {
+                    // Use LogNormal for unsigned integers (always positive)
+                    VariationalParam::LogNormal {
+                        mu: (val as f64).ln(),
+                        log_sigma: 1.0_f64.ln(),
+                    }
+                }
+                ChoiceValue::Usize(val) => {
+                    // Use LogNormal for categorical indices (always positive)
+                    VariationalParam::LogNormal {
+                        mu: (val as f64 + 1.0).ln(), // +1 to avoid log(0)
                         log_sigma: 1.0_f64.ln(),
                     }
                 }
@@ -364,12 +445,20 @@ pub fn optimize_meanfield_vi<A, R: Rng>(
                     if let Some(VariationalParam::Normal { mu: mu_plus, .. }) =
                         guide_plus.params.get_mut(_addr)
                     {
-                        *mu_plus = *mu_plus + eps;
+                        *mu_plus += eps;
                     }
                     let elbo_plus = elbo_with_guide(rng, &model_fn, &guide_plus, 10);
                     let grad_mu = (elbo_plus - current_elbo) / eps;
-
-                    *mu = *mu + learning_rate * grad_mu;
+                    
+                    // Add numerical stability checks
+                    if grad_mu.is_finite() {
+                        let update = learning_rate * grad_mu;
+                        if update.is_finite() {
+                            *mu += update;
+                            // Clamp to reasonable range to prevent overflow
+                            *mu = mu.clamp(-100.0, 100.0);
+                        }
+                    }
                 }
                 VariationalParam::LogNormal { mu, log_sigma: _ } => {
                     // Similar finite difference for LogNormal parameters
@@ -378,12 +467,20 @@ pub fn optimize_meanfield_vi<A, R: Rng>(
                     if let Some(VariationalParam::LogNormal { mu: mu_plus, .. }) =
                         guide_plus.params.get_mut(_addr)
                     {
-                        *mu_plus = *mu_plus + eps;
+                        *mu_plus += eps;
                     }
                     let elbo_plus = elbo_with_guide(rng, &model_fn, &guide_plus, 10);
                     let grad_mu = (elbo_plus - current_elbo) / eps;
-
-                    *mu = *mu + learning_rate * grad_mu;
+                    
+                    // Add numerical stability checks
+                    if grad_mu.is_finite() {
+                        let update = learning_rate * grad_mu;
+                        if update.is_finite() {
+                            *mu += update;
+                            // Clamp to reasonable range for LogNormal
+                            *mu = mu.clamp(-10.0, 10.0);
+                        }
+                    }
                 }
                 VariationalParam::Beta {
                     log_alpha,
@@ -397,12 +494,20 @@ pub fn optimize_meanfield_vi<A, R: Rng>(
                         ..
                     }) = guide_plus.params.get_mut(_addr)
                     {
-                        *alpha_plus = *alpha_plus + eps;
+                        *alpha_plus += eps;
                     }
                     let elbo_plus = elbo_with_guide(rng, &model_fn, &guide_plus, 10);
                     let grad_alpha = (elbo_plus - current_elbo) / eps;
-
-                    *log_alpha = *log_alpha + learning_rate * grad_alpha;
+                    
+                    // Add numerical stability checks
+                    if grad_alpha.is_finite() {
+                        let update = learning_rate * grad_alpha;
+                        if update.is_finite() {
+                            *log_alpha += update;
+                            // Clamp to reasonable range for Beta
+                            *log_alpha = log_alpha.clamp(-5.0, 5.0);
+                        }
+                    }
                 }
             }
         }

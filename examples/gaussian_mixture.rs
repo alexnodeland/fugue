@@ -4,19 +4,12 @@ use rand::{rngs::StdRng, SeedableRng};
 
 fn mixture_model(obs: f64) -> Model<(f64, f64)> {
     // Simple 2-component mixture with fixed weights
-    sample(
-        addr!("z"),
-        Uniform {
-            low: 0.0,
-            high: 1.0,
-        },
-    )
-    .bind(move |u| {
+    sample(addr!("z"), Uniform::new(0.0, 1.0).unwrap()).bind(move |u| {
         let choose_first = u < 0.5;
         let mu = if choose_first { -2.0 } else { 2.0 };
         let sigma = 1.0;
-        sample(addr!("x"), Normal { mu, sigma }).bind(move |x| {
-            observe(addr!("y"), Normal { mu: x, sigma: 1.0 }, obs).bind(move |_| pure((x, obs)))
+        sample(addr!("x"), Normal::new(mu, sigma).unwrap()).bind(move |x| {
+            observe(addr!("y"), Normal::new(x, 1.0).unwrap(), obs).bind(move |_| pure((x, obs)))
         })
     })
 }

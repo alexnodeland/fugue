@@ -3,14 +3,9 @@ use fugue::*;
 use rand::{rngs::StdRng, SeedableRng};
 
 fn hazard_model(obs: f64) -> Model<f64> {
-    sample(
-        addr!("rate"),
-        LogNormal {
-            mu: 0.0,
-            sigma: 1.0,
-        },
-    )
-    .bind(move |rate| observe(addr!("t"), Exponential { rate }, obs).bind(move |_| pure(rate)))
+    sample(addr!("rate"), LogNormal::new(0.0, 1.0).unwrap()).bind(move |rate| {
+        observe(addr!("t"), Exponential::new(rate).unwrap(), obs).bind(move |_| pure(rate))
+    })
 }
 
 #[derive(Parser, Debug)]
