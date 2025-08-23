@@ -40,13 +40,13 @@ fn bayesian_regression(x_data: &[f64], y_data: &[f64]) -> FugueResult<Model<(f64
         let slope <- sample(addr!("slope"), Normal::new(0.0, 1.0)?);
         let intercept <- sample(addr!("intercept"), Normal::new(0.0, 1.0)?);
         let noise <- sample(addr!("noise"), LogNormal::new(0.0, 0.5)?);
-        
+
         // Likelihood
         for (i, (&x, &y)) in x_data.iter().zip(y_data.iter()).enumerate() {
             let y_pred = slope * x + intercept;
             observe(addr!("y", i), Normal::new(y_pred, noise)?, y);
         }
-        
+
         pure((slope, intercept))
     })
 }
@@ -54,9 +54,9 @@ fn bayesian_regression(x_data: &[f64], y_data: &[f64]) -> FugueResult<Model<(f64
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let x_data = vec![1.0, 2.0, 3.0, 4.0, 5.0];
     let y_data = vec![2.1, 3.9, 6.1, 8.0, 9.9];
-    
+
     let mut rng = StdRng::seed_from_u64(42);
-    
+
     // Run adaptive MCMC
     let samples = adaptive_mcmc_chain(
         &mut rng,
@@ -64,19 +64,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         1000,  // samples
         500,   // warmup
     );
-    
+
     // Extract results using type-safe accessors
     let slopes: Vec<f64> = samples.iter()
         .filter_map(|(_, trace)| trace.get_f64(&addr!("slope")))
         .collect();
-    
+
     let mean_slope = slopes.iter().sum::<f64>() / slopes.len() as f64;
     println!("Estimated slope: {:.3}", mean_slope);
-    
+
     // Diagnostics
     let ess = effective_sample_size_mcmc(&slopes);
     println!("Effective sample size: {:.1}", ess);
-    
+
     Ok(())
 }
 ```
@@ -86,32 +86,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 Fugue features a **fully type-safe distribution system** that eliminates common probabilistic programming pitfalls:
 
 ### Before (Error-Prone)
+
 ```rust
 sample(addr!("coin"), Bernoulli { p: 0.5 })
     .bind(|coin_result| {
         // ❌ Error-prone: floating point comparison
-        if coin_result == 1.0 { 
-            pure("heads") 
-        } else { 
-            pure("tails") 
+        if coin_result == 1.0 {
+            pure("heads")
+        } else {
+            pure("tails")
         }
     })
 ```
 
 ### After (Type-Safe)
+
 ```rust
 sample(addr!("coin"), Bernoulli { p: 0.5 })
     .bind(|is_heads| {
         // ✅ Natural: direct boolean usage, compiler-enforced
-        if is_heads { 
-            pure("heads") 
-        } else { 
-            pure("tails") 
+        if is_heads {
+            pure("heads")
+        } else {
+            pure("tails")
         }
     })
 ```
 
 ### 🔥 Key Improvements
+
 - **Bernoulli** → `bool` (no more `== 1.0` comparisons)
 - **Poisson/Binomial** → `u64` (natural counting, no casting)
 - **Categorical** → `usize` (safe array indexing)
@@ -137,7 +140,7 @@ let category_choice: Model<usize> = sample(addr!("choice"), Categorical::new(
     vec![0.3, 0.5, 0.2]
 ).unwrap());
 
-// Type-safe observations  
+// Type-safe observations
 let obs1 = observe(addr!("y"), Normal::new(0.0, 1.0).unwrap(), 2.5);       // f64
 let obs2 = observe(addr!("success"), Bernoulli::new(0.7).unwrap(), true);   // bool
 let obs3 = observe(addr!("events"), Poisson::new(4.0).unwrap(), 7u64);      // u64
@@ -253,18 +256,18 @@ let samples = abc_rejection(
 
 ## 📊 Built-in Distributions
 
-| **Distribution** | **Parameters** | **Return Type** | **Support** | **Usage** |
-|------------------|----------------|-----------------|-------------|-----------|
-| `Normal` | `mu`, `sigma` | `f64` | ℝ | `Normal { mu: 0.0, sigma: 1.0 }` |
-| `LogNormal` | `mu`, `sigma` | `f64` | ℝ⁺ | `LogNormal { mu: 0.0, sigma: 1.0 }` |
-| `Uniform` | `low`, `high` | `f64` | [low, high] | `Uniform { low: 0.0, high: 1.0 }` |
-| `Exponential` | `rate` | `f64` | ℝ⁺ | `Exponential { rate: 1.0 }` |
-| `Beta` | `alpha`, `beta` | `f64` | [0, 1] | `Beta { alpha: 2.0, beta: 3.0 }` |
-| `Gamma` | `shape`, `rate` | `f64` | ℝ⁺ | `Gamma { shape: 2.0, rate: 1.0 }` |
-| `Bernoulli` | `p` | **`bool`** | {false, true} | `Bernoulli { p: 0.3 }` |
-| `Binomial` | `n`, `p` | **`u64`** | {0, 1, ..., n} | `Binomial { n: 10, p: 0.5 }` |
-| `Categorical` | `probs` | **`usize`** | {0, 1, ..., k-1} | `Categorical { probs: vec![0.2, 0.3, 0.5] }` |
-| `Poisson` | `lambda` | **`u64`** | ℕ | `Poisson { lambda: 2.0 }` |
+| **Distribution** | **Parameters**  | **Return Type** | **Support**      | **Usage**                                    |
+| ---------------- | --------------- | --------------- | ---------------- | -------------------------------------------- |
+| `Normal`         | `mu`, `sigma`   | `f64`           | ℝ                | `Normal { mu: 0.0, sigma: 1.0 }`             |
+| `LogNormal`      | `mu`, `sigma`   | `f64`           | ℝ⁺               | `LogNormal { mu: 0.0, sigma: 1.0 }`          |
+| `Uniform`        | `low`, `high`   | `f64`           | [low, high]      | `Uniform { low: 0.0, high: 1.0 }`            |
+| `Exponential`    | `rate`          | `f64`           | ℝ⁺               | `Exponential { rate: 1.0 }`                  |
+| `Beta`           | `alpha`, `beta` | `f64`           | [0, 1]           | `Beta { alpha: 2.0, beta: 3.0 }`             |
+| `Gamma`          | `shape`, `rate` | `f64`           | ℝ⁺               | `Gamma { shape: 2.0, rate: 1.0 }`            |
+| `Bernoulli`      | `p`             | **`bool`**      | {false, true}    | `Bernoulli { p: 0.3 }`                       |
+| `Binomial`       | `n`, `p`        | **`u64`**       | {0, 1, ..., n}   | `Binomial { n: 10, p: 0.5 }`                 |
+| `Categorical`    | `probs`         | **`usize`**     | {0, 1, ..., k-1} | `Categorical { probs: vec![0.2, 0.3, 0.5] }` |
+| `Poisson`        | `lambda`        | **`u64`**       | ℕ                | `Poisson { lambda: 2.0 }`                    |
 
 ### 🎯 Type Safety Benefits
 
@@ -291,27 +294,27 @@ impl Handler for CustomHandler {
     fn on_sample_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>) -> f64 {
         // Handle continuous distributions
     }
-    
+
     fn on_sample_bool(&mut self, addr: &Address, dist: &dyn Distribution<bool>) -> bool {
         // Handle Bernoulli - returns bool directly!
     }
-    
+
     fn on_sample_u64(&mut self, addr: &Address, dist: &dyn Distribution<u64>) -> u64 {
         // Handle Poisson/Binomial - returns counts as u64
     }
-    
+
     fn on_sample_usize(&mut self, addr: &Address, dist: &dyn Distribution<usize>) -> usize {
         // Handle Categorical - returns indices as usize
     }
-    
+
     fn on_observe_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>, value: f64) {
         // Observe continuous values
     }
-    
+
     fn on_observe_bool(&mut self, addr: &Address, dist: &dyn Distribution<bool>, value: bool) {
         // Observe boolean outcomes
     }
-    
+
     // ... other methods for u64, usize observations and factors
 }
 ```
@@ -421,7 +424,7 @@ cargo run --example gaussian_mean
 # Unit tests
 cargo test
 
-# Integration tests  
+# Integration tests
 cargo test --test '*'
 
 # Property-based tests

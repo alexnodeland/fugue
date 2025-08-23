@@ -449,8 +449,16 @@ pub fn optimize_meanfield_vi<A, R: Rng>(
                     }
                     let elbo_plus = elbo_with_guide(rng, &model_fn, &guide_plus, 10);
                     let grad_mu = (elbo_plus - current_elbo) / eps;
-
-                    *mu += learning_rate * grad_mu;
+                    
+                    // Add numerical stability checks
+                    if grad_mu.is_finite() {
+                        let update = learning_rate * grad_mu;
+                        if update.is_finite() {
+                            *mu += update;
+                            // Clamp to reasonable range to prevent overflow
+                            *mu = mu.clamp(-100.0, 100.0);
+                        }
+                    }
                 }
                 VariationalParam::LogNormal { mu, log_sigma: _ } => {
                     // Similar finite difference for LogNormal parameters
@@ -463,8 +471,16 @@ pub fn optimize_meanfield_vi<A, R: Rng>(
                     }
                     let elbo_plus = elbo_with_guide(rng, &model_fn, &guide_plus, 10);
                     let grad_mu = (elbo_plus - current_elbo) / eps;
-
-                    *mu += learning_rate * grad_mu;
+                    
+                    // Add numerical stability checks
+                    if grad_mu.is_finite() {
+                        let update = learning_rate * grad_mu;
+                        if update.is_finite() {
+                            *mu += update;
+                            // Clamp to reasonable range for LogNormal
+                            *mu = mu.clamp(-10.0, 10.0);
+                        }
+                    }
                 }
                 VariationalParam::Beta {
                     log_alpha,
@@ -482,8 +498,16 @@ pub fn optimize_meanfield_vi<A, R: Rng>(
                     }
                     let elbo_plus = elbo_with_guide(rng, &model_fn, &guide_plus, 10);
                     let grad_alpha = (elbo_plus - current_elbo) / eps;
-
-                    *log_alpha += learning_rate * grad_alpha;
+                    
+                    // Add numerical stability checks
+                    if grad_alpha.is_finite() {
+                        let update = learning_rate * grad_alpha;
+                        if update.is_finite() {
+                            *log_alpha += update;
+                            // Clamp to reasonable range for Beta
+                            *log_alpha = log_alpha.clamp(-5.0, 5.0);
+                        }
+                    }
                 }
             }
         }
