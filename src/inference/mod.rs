@@ -1,9 +1,4 @@
-//! Inference methods for fitting models to data.
-//!
-//! This module provides various inference methods for fitting models to data.
-//! The `inference` module provides a unified interface for running inference
-//! methods on models.
-
+#![doc = include_str!("README.md")]
 pub mod abc;
 pub mod diagnostics;
 pub mod mcmc_utils;

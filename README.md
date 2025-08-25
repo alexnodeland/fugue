@@ -438,20 +438,19 @@ cargo test --doc
 
 ### 🚀 Getting Started
 
-- **[📚 Complete Documentation](docs/README.md)** - Comprehensive guides and tutorials
 - **[⚡ Installation Guide](docs/src/getting-started/installation.md)** - Get up and running quickly
 - **[🎯 Your First Model](docs/src/getting-started/your-first-model.md)** - Build your first probabilistic model
 
 ### 📚 Learning Resources
 
-- **[🎓 Tutorials](docs/src/tutorials/)** - Step-by-step learning:
+- **[🎓 Tutorials](docs/src/tutorials/README.md)** - Step-by-step learning:
 
   - [Bayesian Coin Flip](docs/src/tutorials/bayesian-coin-flip.md) (Beginner)
   - [Linear Regression](docs/src/tutorials/linear-regression.md) (Intermediate)
   - [Mixture Models](docs/src/tutorials/mixture-models.md) (Intermediate)
   - [Hierarchical Models](docs/src/tutorials/hierarchical-models.md) (Advanced)
 
-- **[🛠️ How-To Guides](docs/src/how-to/)** - Practical solutions:
+- **[🛠️ How-To Guides](docs/src/how-to/README.md)** - Practical solutions:
   - [Working with Distributions](docs/src/how-to/working-with-distributions.md)
   - [Using Macros](docs/src/how-to/using-macros.md) (`prob!`, `plate!`, `addr!`)
   - [Trace Manipulation](docs/src/how-to/trace-manipulation.md)

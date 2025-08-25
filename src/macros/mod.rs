@@ -1,22 +1,4 @@
-//! Macros for ergonomic probabilistic programming.
-//!
-//! Provides `prob!` for do-notation style model composition and `plate!` for
-//! replication over ranges.
-
-/// Do-notation style macro for monadic model composition.
-///
-/// Allows writing probabilistic programs in a more imperative style:
-///
-/// ```rust
-/// use fugue::*;
-///
-/// let model = prob! {
-///     let mu <- sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap());
-///     let sigma <- sample(addr!("sigma"), LogNormal::new(0.0, 1.0).unwrap());
-///     observe(addr!("y"), Normal::new(mu, sigma).unwrap(), 2.5);
-///     pure((mu, sigma))
-/// };
-/// ```
+#![doc = include_str!("README.md")]
 #[macro_export]
 macro_rules! prob {
     // Simple cases first

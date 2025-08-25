@@ -1,4 +1,4 @@
-//! Core building blocks: addresses, distributions, models, and numerical utilities.
+#![doc = include_str!("README.md")]
 pub mod address;
 pub mod distribution;
 pub mod model;
