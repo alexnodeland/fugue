@@ -1,8 +1,8 @@
 # Changelog
 
-## [0.3.0] - 2024-12-19 - Academic-Grade Release
+## [0.3.0] - 2024-12-19 - General Improvements
 
-### 🎓 **Major Academic Improvements**
+### 🚀 **Major Improvements**
 
 #### **Numerical Stability & Correctness**
 
@@ -82,5 +82,3 @@
 ## [0.1.0]
 
 - Initial release
-
-This release transforms Fugue from a prototype into a production-ready, academically rigorous probabilistic programming library suitable for research and production use.
