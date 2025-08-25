@@ -444,4 +444,4 @@ Now that you understand basic inference:
 
 ---
 
-**Ready for practical how-to guides?** → **[How-To Guides](../how-to/)**
+**Ready for practical how-to guides?** → **[How-To Guides](../how-to/index.md)**

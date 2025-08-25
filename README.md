@@ -406,7 +406,7 @@ cargo bench
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
+We welcome contributions! Please see our [Contributing Guidelines](.github/CONTRIBUTING.md) for details.
 
 ### Development Setup
 
@@ -437,25 +437,29 @@ cargo test --doc
 ## 📖 Documentation
 
 ### 🚀 Getting Started
+
 - **[📚 Complete Documentation](docs/README.md)** - Comprehensive guides and tutorials
-- **[⚡ Installation Guide](docs/getting-started/installation.md)** - Get up and running quickly
-- **[🎯 Your First Model](docs/getting-started/your-first-model.md)** - Build your first probabilistic model
+- **[⚡ Installation Guide](docs/src/getting-started/installation.md)** - Get up and running quickly
+- **[🎯 Your First Model](docs/src/getting-started/your-first-model.md)** - Build your first probabilistic model
 
 ### 📚 Learning Resources
-- **[🎓 Tutorials](docs/tutorials/)** - Step-by-step learning:
-  - [Bayesian Coin Flip](docs/tutorials/bayesian-coin-flip.md) (Beginner)
-  - [Linear Regression](docs/tutorials/linear-regression.md) (Intermediate)
-  - [Mixture Models](docs/tutorials/mixture-models.md) (Intermediate)
-  - [Hierarchical Models](docs/tutorials/hierarchical-models.md) (Advanced)
 
-- **[🛠️ How-To Guides](docs/how-to/)** - Practical solutions:
-  - [Working with Distributions](docs/how-to/working-with-distributions.md)
-  - [Using Macros](docs/how-to/using-macros.md) (`prob!`, `plate!`, `addr!`)
-  - [Trace Manipulation](docs/how-to/trace-manipulation.md)
-  - [Custom Handlers](docs/how-to/custom-handlers.md)
-  - [Debugging Models](docs/how-to/debugging-models.md)
+- **[🎓 Tutorials](docs/src/tutorials/)** - Step-by-step learning:
+
+  - [Bayesian Coin Flip](docs/src/tutorials/bayesian-coin-flip.md) (Beginner)
+  - [Linear Regression](docs/src/tutorials/linear-regression.md) (Intermediate)
+  - [Mixture Models](docs/src/tutorials/mixture-models.md) (Intermediate)
+  - [Hierarchical Models](docs/src/tutorials/hierarchical-models.md) (Advanced)
+
+- **[🛠️ How-To Guides](docs/src/how-to/)** - Practical solutions:
+  - [Working with Distributions](docs/src/how-to/working-with-distributions.md)
+  - [Using Macros](docs/src/how-to/using-macros.md) (`prob!`, `plate!`, `addr!`)
+  - [Trace Manipulation](docs/src/how-to/trace-manipulation.md)
+  - [Custom Handlers](docs/src/how-to/custom-handlers.md)
+  - [Debugging Models](docs/src/how-to/debugging-models.md)
 
 ### 📖 Reference
+
 - **[API Documentation](https://docs.rs/fugue)** - Complete API reference
 - **[Examples](examples/)** - Practical usage examples
 - **[Core Module Guide](src/core/README.md)** - Deep dive into Model types
@@ -463,7 +467,16 @@ cargo test --doc
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+
+at your option.
+
+## 📄 Contributing
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you shall be dual licensed as above, without any additional terms or conditions.
 
 ## 🙏 Acknowledgments
 

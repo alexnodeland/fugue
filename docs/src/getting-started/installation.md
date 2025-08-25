@@ -162,7 +162,7 @@ cargo run --example gaussian_mixture -- --seed 123
 
 If you encounter issues:
 1. Check the [GitHub Issues](https://github.com/alexandernodeland/fugue/issues)
-2. Review the [examples](../examples/) for working code
+2. Review the [examples](https://github.com/alexandernodeland/fugue/tree/main/examples) for working code
 3. Read the [API documentation](https://docs.rs/fugue)
 
 ## Next Steps
@@ -170,7 +170,7 @@ If you encounter issues:
 Now that Fugue is installed and working:
 
 1. **[Build Your First Model](your-first-model.md)** - Create and run a simple probabilistic model
-2. **[Explore Examples](../examples/)** - Look at complete working examples
+2. **[Explore Examples](https://github.com/alexandernodeland/fugue/tree/main/examples)** - Look at complete working examples
 3. **[Understanding Models](understanding-models.md)** - Learn the core concepts
 
 ---
