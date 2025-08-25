@@ -1,4 +1,4 @@
-#![doc = include_str!("README.md")]
+#![doc = include_str!("../../docs/api/inference/README.md")]
 pub mod abc;
 pub mod diagnostics;
 pub mod mcmc_utils;

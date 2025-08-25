@@ -1,7 +1,4 @@
-//! Memory management optimizations for probabilistic programming.
-//!
-//! This module provides efficient memory management strategies to reduce
-//! allocation overhead and improve cache locality in probabilistic computation.
+#![doc = include_str!("../../docs/api/runtime/memory/README.md")]
 
 use crate::core::address::Address;
 use crate::core::distribution::Distribution;
@@ -9,10 +6,7 @@ use crate::runtime::trace::{Choice, ChoiceValue, Trace};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-/// Copy-on-write trace for efficient MCMC operations.
-///
-/// Most MCMC operations only modify a small number of choices,
-/// so we can share the majority of the trace data between states.
+#[doc = include_str!("../../docs/api/runtime/memory/cow_trace.md")]
 #[derive(Clone, Debug)]
 pub struct CowTrace {
     choices: Arc<BTreeMap<Address, Choice>>,
@@ -83,7 +77,7 @@ impl CowTrace {
     }
 }
 
-/// Efficient trace builder that minimizes allocations.
+#[doc = include_str!("../../docs/api/runtime/memory/trace_builder.md")]
 pub struct TraceBuilder {
     choices: BTreeMap<Address, Choice>,
     log_prior: f64,
@@ -170,10 +164,7 @@ impl TraceBuilder {
     }
 }
 
-/// Memory pool for reusing trace allocations.
-///
-/// This pool maintains a collection of cleared Trace objects that can be reused
-/// to reduce allocation overhead in MCMC and other inference algorithms.
+#[doc = include_str!("../../docs/api/runtime/memory/trace_pool.md")]
 pub struct TracePool {
     available: Vec<Trace>,
     max_size: usize,
@@ -181,7 +172,8 @@ pub struct TracePool {
     stats: PoolStats,
 }
 
-/// Statistics for monitoring TracePool usage and efficiency.
+
+#[doc = include_str!("../../docs/api/runtime/memory/pool_stats.md")]
 #[derive(Debug, Clone, Default)]
 pub struct PoolStats {
     /// Number of successful gets from the pool (cache hits).

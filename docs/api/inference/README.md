@@ -1,4 +1,4 @@
-# Inference Module
+# `inference` module
 
 ## Overview
 

@@ -461,8 +461,6 @@ cargo test --doc
 
 - **[API Documentation](https://docs.rs/fugue)** - Complete API reference
 - **[Examples](examples/)** - Practical usage examples
-- **[Core Module Guide](src/core/README.md)** - Deep dive into Model types
-- **[Inference Guide](src/inference/README.md)** - Inference algorithms overview
 
 ## 📄 License
 

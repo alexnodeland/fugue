@@ -1,4 +1,4 @@
-# Core Module
+# `core` module
 
 ## Overview
 

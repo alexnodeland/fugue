@@ -1,4 +1,4 @@
-#![doc = include_str!("README.md")]
+#![doc = include_str!("../../docs/api/macros/README.md")]
 #[macro_export]
 macro_rules! prob {
     // Simple cases first

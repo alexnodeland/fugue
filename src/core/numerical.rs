@@ -1,32 +1,6 @@
-//! Numerical utilities for stable probabilistic computation.
-//!
-//! This module provides numerically stable implementations of common operations
-//! in probabilistic programming. Proper numerical stability is crucial for
-//! reliable inference, especially when dealing with extreme probabilities.
+#![doc = include_str!("../../docs/api/core/numerical/README.md")]
 
-/// Compute log(sum(exp(x_i))) in a numerically stable way.
-///
-/// This is essential for normalizing log-probabilities without underflow.
-/// The standard trick is to factor out the maximum value to prevent overflow.
-///
-/// # Arguments
-///
-/// * `log_values` - Slice of log-values to sum
-///
-/// # Returns
-///
-/// log(Σᵢ exp(xᵢ)) computed stably, or -∞ if all inputs are -∞
-///
-/// # Examples
-///
-/// ```rust
-/// use fugue::core::numerical::log_sum_exp;
-///
-/// let log_vals = vec![-1.0, -2.0, -3.0];
-/// let result = log_sum_exp(&log_vals);
-/// // log_sum_exp([-1, -2, -3]) ≈ log(e^(-1) + e^(-2) + e^(-3)) ≈ -0.591
-/// assert!((result - (-0.5914)).abs() < 0.01);
-/// ```
+#[doc = include_str!("../../docs/api/core/numerical/log_sum_exp.md")]
 pub fn log_sum_exp(log_values: &[f64]) -> f64 {
     if log_values.is_empty() {
         return f64::NEG_INFINITY;
@@ -52,19 +26,7 @@ pub fn log_sum_exp(log_values: &[f64]) -> f64 {
     }
 }
 
-/// Compute log(sum(w_i * exp(x_i))) stably for weighted log-sum-exp.
-///
-/// This generalizes log_sum_exp to handle weighted sums, commonly needed
-/// in importance sampling and particle filtering.
-///
-/// # Arguments
-///
-/// * `log_values` - Log-values to sum
-/// * `weights` - Linear weights (not log-weights)
-///
-/// # Returns
-///
-/// log(Σᵢ wᵢ exp(xᵢ)) computed stably
+#[doc = include_str!("../../docs/api/core/numerical/weighted_log_sum_exp.md")]
 pub fn weighted_log_sum_exp(log_values: &[f64], weights: &[f64]) -> f64 {
     assert_eq!(log_values.len(), weights.len());
 
@@ -93,27 +55,13 @@ pub fn weighted_log_sum_exp(log_values: &[f64], weights: &[f64]) -> f64 {
     }
 }
 
-/// Normalize log-probabilities to linear probabilities stably.
-///
-/// Converts a vector of log-probabilities to normalized linear probabilities
-/// without underflow or overflow issues.
-///
-/// # Arguments
-///
-/// * `log_probs` - Log-probabilities to normalize
-///
-/// # Returns
-///
-/// Vector of normalized linear probabilities that sum to 1.0
+#[doc = include_str!("../../docs/api/core/numerical/normalize_log_probs.md")]
 pub fn normalize_log_probs(log_probs: &[f64]) -> Vec<f64> {
     let log_sum = log_sum_exp(log_probs);
     log_probs.iter().map(|&lp| (lp - log_sum).exp()).collect()
 }
 
-/// Compute log(1 + exp(x)) stably to avoid overflow.
-///
-/// This function is crucial for logistic regression and other applications
-/// where we need to compute log of sigmoid-like functions.
+#[doc = include_str!("../../docs/api/core/numerical/log1p_exp.md")]
 pub fn log1p_exp(x: f64) -> f64 {
     if x > 33.3 {
         // For large x, 1 + exp(x) ≈ exp(x), so log(1 + exp(x)) ≈ x
@@ -127,9 +75,7 @@ pub fn log1p_exp(x: f64) -> f64 {
     }
 }
 
-/// Safe logarithm that handles edge cases gracefully.
-///
-/// Returns -∞ for non-positive inputs instead of NaN or panicking.
+#[doc = include_str!("../../docs/api/core/numerical/safe_ln.md")]
 pub fn safe_ln(x: f64) -> f64 {
     if x <= 0.0 || !x.is_finite() {
         f64::NEG_INFINITY
@@ -138,9 +84,7 @@ pub fn safe_ln(x: f64) -> f64 {
     }
 }
 
-/// Numerically stable computation of log(Γ(x)) for gamma function.
-///
-/// Wrapper around libm::lgamma with better error handling.
+#[doc = include_str!("../../docs/api/core/numerical/log_gamma.md")]
 pub fn log_gamma(x: f64) -> f64 {
     if x <= 0.0 || !x.is_finite() {
         f64::NAN
