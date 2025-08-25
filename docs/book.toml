@@ -11,7 +11,7 @@ create-missing = true
 [output.html]
 default-theme = "light"
 git-repository-url = "https://github.com/alexnodeland/fugue"
-site-url = "/"
+site-url = "/fugue/"
 additional-css = ["./mdbook-admonish.css"]
 additional-js = ["mermaid.min.js", "mermaid-init.js"]
 
