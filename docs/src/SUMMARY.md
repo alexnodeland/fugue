@@ -28,7 +28,7 @@
 # Developer
 
 - [Contributing]()
-- [License]()
+- [License](../../.github/LICENSE.md)
   - [MIT]()
   - [Apache-2.0]()
 
