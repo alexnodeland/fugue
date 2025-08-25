@@ -595,8 +595,6 @@ cargo test --doc
 <ul>
 <li><strong><a href="https://docs.rs/fugue">API Documentation</a></strong> - Complete API reference</li>
 <li><strong><a href="examples/">Examples</a></strong> - Practical usage examples</li>
-<li><strong><a href="src/core/README.html">Core Module Guide</a></strong> - Deep dive into Model types</li>
-<li><strong><a href="src/inference/README.html">Inference Guide</a></strong> - Inference algorithms overview</li>
 </ul>
 <h2 id="-license"><a class="header" href="#-license">📄 License</a></h2>
 <p>Licensed under either of</p>
@@ -649,22 +647,6 @@ cargo test --doc
 
         </div>
 
-        <!-- Livereload script (if served using the cli tool) -->
-        <script>
-            const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsAddress = wsProtocol + "//" + location.host + "/" + "__livereload";
-            const socket = new WebSocket(wsAddress);
-            socket.onmessage = function (event) {
-                if (event.data === "reload") {
-                    socket.close();
-                    location.reload();
-                }
-            };
-
-            window.onbeforeunload = function() {
-                socket.close();
-            }
-        </script>
 
 
 
