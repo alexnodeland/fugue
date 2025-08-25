@@ -18,10 +18,15 @@
   - [Custom Handlers](./how-to/custom-handlers.md)
   - [Debugging Models](./how-to/debugging-models.md)
 - [Tutorials](./tutorials/README.md)
+  - [Basic Inference](./tutorials/basic-inference.md)
   - [Bayesian Coin Flip](./tutorials/bayesian-coin-flip.md)
+  - [Type Safety Features](./tutorials/type-safety-features.md)
   - [Linear Regression](./tutorials/linear-regression.md)
+  - [Simple Mixtures](./tutorials/simple-mixtures.md)
   - [Mixture Models](./tutorials/mixture-models.md)
   - [Hierarchical Models](./tutorials/hierarchical-models.md)
+  - [Trace Manipulation](./tutorials/trace-manipulation.md)
+  - [Advanced Inference](./tutorials/advanced-inference.md)
 
 ---
 

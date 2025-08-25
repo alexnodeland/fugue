@@ -1,0 +1,254 @@
+#!/usr/bin/env rust-script
+
+//! Tutorial-Example Management Tool
+//! 
+//! This tool helps maintain consistency between tutorials and examples by:
+//! - Parsing example metadata 
+//! - Validating tutorial includes
+//! - Generating example indexes
+//! - Checking that all examples compile and run
+
+use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
+use std::process::Command;
+
+#[derive(Debug, Clone)]
+struct ExampleMetadata {
+    name: String,
+    title: String, 
+    tutorial: String,
+    section: String,
+    level: String,
+    concepts: Vec<String>,
+    description: String,
+    file_path: String,
+}
+
+fn parse_example_metadata(file_path: &str) -> Option<ExampleMetadata> {
+    let content = fs::read_to_string(file_path).ok()?;
+    let lines: Vec<&str> = content.lines().collect();
+    
+    let mut title = None;
+    let mut tutorial = None;
+    let mut section = None;
+    let mut level = None;
+    let mut concepts = None;
+    let mut description = String::new();
+    
+    let mut in_doc_comment = false;
+    
+    for line in lines {
+        let line = line.trim();
+        
+        if line.starts_with("//!") {
+            in_doc_comment = true;
+            let content = line.strip_prefix("//!").unwrap_or("").trim();
+            
+            if content.starts_with("# ") {
+                title = Some(content.strip_prefix("# ").unwrap().to_string());
+            } else if content.starts_with("**Tutorial**:") {
+                tutorial = Some(extract_markdown_link(content));
+            } else if content.starts_with("**Section**:") {
+                section = Some(content.strip_prefix("**Section**:").unwrap().trim().to_string());
+            } else if content.starts_with("**Level**:") {
+                level = Some(content.strip_prefix("**Level**:").unwrap().trim().to_string());
+            } else if content.starts_with("**Concepts**:") {
+                let concepts_str = content.strip_prefix("**Concepts**:").unwrap().trim();
+                concepts = Some(concepts_str.split(',').map(|s| s.trim().to_string()).collect());
+            } else if !content.is_empty() && !content.starts_with("**") {
+                if !description.is_empty() {
+                    description.push(' ');
+                }
+                description.push_str(content);
+            }
+        } else if in_doc_comment && !line.starts_with("//") {
+            break;
+        }
+    }
+    
+    let name = Path::new(file_path)
+        .file_stem()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    
+    Some(ExampleMetadata {
+        name,
+        title: title?,
+        tutorial: tutorial?,
+        section: section?,
+        level: level?,
+        concepts: concepts?,
+        description,
+        file_path: file_path.to_string(),
+    })
+}
+
+fn extract_markdown_link(text: &str) -> String {
+    // Extract from **Tutorial**: [Name](../path/to/file.md) format
+    if let Some(start) = text.find('[') {
+        if let Some(end) = text.find(']') {
+            if start < end {
+                return text[start + 1..end].to_string();
+            }
+        }
+    }
+    text.to_string()
+}
+
+fn scan_examples_directory() -> Vec<ExampleMetadata> {
+    let mut examples = Vec::new();
+    
+    if let Ok(entries) = fs::read_dir("examples") {
+        for entry in entries {
+            if let Ok(entry) = entry {
+                let path = entry.path();
+                if path.extension() == Some(std::ffi::OsStr::new("rs")) {
+                    if let Some(metadata) = parse_example_metadata(&path.to_string_lossy()) {
+                        examples.push(metadata);
+                    }
+                }
+            }
+        }
+    }
+    
+    examples
+}
+
+fn validate_examples_compile() -> bool {
+    println!("🔍 Validating all examples compile...");
+    
+    let examples = scan_examples_directory();
+    let mut all_passed = true;
+    
+    for example in examples {
+        print!("  Checking {}... ", example.name);
+        
+        let output = Command::new("cargo")
+            .args(&["check", "--example", &example.name])
+            .output()
+            .expect("Failed to execute cargo check");
+        
+        if output.status.success() {
+            println!("✅");
+        } else {
+            println!("❌");
+            println!("    Error: {}", String::from_utf8_lossy(&output.stderr));
+            all_passed = false;
+        }
+    }
+    
+    all_passed
+}
+
+fn generate_example_index() -> String {
+    let examples = scan_examples_directory();
+    let mut tutorials: HashMap<String, Vec<ExampleMetadata>> = HashMap::new();
+    
+    // Group by tutorial
+    for example in examples {
+        tutorials.entry(example.tutorial.clone()).or_default().push(example);
+    }
+    
+    let mut index = String::from("# Example Index\n\n");
+    index.push_str("This file is auto-generated by `scripts/tutorial_examples.rs`.\n\n");
+    
+    for (tutorial, mut examples) in tutorials {
+        examples.sort_by(|a, b| a.name.cmp(&b.name));
+        
+        index.push_str(&format!("## {}\n\n", tutorial));
+        
+        for example in examples {
+            index.push_str(&format!("- **[{}](examples/{}.rs)** ({})\n", 
+                example.title, example.name, example.level));
+            index.push_str(&format!("  - Section: {}\n", example.section));
+            index.push_str(&format!("  - Concepts: {}\n", example.concepts.join(", ")));
+            index.push_str(&format!("  - Run: `cargo run --example {}`\n", example.name));
+            index.push_str(&format!("  - {}\n\n", example.description));
+        }
+    }
+    
+    index
+}
+
+fn check_tutorial_includes() -> bool {
+    println!("🔍 Checking tutorial example includes...");
+    
+    let tutorials = [
+        "docs/src/tutorials/bayesian-coin-flip.md",
+        "docs/src/tutorials/linear-regression.md", 
+        "docs/src/tutorials/mixture-models.md",
+        "docs/src/tutorials/hierarchical-models.md",
+    ];
+    
+    let mut all_valid = true;
+    
+    for tutorial_path in tutorials {
+        if let Ok(content) = fs::read_to_string(tutorial_path) {
+            // Find all {{#include ...}} statements
+            for line in content.lines() {
+                if line.contains("{{#include") {
+                    if let Some(start) = line.find("{{#include ") {
+                        if let Some(end) = line.find("}}") {
+                            let include_path = line[start + 11..end].trim();
+                            let full_path = format!("docs/src/{}", include_path);
+                            
+                            if !Path::new(&full_path).exists() {
+                                println!("❌ Missing include: {} in {}", include_path, tutorial_path);
+                                all_valid = false;
+                            } else {
+                                println!("✅ Valid include: {}", include_path);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    all_valid
+}
+
+fn main() {
+    println!("🚀 Fugue Tutorial-Example Management Tool");
+    println!("=========================================");
+    
+    let args: Vec<String> = std::env::args().collect();
+    let command = args.get(1).map(|s| s.as_str()).unwrap_or("check");
+    
+    match command {
+        "check" => {
+            let examples_ok = validate_examples_compile();
+            let includes_ok = check_tutorial_includes();
+            
+            if examples_ok && includes_ok {
+                println!("\n✅ All checks passed!");
+            } else {
+                println!("\n❌ Some checks failed!");
+                std::process::exit(1);
+            }
+        }
+        
+        "index" => {
+            let index = generate_example_index();
+            fs::write("EXAMPLES.md", index).expect("Failed to write index");
+            println!("📝 Generated EXAMPLES.md");
+        }
+        
+        "list" => {
+            let examples = scan_examples_directory();
+            println!("📋 Found {} examples:", examples.len());
+            for example in examples {
+                println!("  {} - {} ({})", example.name, example.title, example.level);
+            }
+        }
+        
+        _ => {
+            println!("Usage: {} [check|index|list]", args[0]);
+            println!("  check: Validate examples compile and tutorial includes");
+            println!("  index: Generate EXAMPLES.md index file");  
+            println!("  list:  List all discovered examples");
+        }
+    }
+}
