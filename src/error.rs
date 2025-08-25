@@ -543,15 +543,7 @@ impl From<String> for FugueError {
 // Macros for Convenient Error Creation
 // =============================================================================
 
-/// Create an InvalidParameters error with optional context.
-/// 
-/// # Examples
-/// ```
-/// # use fugue::*;
-/// let err = invalid_params!("Normal", "sigma must be positive", InvalidVariance);
-/// let err_with_ctx = invalid_params!("Normal", "sigma must be positive", InvalidVariance, 
-///     "sigma" => "-1.0", "expected" => "> 0.0");
-/// ```
+#[doc = include_str!("../docs/api/error/invalid_params.md")]
 #[macro_export]
 macro_rules! invalid_params {
     ($dist:expr, $reason:expr, $code:ident) => {
@@ -563,15 +555,7 @@ macro_rules! invalid_params {
     };
 }
 
-/// Create a NumericalError with optional context.
-/// 
-/// # Examples
-/// ```
-/// # use fugue::*;
-/// let err = numerical_error!("log", "input was negative", NumericalInstability);
-/// let err_with_ctx = numerical_error!("log", "input was negative", NumericalInstability,
-///     "input" => "-1.5");
-/// ```
+#[doc = include_str!("../docs/api/error/numerical_error.md")]
 #[macro_export]
 macro_rules! numerical_error {
     ($op:expr, $details:expr, $code:ident) => {
@@ -583,13 +567,7 @@ macro_rules! numerical_error {
     };
 }
 
-/// Create a TraceError with optional context.
-/// 
-/// # Examples 
-/// ```
-/// # use fugue::*;
-/// let err = trace_error!("get_f64", Some(addr!("mu")), "address not found", TraceAddressNotFound);
-/// ```
+#[doc = include_str!("../docs/api/error/trace_error.md")]
 #[macro_export]
 macro_rules! trace_error {
     ($op:expr, $addr:expr, $reason:expr, $code:ident) => {

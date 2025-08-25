@@ -1,4 +1,6 @@
 #![doc = include_str!("../../docs/api/macros/README.md")]
+
+#[doc = include_str!("../../docs/api/macros/prob.md")]
 #[macro_export]
 macro_rules! prob {
     // Simple cases first
@@ -20,15 +22,7 @@ macro_rules! prob {
     };
 }
 
-/// Plate notation for replicating models over ranges.
-///
-/// ```rust
-/// use fugue::*;
-///
-/// let model = plate!(i in 0..10 => {
-///     sample(addr!("x", i), Normal::new(0.0, 1.0).unwrap())
-/// });
-/// ```
+#[doc = include_str!("../../docs/api/macros/plate.md")]
 #[macro_export]
 macro_rules! plate {
     ($var:ident in $range:expr => $body:expr) => {
@@ -36,7 +30,7 @@ macro_rules! plate {
     };
 }
 
-/// Enhanced address macro with scoping support.
+#[doc = include_str!("../../docs/api/macros/scoped_addr.md")]
 #[macro_export]
 macro_rules! scoped_addr {
     ($scope:expr, $name:expr) => {
