@@ -373,3 +373,62 @@ pub fn guard(pred: bool) -> Model<()> {
         factor(f64::NEG_INFINITY)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::addr;
+    use crate::core::distribution::*;
+    use crate::runtime::handler::run;
+    use crate::runtime::interpreters::PriorHandler;
+    use crate::runtime::trace::Trace;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
+    #[test]
+    fn pure_and_map_work() {
+        let m = pure(2).map(|x| x + 3);
+        let (val, t) = run(PriorHandler { rng: &mut StdRng::seed_from_u64(1), trace: Trace::default() }, m);
+        assert_eq!(val, 5);
+        assert_eq!(t.choices.len(), 0);
+    }
+
+    #[test]
+    fn sample_and_observe_sites() {
+        let m = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+            .and_then(|x| observe(addr!("y"), Normal::new(x, 1.0).unwrap(), 0.5).map(move |_| x));
+
+        let mut rng = StdRng::seed_from_u64(42);
+        let (_val, trace) = run(PriorHandler { rng: &mut rng, trace: Trace::default() }, m);
+        assert!(trace.choices.contains_key(&addr!("x")));
+        // Observation contributes to likelihood but not to choices
+        assert!((trace.log_likelihood.is_finite()));
+    }
+
+    #[test]
+    fn factor_and_guard_affect_weight() {
+        // factor adds a finite weight
+        let m_ok = factor(-1.23);
+        let ((), t_ok) = run(PriorHandler { rng: &mut StdRng::seed_from_u64(2), trace: Trace::default() }, m_ok);
+        assert!((t_ok.total_log_weight() + 1.23).abs() < 1e-12);
+
+        // guard(false) adds -inf weight via factor
+        let m_bad = guard(false);
+        let ((), t_bad) = run(PriorHandler { rng: &mut StdRng::seed_from_u64(3), trace: Trace::default() }, m_bad);
+        assert!(t_bad.total_log_weight().is_infinite() && t_bad.total_log_weight().is_sign_negative());
+    }
+
+    #[test]
+    fn sequence_and_traverse_vec() {
+        let models: Vec<Model<i32>> = (0..5).map(|i| pure(i)).collect();
+        let seq = sequence_vec(models);
+        let (vals, t) = run(PriorHandler { rng: &mut StdRng::seed_from_u64(4), trace: Trace::default() }, seq);
+        assert_eq!(vals, vec![0,1,2,3,4]);
+        assert_eq!(t.choices.len(), 0);
+
+        let trav = traverse_vec(vec![1,2,3], |i| pure(i * 2));
+        let (v2, _t2) = run(PriorHandler { rng: &mut StdRng::seed_from_u64(5), trace: Trace::default() }, trav);
+        assert_eq!(v2, vec![2,4,6]);
+    }
+}
+

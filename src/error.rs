@@ -748,3 +748,71 @@ impl Validate for Categorical {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::addr;
+    use crate::core::distribution::*;
+
+    #[test]
+    fn error_code_category_and_description() {
+        let code = ErrorCode::InvalidMean;
+        assert!(ErrorCode::InvalidMean.description().contains("mean"));
+        assert_eq!(code.category(), ErrorCategory::DistributionValidation);
+
+        let code = ErrorCode::NumericalOverflow;
+        assert_eq!(code.category(), ErrorCategory::NumericalComputation);
+    }
+
+    #[test]
+    fn invalid_parameters_constructor_and_context() {
+        let err = FugueError::invalid_parameters("Normal", "bad params", ErrorCode::InvalidMean)
+            .with_context("mu", "nan")
+            .with_source_location("file.rs", 10);
+
+        let msg = format!("{}", err);
+        assert!(msg.contains("Invalid parameters for Normal"));
+        assert!(msg.contains("mu=nan"));
+        assert_eq!(err.code(), ErrorCode::InvalidMean);
+        assert_eq!(err.category(), ErrorCategory::DistributionValidation);
+    }
+
+    #[test]
+    fn error_macros_create_expected_variants() {
+        let e1 = invalid_params!("Uniform", "bad range", InvalidRange, "low" => "1", "high" => "0");
+        match e1 {
+            FugueError::InvalidParameters { code, .. } => assert_eq!(code, ErrorCode::InvalidRange),
+            _ => panic!("expected InvalidParameters"),
+        }
+
+        let e2 = numerical_error!("compute", "overflow", NumericalOverflow, "x" => "1e309");
+        match e2 {
+            FugueError::NumericalError { code, .. } => assert_eq!(code, ErrorCode::NumericalOverflow),
+            _ => panic!("expected NumericalError"),
+        }
+
+        let e3 = trace_error!("lookup", Some(addr!("x")), "missing", TraceAddressNotFound);
+        match e3 {
+            FugueError::TraceError { code, .. } => assert_eq!(code, ErrorCode::TraceAddressNotFound),
+            _ => panic!("expected TraceError"),
+        }
+    }
+
+    #[test]
+    fn type_mismatch_constructor() {
+        let e = FugueError::type_mismatch(addr!("a"), "f64", "bool");
+        assert_eq!(e.code(), ErrorCode::TypeMismatch);
+        assert_eq!(e.category(), ErrorCategory::TypeSystem);
+        let msg = format!("{}", e);
+        assert!(msg.contains("Type mismatch"));
+    }
+
+    #[test]
+    fn validate_trait_on_valid_distributions() {
+        assert!(Normal::new(0.0, 1.0).unwrap().validate().is_ok());
+        assert!(Uniform::new(0.0, 1.0).unwrap().validate().is_ok());
+        assert!(Bernoulli::new(0.5).unwrap().validate().is_ok());
+        assert!(Categorical::new(vec![0.2, 0.8]).unwrap().validate().is_ok());
+    }
+}

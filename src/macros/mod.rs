@@ -40,3 +40,48 @@ macro_rules! scoped_addr {
         $crate::core::address::Address(format!("{}::{}#{}", $scope, $name, format!("{}", format_args!($($indices),+))))
     };
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::addr;
+    use crate::core::distribution::*;
+    use crate::core::model::{observe, sample, ModelExt, pure};
+    use crate::runtime::handler::run;
+    use crate::runtime::interpreters::PriorHandler;
+    use crate::runtime::trace::Trace;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
+    #[test]
+    fn prob_macro_chains_computations() {
+        // Equivalent to: let x <- sample(...); observe(...); pure(x)
+        let model = prob!({
+            sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+        ;   let x = pure(())
+        ;   observe(addr!("y"), Normal::new(0.0, 1.0).unwrap(), 0.1)
+        ;   pure(1)
+        });
+        let mut rng = StdRng::seed_from_u64(30);
+        let (val, trace) = run(PriorHandler { rng: &mut rng, trace: Trace::default() }, model);
+        assert_eq!(val, 1);
+        assert!(trace.log_prior.is_finite());
+        assert!(trace.log_likelihood.is_finite());
+    }
+
+    #[test]
+    fn plate_macro_traverses_range() {
+        let xs = 0..5;
+        let model = plate!(i in xs => pure(i));
+        let (vals, _t) = run(PriorHandler { rng: &mut StdRng::seed_from_u64(31), trace: Trace::default() }, model);
+        assert_eq!(vals, vec![0,1,2,3,4]);
+    }
+
+    #[test]
+    fn scoped_addr_formats_with_scope_and_indices() {
+        let a = scoped_addr!("scope", "name");
+        assert_eq!(a.0, "scope::name");
+        let b = scoped_addr!("scope", "name", "{}", 3);
+        assert_eq!(b.0, "scope::name#3");
+    }
+}

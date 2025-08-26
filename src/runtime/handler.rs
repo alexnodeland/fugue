@@ -117,3 +117,39 @@ pub fn run<A>(mut h: impl Handler, m: Model<A>) -> (A, Trace) {
     let t = h.finish();
     (a, t)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::addr;
+    use crate::core::distribution::*;
+    use crate::core::model::ModelExt;
+    use crate::runtime::interpreters::PriorHandler;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
+    #[test]
+    fn run_accumulates_logs_for_sample_observe_factor() {
+        // Model: sample x ~ Normal(0,1); observe y ~ Normal(x,1) with value 0.5; factor(-1.0)
+        let model = crate::core::model::sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+            .and_then(|x| crate::core::model::observe(addr!("y"), Normal::new(x, 1.0).unwrap(), 0.5))
+            .and_then(|_| crate::core::model::factor(-1.0));
+
+        let mut rng = StdRng::seed_from_u64(123);
+        let (_a, trace) = crate::runtime::handler::run(
+            PriorHandler {
+                rng: &mut rng,
+                trace: Trace::default(),
+            },
+            model,
+        );
+
+        // Should have a sample recorded and finite prior
+        assert!(trace.choices.contains_key(&addr!("x")));
+        assert!(trace.log_prior.is_finite());
+        // Observation contributes to likelihood
+        assert!(trace.log_likelihood.is_finite());
+        // Factor contributes exact -1.0
+        assert!((trace.log_factors + 1.0).abs() < 1e-12);
+    }
+}

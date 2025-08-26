@@ -546,3 +546,46 @@ pub fn estimate_elbo<A, R: Rng>(
     }
     total / (num_samples as f64)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::addr;
+    use crate::core::distribution::*;
+    use crate::core::model::{observe, sample, ModelExt};
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
+    #[test]
+    fn variational_param_sampling_and_log_prob() {
+        let mut rng = StdRng::seed_from_u64(20);
+        let vp_n = VariationalParam::Normal { mu: 0.0, log_sigma: 0.0 };
+        let x = vp_n.sample(&mut rng);
+        assert!(x.is_finite());
+        assert!(vp_n.log_prob(x).is_finite());
+
+        let vp_b = VariationalParam::Beta { log_alpha: (2.0f64).ln(), log_beta: (3.0f64).ln() };
+        let y = vp_b.sample(&mut rng);
+        assert!(y > 0.0 && y < 1.0);
+        assert!(vp_b.log_prob(y).is_finite());
+    }
+
+    #[test]
+    fn elbo_computation_is_finite() {
+        let model_fn = || {
+            sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
+                .and_then(|mu| observe(addr!("y"), Normal::new(mu, 1.0).unwrap(), 0.2).map(move |_| mu))
+        };
+
+        // Build a simple guide
+        let mut guide = MeanFieldGuide::new();
+        guide.params.insert(
+            addr!("mu"),
+            VariationalParam::Normal { mu: 0.0, log_sigma: 0.0 }
+        );
+
+        let mut rng = StdRng::seed_from_u64(21);
+        let elbo = elbo_with_guide(&mut rng, &model_fn, &guide, 5);
+        assert!(elbo.is_finite());
+    }
+}

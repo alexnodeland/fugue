@@ -615,3 +615,32 @@ mod memory_tests {
         assert!((stats.hit_ratio() - 25.0).abs() < 1e-10);
     }
 }
+
+#[cfg(test)]
+mod pooled_tests {
+    use super::*;
+    use crate::addr;
+    use crate::core::distribution::*;
+    use crate::core::model::{observe, sample, ModelExt};
+    use crate::runtime::handler::run;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
+    #[test]
+    fn pooled_prior_handler_builds_trace_and_updates_pool() {
+        let mut pool = TracePool::new(4);
+        let mut rng = StdRng::seed_from_u64(40);
+        let (_val, trace) = run(
+            PooledPriorHandler { rng: &mut rng, trace_builder: TraceBuilder::new(), pool: &mut pool },
+            sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+                .and_then(|x| observe(addr!("y"), Normal::new(x, 1.0).unwrap(), 0.3))
+        );
+        assert!(trace.choices.contains_key(&addr!("x")));
+        assert!(trace.log_likelihood.is_finite());
+
+        // Return a trace and check stats update when pool accepts
+        let before_returns = pool.stats().returns;
+        pool.return_trace(trace);
+        assert_eq!(pool.stats().returns, before_returns + 1);
+    }
+}

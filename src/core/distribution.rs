@@ -749,3 +749,126 @@ impl Distribution<u64> for Poisson {
         Box::new(*self)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
+    #[test]
+    fn normal_constructor_and_log_prob() {
+        assert!(Normal::new(0.0, 1.0).is_ok());
+        assert!(Normal::new(f64::NAN, 1.0).is_err());
+        assert!(Normal::new(0.0, 0.0).is_err());
+
+        let n = Normal::new(0.0, 1.0).unwrap();
+        assert!(n.log_prob(&0.0).is_finite());
+        assert_eq!(n.log_prob(&f64::INFINITY), f64::NEG_INFINITY);
+    }
+
+    #[test]
+    fn uniform_support_and_log_prob() {
+        assert!(Uniform::new(0.0, 1.0).is_ok());
+        assert!(Uniform::new(1.0, 0.0).is_err());
+        let u = Uniform::new(-2.0, 2.0).unwrap();
+        // Inside support
+        let lp0 = u.log_prob(&0.0);
+        assert!(lp0.is_finite());
+        // Outside support
+        assert_eq!(u.log_prob(&2.0), f64::NEG_INFINITY);
+        assert_eq!(u.log_prob(&-2.1), f64::NEG_INFINITY);
+    }
+
+    #[test]
+    fn lognormal_validation() {
+        assert!(LogNormal::new(0.0, 1.0).is_ok());
+        assert!(LogNormal::new(0.0, 0.0).is_err());
+        let ln = LogNormal::new(0.0, 1.0).unwrap();
+        assert_eq!(ln.log_prob(&0.0), f64::NEG_INFINITY);
+        assert!(ln.log_prob(&1.0).is_finite());
+    }
+
+    #[test]
+    fn exponential_validation() {
+        assert!(Exponential::new(1.0).is_ok());
+        assert!(Exponential::new(0.0).is_err());
+        let e = Exponential::new(2.0).unwrap();
+        assert_eq!(e.log_prob(&-1.0), f64::NEG_INFINITY);
+        assert!((e.log_prob(&0.0) - (2.0f64).ln()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn bernoulli_validation() {
+        assert!(Bernoulli::new(0.5).is_ok());
+        assert!(Bernoulli::new(-0.1).is_err());
+        let b = Bernoulli::new(0.25).unwrap();
+        assert!((b.log_prob(&true) - (0.25f64).ln()).abs() < 1e-12);
+        assert!((b.log_prob(&false) - (0.75f64).ln()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn categorical_validation_and_log_prob() {
+        assert!(Categorical::new(vec![0.5, 0.5]).is_ok());
+        assert!(Categorical::new(vec![]).is_err());
+        assert!(Categorical::new(vec![0.6, 0.5]).is_err());
+
+        let c = Categorical::new(vec![0.2, 0.8]).unwrap();
+        assert!((c.log_prob(&1) - (0.8f64).ln()).abs() < 1e-12);
+        assert_eq!(c.log_prob(&2), f64::NEG_INFINITY);
+    }
+
+    #[test]
+    fn beta_validation_and_support() {
+        assert!(Beta::new(2.0, 3.0).is_ok());
+        assert!(Beta::new(0.0, 1.0).is_err());
+        let b = Beta::new(2.0, 5.0).unwrap();
+        assert_eq!(b.log_prob(&0.0), f64::NEG_INFINITY);
+        assert_eq!(b.log_prob(&1.0), f64::NEG_INFINITY);
+        assert!(b.log_prob(&0.5).is_finite());
+    }
+
+    #[test]
+    fn gamma_validation_and_support() {
+        assert!(Gamma::new(1.5, 2.0).is_ok());
+        assert!(Gamma::new(0.0, 2.0).is_err());
+        assert!(Gamma::new(1.0, 0.0).is_err());
+        let g = Gamma::new(2.0, 1.0).unwrap();
+        assert_eq!(g.log_prob(&-1.0), f64::NEG_INFINITY);
+        assert!(g.log_prob(&1.0).is_finite());
+    }
+
+    #[test]
+    fn binomial_validation_and_log_prob() {
+        assert!(Binomial::new(10, 0.5).is_ok());
+        assert!(Binomial::new(10, 1.5).is_err());
+        let bi = Binomial::new(5, 0.3).unwrap();
+        assert_eq!(bi.log_prob(&6), f64::NEG_INFINITY); // k > n
+        assert!(bi.log_prob(&3).is_finite());
+    }
+
+    #[test]
+    fn poisson_validation_and_log_prob() {
+        assert!(Poisson::new(1.0).is_ok());
+        assert!(Poisson::new(0.0).is_err());
+        let p = Poisson::new(3.0).unwrap();
+        assert!(p.log_prob(&0).is_finite());
+        assert!(p.log_prob(&5).is_finite());
+    }
+
+    #[test]
+    fn sampling_basic_sanity() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let n = Normal::new(0.0, 1.0).unwrap();
+        let x = n.sample(&mut rng);
+        assert!(x.is_finite());
+
+        let u = Uniform::new(-1.0, 2.0).unwrap();
+        let y = u.sample(&mut rng);
+        assert!(y >= -1.0 && y < 2.0);
+
+        let b = Bernoulli::new(0.7).unwrap();
+        let _z = b.sample(&mut rng);
+    }
+}
+

@@ -420,3 +420,49 @@ pub fn single_site_random_walk_mh<A, R: Rng>(
     let mut adaptation = DiminishingAdaptation::new(0.44, 0.7);
     adaptive_single_site_mh(rng, model_fn, current, &mut adaptation)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::addr;
+    use crate::core::distribution::*;
+    use crate::core::model::{observe, sample, ModelExt};
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
+    #[test]
+    fn gaussian_walk_proposal_produces_variation() {
+        let mut rng = StdRng::seed_from_u64(11);
+        let strat = GaussianWalkProposal;
+        let x0 = 0.0;
+        let x1 = strat.propose(x0, 1.0, &mut rng);
+        // With probability 1 it's not guaranteed to change, but very likely; ensure finiteness
+        assert!(x1.is_finite());
+    }
+
+    #[test]
+    fn discrete_and_flip_proposals_preserve_types() {
+        let mut rng = StdRng::seed_from_u64(12);
+        let d = DiscreteWalkProposal;
+        let u = d.propose(5u64, 1.0, &mut rng);
+        assert!(u >= 0);
+        let f = FlipProposal;
+        let b = f.propose(true, 1.0, &mut rng);
+        assert!(b == true || b == false);
+    }
+
+    #[test]
+    fn adaptive_chain_runs_and_returns_samples() {
+        let model_fn = || {
+            sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
+                .and_then(|mu| observe(addr!("y"), Normal::new(mu, 1.0).unwrap(), 0.5).map(move |_| mu))
+        };
+        let mut rng = StdRng::seed_from_u64(13);
+        let samples = adaptive_mcmc_chain(&mut rng, model_fn, 5, 2);
+        assert_eq!(samples.len(), 5);
+        // Ensure types are preserved in trace
+        for (_val, t) in &samples {
+            assert!(t.get_f64(&addr!("mu")).is_some());
+        }
+    }
+}

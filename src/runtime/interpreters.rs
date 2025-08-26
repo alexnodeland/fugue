@@ -589,3 +589,86 @@ impl Handler for SafeScoreGivenTrace {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::addr;
+    use crate::core::distribution::*;
+    use crate::core::model::{observe, sample, ModelExt};
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
+    #[test]
+    fn prior_handler_samples_and_accumulates() {
+        let mut rng = StdRng::seed_from_u64(7);
+        let (_val, trace) = crate::runtime::handler::run(
+            PriorHandler { rng: &mut rng, trace: Trace::default() },
+            sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+                .and_then(|x| observe(addr!("y"), Normal::new(x, 1.0).unwrap(), 0.5))
+        );
+        assert!(trace.choices.contains_key(&addr!("x")));
+        assert!(trace.log_prior.is_finite());
+        assert!(trace.log_likelihood.is_finite());
+    }
+
+    #[test]
+    fn replay_handler_reuses_values() {
+        let mut rng = StdRng::seed_from_u64(8);
+        let ((), base) = crate::runtime::handler::run(
+            PriorHandler { rng: &mut rng, trace: Trace::default() },
+            sample(addr!("x"), Normal::new(0.0, 1.0).unwrap()).map(|_| ())
+        );
+
+        let ((), replayed) = crate::runtime::handler::run(
+            ReplayHandler { rng: &mut rng, base: base.clone(), trace: Trace::default() },
+            sample(addr!("x"), Normal::new(0.0, 1.0).unwrap()).map(|_| ())
+        );
+
+        let x_base = base.get_f64(&addr!("x")).unwrap();
+        let x_replay = replayed.get_f64(&addr!("x")).unwrap();
+        assert_eq!(x_base, x_replay);
+    }
+
+    #[test]
+    fn score_given_trace_scores_fixed_values() {
+        let mut rng = StdRng::seed_from_u64(9);
+        let (_a, base) = crate::runtime::handler::run(
+            PriorHandler { rng: &mut rng, trace: Trace::default() },
+            sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+        );
+
+        let (_a2, scored) = crate::runtime::handler::run(
+            ScoreGivenTrace { base: base.clone(), trace: Trace::default() },
+            sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+        );
+
+        // Should have same value and finite log_prior
+        assert_eq!(scored.get_f64(&addr!("x")), base.get_f64(&addr!("x")));
+        assert!(scored.log_prior.is_finite());
+    }
+
+    #[test]
+    fn safe_variants_handle_mismatches() {
+        // Build base trace with x as f64, then attempt to replay as bool
+        let mut rng = StdRng::seed_from_u64(10);
+        let (_a, base) = crate::runtime::handler::run(
+            PriorHandler { rng: &mut rng, trace: Trace::default() },
+            sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+        );
+
+        // SafeReplayHandler should sample fresh value for bool and continue
+        let (_b, t1) = crate::runtime::handler::run(
+            SafeReplayHandler { rng: &mut rng, base: base.clone(), trace: Trace::default(), warn_on_mismatch: true },
+            sample(addr!("x"), Bernoulli::new(0.5).unwrap())
+        );
+        assert!(t1.log_prior.is_finite());
+
+        // SafeScoreGivenTrace should mark as invalid by adding -inf
+        let (_c, t2) = crate::runtime::handler::run(
+            SafeScoreGivenTrace { base: base.clone(), trace: Trace::default(), warn_on_error: true },
+            sample(addr!("x"), Bernoulli::new(0.5).unwrap())
+        );
+        assert!(t2.log_prior.is_infinite());
+    }
+}
+

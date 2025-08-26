@@ -246,3 +246,48 @@ impl Trace {
         self.choices.insert(addr, choice);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::addr;
+
+    #[test]
+    fn insert_and_getters_work() {
+        let mut t = Trace::default();
+        t.insert_choice(addr!("a"), ChoiceValue::F64(1.5), -0.5);
+        t.insert_choice(addr!("b"), ChoiceValue::Bool(true), -0.7);
+        t.insert_choice(addr!("c"), ChoiceValue::U64(3), -0.2);
+        t.insert_choice(addr!("d"), ChoiceValue::Usize(4), -0.3);
+        t.insert_choice(addr!("e"), ChoiceValue::I64(-7), -0.1);
+
+        assert_eq!(t.get_f64(&addr!("a")), Some(1.5));
+        assert_eq!(t.get_bool(&addr!("b")), Some(true));
+        assert_eq!(t.get_u64(&addr!("c")), Some(3));
+        assert_eq!(t.get_usize(&addr!("d")), Some(4));
+        assert_eq!(t.get_i64(&addr!("e")), Some(-7));
+
+        // Result-based accessors
+        assert!(t.get_f64_result(&addr!("a")).is_ok());
+        assert!(t.get_bool_result(&addr!("b")).is_ok());
+        assert!(t.get_u64_result(&addr!("c")).is_ok());
+        assert!(t.get_usize_result(&addr!("d")).is_ok());
+        assert!(t.get_i64_result(&addr!("e")).is_ok());
+
+        // Type mismatch
+        let err = t.get_f64_result(&addr!("b")).unwrap_err();
+        assert!(matches!(err, crate::error::FugueError::TypeMismatch{..}));
+    }
+
+    #[test]
+    fn total_log_weight_accumulates() {
+        let mut t = Trace::default();
+        // insert_choice does not modify log accumulators; set them explicitly
+        t.insert_choice(addr!("x"), ChoiceValue::F64(0.0), -1.0);
+        t.log_prior = -1.0;
+        t.log_likelihood = -2.0;
+        t.log_factors = -3.0;
+        assert!((t.total_log_weight() - (-6.0)).abs() < 1e-12);
+    }
+}
+
