@@ -36,6 +36,7 @@ mdbook-mermaid = "0.15.0"
 mdbook-katex = "0.9.4"
 mdbook-admonish = "1.20.0"
 mdbook-linkcheck = "0.7.7"
+cargo-llvm-cov = "0.6.18"
 
 [[bench]]
 name = "memory_benchmarks"

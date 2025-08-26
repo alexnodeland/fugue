@@ -1,0 +1,8 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+      { "label": "CI (local)", "type": "shell", "command": "make ci", "problemMatcher": [] },
+      { "label": "Docs: serve", "type": "shell", "command": "mdbook serve docs", "problemMatcher": [] },
+      { "label": "Test", "type": "shell", "command": "cargo test --all-features", "problemMatcher": [] }
+    ]
+  }
