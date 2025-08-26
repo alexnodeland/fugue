@@ -430,5 +430,25 @@ mod tests {
         let (v2, _t2) = run(PriorHandler { rng: &mut StdRng::seed_from_u64(5), trace: Trace::default() }, trav);
         assert_eq!(v2, vec![2,4,6]);
     }
+
+    #[test]
+    fn zip_and_sequence_empty_and_bind_chaining() {
+        // zip
+        let m1 = pure(1);
+        let m2 = pure(2);
+        let (pair, _t) = run(PriorHandler { rng: &mut StdRng::seed_from_u64(6), trace: Trace::default() }, zip(m1, m2));
+        assert_eq!(pair, (1,2));
+
+        // sequence empty
+        let empty: Vec<Model<i32>> = vec![];
+        let (vals, _t2) = run(PriorHandler { rng: &mut StdRng::seed_from_u64(7), trace: Trace::default() }, sequence_vec(empty));
+        assert!(vals.is_empty());
+
+        // bind chaining across types
+        let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+            .bind(|x| pure(x > 0.0))
+            .bind(|b| if b { pure(1u64) } else { pure(0u64) });
+        let (_val, _t3) = run(PriorHandler { rng: &mut StdRng::seed_from_u64(8), trace: Trace::default() }, model);
+    }
 }
 

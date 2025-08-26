@@ -815,4 +815,37 @@ mod tests {
         assert!(Bernoulli::new(0.5).unwrap().validate().is_ok());
         assert!(Categorical::new(vec![0.2, 0.8]).unwrap().validate().is_ok());
     }
+
+    #[test]
+    fn error_cause_chaining_and_display_variants() {
+        // Build a cause chain
+        let base = FugueError::invalid_parameters("Normal", "bad", ErrorCode::InvalidMean);
+        let ctx = ErrorContext::new().with_cause(base.clone());
+        let inf = FugueError::InferenceError { algorithm: "MH".into(), reason: "did not converge".into(), code: ErrorCode::InferenceConvergenceFailed, context: ctx.clone() };
+        let msg = format!("{}", inf);
+        assert!(msg.contains("Inference error"));
+
+        let model_err = FugueError::ModelError { address: Some(crate::addr!("x")), reason: "failed".into(), code: ErrorCode::ModelExecutionFailed, context: ctx };
+        let msg2 = format!("{}", model_err);
+        assert!(msg2.contains("Model error"));
+    }
+
+    #[test]
+    fn from_conversions_cover_paths() {
+        // ParseFloatError
+        let e_float: FugueError = "abc".parse::<f64>().unwrap_err().into();
+        assert!(matches!(e_float, FugueError::NumericalError{..}));
+
+        // ParseIntError
+        let e_int: FugueError = "abc".parse::<i32>().unwrap_err().into();
+        assert!(matches!(e_int, FugueError::NumericalError{..}));
+
+        // From<&str>
+        let e_str: FugueError = "oops".into();
+        assert!(matches!(e_str, FugueError::ModelError{..}));
+
+        // From<String>
+        let e_string: FugueError = String::from("oops").into();
+        assert!(matches!(e_string, FugueError::ModelError{..}));
+    }
 }

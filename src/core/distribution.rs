@@ -870,5 +870,12 @@ mod tests {
         let b = Bernoulli::new(0.7).unwrap();
         let _z = b.sample(&mut rng);
     }
+
+    #[test]
+    fn categorical_uniform_constructor() {
+        let cu = Categorical::uniform(4).unwrap();
+        assert_eq!(cu.len(), 4);
+        for &p in cu.probs() { assert!((p - 0.25).abs() < 1e-12); }
+    }
 }
 

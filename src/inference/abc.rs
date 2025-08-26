@@ -548,6 +548,7 @@ mod tests {
     use crate::addr;
     use crate::core::distribution::*;
     use crate::core::model::sample;
+    use crate::runtime::trace::Trace;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
@@ -577,5 +578,37 @@ mod tests {
             3,
         );
         assert!(!samples.is_empty());
+    }
+
+    #[test]
+    fn abc_rejection_can_return_empty_with_tight_tolerance() {
+        let mut rng = StdRng::seed_from_u64(43);
+        let observed = vec![1000.0]; // far from prior mean 0
+        let res = abc_rejection(
+            &mut rng,
+            || sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap()),
+            |trace| vec![trace.get_f64(&addr!("mu")).unwrap_or(0.0)],
+            &observed,
+            &EuclideanDistance,
+            1e-6, // extremely tight
+            3,
+        );
+        assert!(res.is_empty());
+    }
+
+    #[test]
+    fn abc_smc_respects_tolerance_schedule() {
+        let mut rng = StdRng::seed_from_u64(44);
+        let observed = vec![0.0];
+        let config = ABCSMCConfig { initial_tolerance: 2.0, tolerance_schedule: vec![1.0, 0.5], particles_per_round: 4 };
+        let res = abc_smc(
+            &mut rng,
+            || sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap()),
+            |trace| vec![trace.get_f64(&addr!("mu")).unwrap_or(0.0)],
+            &observed,
+            &EuclideanDistance,
+            config,
+        );
+        assert_eq!(res.len(), 4);
     }
 }

@@ -289,5 +289,12 @@ mod tests {
         t.log_factors = -3.0;
         assert!((t.total_log_weight() - (-6.0)).abs() < 1e-12);
     }
+
+    #[test]
+    fn result_accessors_return_errors_for_missing_addresses() {
+        let t = Trace::default();
+        let e = t.get_f64_result(&addr!("missing")).unwrap_err();
+        assert!(matches!(e, crate::error::FugueError::TraceError{..}));
+    }
 }
 

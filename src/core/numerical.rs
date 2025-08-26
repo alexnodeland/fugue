@@ -139,4 +139,24 @@ mod tests {
         assert!(log1p_exp(-50.0) < 1e-10);
         assert!(log1p_exp(0.0).abs() < 1.0);
     }
+
+    #[test]
+    fn test_weighted_log_sum_exp_more_edges() {
+        // Mixed signs and zeros
+        let logs = vec![-1000.0, 0.0, -10.0];
+        let weights = vec![0.0, 1.0, 0.0];
+        let res = weighted_log_sum_exp(&logs, &weights);
+        assert!((res - 0.0).abs() < 1e-12);
+
+        let weights2 = vec![0.5, 0.5, 0.0];
+        let res2 = weighted_log_sum_exp(&logs, &weights2);
+        assert!(res2.is_finite());
+    }
+
+    #[test]
+    fn test_safe_ln_edges() {
+        assert_eq!(safe_ln(-1.0), f64::NEG_INFINITY);
+        assert_eq!(safe_ln(f64::INFINITY), f64::NEG_INFINITY);
+        assert_eq!(safe_ln(1.0), 0.0);
+    }
 }

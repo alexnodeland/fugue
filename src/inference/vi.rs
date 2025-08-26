@@ -553,6 +553,7 @@ mod tests {
     use crate::addr;
     use crate::core::distribution::*;
     use crate::core::model::{observe, sample, ModelExt};
+    use crate::runtime::trace::{Choice, ChoiceValue, Trace};
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
@@ -587,5 +588,61 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(21);
         let elbo = elbo_with_guide(&mut rng, &model_fn, &guide, 5);
         assert!(elbo.is_finite());
+    }
+
+    #[test]
+    fn meanfield_from_trace_and_sampling() {
+        // Create a base trace with mixed types
+        let mut base = Trace::default();
+        base.choices.insert(
+            addr!("pos"),
+            Choice { addr: addr!("pos"), value: ChoiceValue::F64(-1.0), logp: -0.1 }
+        );
+        base.choices.insert(
+            addr!("bool"),
+            Choice { addr: addr!("bool"), value: ChoiceValue::Bool(true), logp: -0.7 }
+        );
+        base.choices.insert(
+            addr!("u64"),
+            Choice { addr: addr!("u64"), value: ChoiceValue::U64(3), logp: -0.5 }
+        );
+
+        let guide = MeanFieldGuide::from_trace(&base);
+        assert!(!guide.params.is_empty());
+
+        // Sample a trace from the guide
+        let t = guide.sample_trace(&mut StdRng::seed_from_u64(22));
+        assert!(!t.choices.is_empty());
+        assert!(t.log_prior.is_finite());
+    }
+
+    #[test]
+    fn optimize_vi_updates_parameters_and_is_stable() {
+        let model_fn = || {
+            sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
+                .and_then(|mu| observe(addr!("y"), Normal::new(mu, 1.0).unwrap(), 0.3).map(move |_| mu))
+        };
+
+        let mut guide = MeanFieldGuide::new();
+        guide.params.insert(
+            addr!("mu"),
+            VariationalParam::Normal { mu: 0.0, log_sigma: 0.0 }
+        );
+
+        let optimized = optimize_meanfield_vi(
+            &mut StdRng::seed_from_u64(23),
+            model_fn,
+            guide.clone(),
+            2,   // small iterations for speed
+            3,
+            0.1,
+        );
+
+        // Parameter exists and remains within clamped bounds
+        if let VariationalParam::Normal { mu, .. } = optimized.params.get(&addr!("mu")).unwrap() {
+            assert!(*mu <= 100.0 && *mu >= -100.0);
+        } else {
+            panic!("expected Normal param");
+        }
     }
 }

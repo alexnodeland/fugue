@@ -670,5 +670,95 @@ mod tests {
         );
         assert!(t2.log_prior.is_infinite());
     }
+
+    #[test]
+    fn handlers_cover_all_types_sample_and_observe() {
+        // Model with multiple types
+        let model = sample(addr!("f"), Normal::new(0.0, 1.0).unwrap())
+            .and_then(|_| sample(addr!("b"), Bernoulli::new(0.6).unwrap()))
+            .and_then(|_| sample(addr!("u64"), Poisson::new(3.0).unwrap()))
+            .and_then(|_| sample(addr!("usz"), Categorical::new(vec![0.3, 0.7]).unwrap()))
+            .and_then(|_| observe(addr!("f_obs"), Normal::new(0.0, 1.0).unwrap(), 0.1))
+            .and_then(|_| observe(addr!("b_obs"), Bernoulli::new(0.4).unwrap(), true))
+            .and_then(|_| observe(addr!("u64_obs"), Poisson::new(2.0).unwrap(), 1))
+            .and_then(|_| observe(addr!("usz_obs"), Categorical::new(vec![0.5, 0.5]).unwrap(), 1));
+
+        let (_a, t) = crate::runtime::handler::run(
+            PriorHandler { rng: &mut StdRng::seed_from_u64(100), trace: Trace::default() },
+            model,
+        );
+        assert!(t.get_f64(&addr!("f")).is_some());
+        assert!(t.get_bool(&addr!("b")).is_some());
+        assert!(t.get_u64(&addr!("u64")).is_some());
+        assert!(t.get_usize(&addr!("usz")).is_some());
+        assert!(t.log_likelihood.is_finite());
+
+        // Build base and score given trace for all types
+        let base = t.clone();
+        let (_sv, scored) = crate::runtime::handler::run(
+            ScoreGivenTrace { base: base.clone(), trace: Trace::default() },
+            sample(addr!("f"), Normal::new(0.0, 1.0).unwrap())
+                .and_then(|_| sample(addr!("b"), Bernoulli::new(0.6).unwrap()))
+                .and_then(|_| sample(addr!("u64"), Poisson::new(3.0).unwrap()))
+                .and_then(|_| sample(addr!("usz"), Categorical::new(vec![0.3, 0.7]).unwrap())),
+        );
+        assert!(scored.log_prior.is_finite());
+
+        // Safe replay mismatches for integer/categorical types
+        let (_sv2, safe) = crate::runtime::handler::run(
+            SafeReplayHandler { rng: &mut StdRng::seed_from_u64(101), base: base.clone(), trace: Trace::default(), warn_on_mismatch: true },
+            sample(addr!("u64"), Bernoulli::new(0.5).unwrap())
+        );
+        assert!(safe.log_prior.is_finite());
+    }
+
+    #[test]
+    fn safe_score_given_trace_warn_flag_branches() {
+        let mut rng = StdRng::seed_from_u64(102);
+        let (_a, base) = crate::runtime::handler::run(
+            PriorHandler { rng: &mut rng, trace: Trace::default() },
+            sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+        );
+        // warn_on_error = false
+        let (_b, t_false) = crate::runtime::handler::run(
+            SafeScoreGivenTrace { base: base.clone(), trace: Trace::default(), warn_on_error: false },
+            sample(addr!("x"), Bernoulli::new(0.5).unwrap())
+        );
+        assert!(t_false.log_prior.is_infinite());
+
+        // warn_on_error = true
+        let (_c, t_true) = crate::runtime::handler::run(
+            SafeScoreGivenTrace { base: base.clone(), trace: Trace::default(), warn_on_error: true },
+            sample(addr!("x"), Bernoulli::new(0.5).unwrap())
+        );
+        assert!(t_true.log_prior.is_infinite());
+    }
+
+    #[test]
+    #[should_panic]
+    fn replay_handler_panics_on_type_mismatch() {
+        // Base has f64, replay expects bool -> panic as designed
+        let mut rng = StdRng::seed_from_u64(103);
+        let (_a, base) = crate::runtime::handler::run(
+            PriorHandler { rng: &mut rng, trace: Trace::default() },
+            sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+        );
+        let (_b, _t) = crate::runtime::handler::run(
+            ReplayHandler { rng: &mut rng, base: base.clone(), trace: Trace::default() },
+            sample(addr!("x"), Bernoulli::new(0.5).unwrap())
+        );
+    }
+
+    #[test]
+    fn safe_replay_handler_samples_fresh_for_missing_address() {
+        let mut rng = StdRng::seed_from_u64(104);
+        // Base trace without address "z"
+        let base = Trace::default();
+        let (_a, t) = crate::runtime::handler::run(
+            SafeReplayHandler { rng: &mut rng, base, trace: Trace::default(), warn_on_mismatch: true },
+            sample(addr!("z"), Normal::new(0.0, 1.0).unwrap())
+        );
+        assert!(t.get_f64(&addr!("z")).is_some());
+    }
 }
 

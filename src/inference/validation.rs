@@ -238,6 +238,39 @@ impl ValidationResult {
 }
 
 #[cfg(test)]
+mod tests_more {
+    use super::*;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
+    #[test]
+    fn ks_test_edge_thresholds_and_print_summary() {
+        let mut rng = StdRng::seed_from_u64(50);
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        let ref_samples: Vec<f64> = (0..200).map(|_| normal.sample(&mut rng)).collect();
+        let ok = ks_test_distribution(&mut rng, &normal, &ref_samples, 200, 0.05);
+        assert!(ok);
+
+        // ValidationResult print_summary coverage
+        let res = ValidationResult::Success {
+            mean_error: 0.0,
+            var_error: 0.0,
+            effective_sample_size: 10.0,
+            mean_within_bounds: true,
+            var_within_bounds: true,
+            ess_adequate: true,
+            posterior_mu: 0.0,
+            posterior_sigma: 1.0,
+            sample_mean: 0.0,
+            sample_sigma: 1.0,
+        };
+        res.print_summary();
+        assert!(res.is_valid());
+    }
+}
+
+
+#[cfg(test)]
 mod validation_tests {
     use super::*;
     use rand::rngs::StdRng;
