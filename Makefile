@@ -1,4 +1,4 @@
-.PHONY: help test coverage coverage-html clean lint fmt check all
+.PHONY: help test coverage clean lint fmt check all
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
