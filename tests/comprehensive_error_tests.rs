@@ -6,7 +6,6 @@
 mod test_utils;
 
 use fugue::*;
-use rand::{rngs::StdRng, SeedableRng};
 use test_utils::*;
 
 #[test]
@@ -445,7 +444,7 @@ fn test_error_propagation_in_models() {
 #[test]
 fn test_validation_trait_coverage() {
     // Test that the Validate trait works for various distributions
-    use std::error::Error;
+    
 
     let valid_normal = Normal::new(0.0, 1.0).unwrap();
     let validation_result = valid_normal.validate();

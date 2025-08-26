@@ -6,7 +6,7 @@ mod test_utils;
 
 use fugue::inference::diagnostics;
 use fugue::*;
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::Rng;
 use test_utils::*;
 
 #[test]

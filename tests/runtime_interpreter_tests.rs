@@ -5,7 +5,6 @@
 mod test_utils;
 
 use fugue::*;
-use rand::{rngs::StdRng, SeedableRng};
 use test_utils::*;
 
 #[test]

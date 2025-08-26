@@ -6,7 +6,7 @@ mod test_utils;
 
 use fugue::inference::validation::*;
 use fugue::*;
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{rngs::StdRng, Rng};
 use test_utils::*;
 
 #[test]
