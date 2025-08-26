@@ -1,0 +1,51 @@
+{
+    "name": "rust-mdbook-dev",
+    "build": { "dockerfile": "Dockerfile" },
+    "features": {
+      "ghcr.io/devcontainers/features/common-utils:2": {
+        "username": "vscode",
+        "installZsh": false,
+        "upgradePackages": true
+      },
+      "ghcr.io/devcontainers/features/git:1": {}
+    },
+    "customizations": {
+      "vscode": {
+        "extensions": [
+          "rust-lang.rust-analyzer",
+          "serayuzgur.crates",
+          "tamasfe.even-better-toml",
+          "tamasfe.even-better-toml",
+          "tamago324.marksman",
+          "DavidAnson.vscode-markdownlint",
+          "yzhang.markdown-all-in-one",
+          "ms-azuretools.vscode-docker",
+          "github.vscode-github-actions"
+        ],
+        "settings": {
+          "editor.formatOnSave": true,
+          "rust-analyzer.cargo.features": "all",
+          "rust-analyzer.cargo.buildScripts.enable": true,
+          "rust-analyzer.checkOnSave.command": "clippy",
+          "rust-analyzer.checkOnSave.allTargets": true,
+          "files.trimTrailingWhitespace": true,
+          "markdownlint.config": { "MD013": false }
+        }
+      }
+    },
+    "containerEnv": {
+      "CARGO_TERM_COLOR": "always"
+    },
+    "mounts": [
+      "type=cache,target=/usr/local/cargo/registry",
+      "type=cache,target=/usr/local/cargo/git",
+      "type=cache,target=/workspaces/${localWorkspaceFolderBasename}/target"
+    ],
+    "forwardPorts": [3000],
+    "portsAttributes": {
+      "3000": { "label": "mdBook", "onAutoForward": "notify" }
+    },
+    "postCreateCommand": "bash .devcontainer/postCreate.sh",
+    "postStartCommand": "git config --global --add safe.directory /workspaces/${localWorkspaceFolderBasename}",
+    "remoteUser": "vscode"
+  }
