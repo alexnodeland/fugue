@@ -3,6 +3,7 @@
 [![Crates.io](https://img.shields.io/crates/v/fugue.svg)](https://crates.io/crates/fugue)
 [![Documentation](https://docs.rs/fugue/badge.svg)](https://docs.rs/fugue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![codecov](https://codecov.io/gh/alexnodeland/fugue/graph/badge.svg?token=BDJ5OB6GOB)](https://codecov.io/gh/alexnodeland/fugue)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-blue.svg)](https://www.rust-lang.org)
 
 A **production-ready**, **monadic probabilistic programming library** for Rust. Write elegant probabilistic programs by composing `Model` values in direct style; execute them with pluggable interpreters and state-of-the-art inference algorithms.
