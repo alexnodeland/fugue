@@ -140,11 +140,6 @@
 use fugue::*;
 use rand::{rngs::StdRng, SeedableRng};
 
-// TODO: Implement comprehensive public API validation tests
-// Focus on validating the public interface and ensuring API stability
-// Each test should verify that the public API works as documented
-// Pay special attention to error handling and edge cases
-
 #[test]
 fn test_api_contract_distribution_interfaces() {
     let mut rng = StdRng::seed_from_u64(42);

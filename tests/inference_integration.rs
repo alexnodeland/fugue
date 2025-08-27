@@ -110,10 +110,6 @@
 use fugue::*;
 use rand::{rngs::StdRng, SeedableRng};
 
-// TODO: Implement the test categories described above
-// Focus on end-to-end validation of inference algorithms
-// Each test should use realistic models and validate statistical properties
-
 #[test]
 fn test_mcmc_normal_mean_recovery() {
     let mut rng = StdRng::seed_from_u64(42);

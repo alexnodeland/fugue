@@ -73,10 +73,6 @@
 use fugue::*;
 use rand::{rngs::StdRng, SeedableRng};
 
-// TODO: Implement the test categories described above
-// Start with basic model execution, then move to more complex scenarios
-// Each test should be focused and test one specific aspect of model execution
-
 #[test]
 fn test_basic_prior_sampling() {
     let mut rng = StdRng::seed_from_u64(42);

@@ -118,11 +118,6 @@
 use fugue::*;
 use rand::{rngs::StdRng, SeedableRng};
 
-// TODO: Implement comprehensive public API coverage tests
-// Start by enumerating all public exports from src/lib.rs
-// Create focused tests for each API component
-// Ensure complete coverage of the public interface
-
 #[test]
 fn test_distribution_constructors_and_validation() {
     // Test all distribution constructors with valid parameters

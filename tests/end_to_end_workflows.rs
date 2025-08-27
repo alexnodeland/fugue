@@ -178,11 +178,6 @@
 use fugue::*;
 use rand::{rngs::StdRng, SeedableRng};
 
-// TODO: Implement comprehensive end-to-end workflow tests
-// Focus on realistic analysis scenarios that users would encounter
-// Each test should demonstrate a complete analysis pipeline
-// Validate both correctness and usability of the public API
-
 #[test]
 fn test_parameter_estimation_gaussian_mean() {
     let mut rng = StdRng::seed_from_u64(42);
