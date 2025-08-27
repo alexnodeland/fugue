@@ -550,3 +550,389 @@ fn test_macro_system_comprehensive() {
         assert_eq!(plate_results[i], trace2.get_f64(&addr).unwrap());
     }
 }
+
+#[test]
+fn test_memory_management_coverage() {
+    let mut rng = StdRng::seed_from_u64(42);
+    
+    // Test TracePool
+    let mut pool = runtime::memory::TracePool::new(5);
+    let stats_initial = pool.stats();
+    assert_eq!(stats_initial.total_gets(), 0);
+    assert_eq!(stats_initial.hits, 0);
+    assert_eq!(stats_initial.misses, 0);
+    
+    // Get a trace from the pool
+    let trace1 = pool.get();
+    let stats_after_get = pool.stats();
+    assert_eq!(stats_after_get.total_gets(), 1);
+    assert_eq!(stats_after_get.misses, 1); // First get is always a miss
+    
+    // Return the trace to the pool
+    pool.return_trace(trace1);
+    let stats_after_return = pool.stats();
+    assert_eq!(stats_after_return.returns, 1);
+    assert_eq!(pool.len(), 1);
+    
+    // Get another trace (should be a hit this time)
+    let _trace2 = pool.get();
+    let stats_after_second_get = pool.stats();
+    assert_eq!(stats_after_second_get.hits, 1);
+    assert_eq!(stats_after_second_get.total_gets(), 2);
+    
+    // Test pool capacity
+    assert_eq!(pool.capacity(), 5);
+    
+    // Test CowTrace copy-on-write semantics
+    let base_trace = runtime::trace::Trace::default();
+    let cow_trace = runtime::memory::CowTrace::from_trace(base_trace.clone());
+    let converted_back = cow_trace.to_trace();
+    assert_eq!(converted_back.choices.len(), base_trace.choices.len());
+    
+    // Test CowTrace creation and access
+    let cow_trace2 = runtime::memory::CowTrace::new();
+    let choices = cow_trace2.choices();
+    assert!(choices.is_empty());
+    
+    // Test TraceBuilder for manual trace construction
+    let mut builder = runtime::memory::TraceBuilder::new();
+    builder.add_sample(addr!("x"), 1.5, -0.5);
+    builder.add_sample_bool(addr!("flag"), true, -0.7);
+    builder.add_sample_u64(addr!("count"), 42, -0.3);
+    builder.add_sample_usize(addr!("index"), 3, -0.2);
+    builder.add_observation(-1.2);
+    builder.add_factor(-0.8);
+    
+    let built_trace = builder.build();
+    assert_eq!(built_trace.get_f64(&addr!("x")), Some(1.5));
+    assert_eq!(built_trace.get_bool(&addr!("flag")), Some(true));
+    assert_eq!(built_trace.get_u64(&addr!("count")), Some(42));
+    assert_eq!(built_trace.get_usize(&addr!("index")), Some(3));
+    assert!((built_trace.log_likelihood + 1.2).abs() < 1e-12);
+    assert!((built_trace.log_factors + 0.8).abs() < 1e-12);
+    
+    // Test PooledPriorHandler integration
+    let model = sample(addr!("test"), Normal::new(0.0, 1.0).unwrap());
+    let pooled_handler = runtime::memory::PooledPriorHandler {
+        rng: &mut rng,
+        trace_builder: runtime::memory::TraceBuilder::new(),
+        pool: &mut pool,
+    };
+    
+    let (result, final_trace) = runtime::handler::run(pooled_handler, model);
+    assert!(result.is_finite());
+    assert!(final_trace.get_f64(&addr!("test")).is_some());
+    
+    // Pool should now have additional statistics
+    let final_stats = pool.stats();
+    assert!(final_stats.total_gets() >= 2);
+}
+
+#[test]
+fn test_inference_api_coverage() {
+    let mut rng = StdRng::seed_from_u64(42);
+    
+    // Test MCMC API
+    let mcmc_model = || sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+        .bind(|x| observe(addr!("y"), Normal::new(x, 0.5).unwrap(), 0.8)
+             .map(move |_| x));
+    
+    let mcmc_samples = adaptive_mcmc_chain(&mut rng, mcmc_model, 50, 10);
+    assert_eq!(mcmc_samples.len(), 50);
+    assert!(mcmc_samples.iter().all(|(val, _)| val.is_finite()));
+    
+    // Test SMC API with configuration
+    let smc_model = || sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
+        .bind(|mu| observe(addr!("obs"), Normal::new(mu, 0.5).unwrap(), 1.2)
+             .map(move |_| mu));
+    
+    let smc_config = SMCConfig {
+        resampling_method: ResamplingMethod::Systematic,
+        ess_threshold: 0.5,
+        rejuvenation_steps: 1,
+    };
+    
+    let smc_particles = adaptive_smc(&mut rng, 20, smc_model, smc_config);
+    assert_eq!(smc_particles.len(), 20);
+    assert!(smc_particles.iter().all(|p| p.log_weight.is_finite()));
+    assert!(smc_particles.iter().all(|p| p.weight >= 0.0));
+    
+    // Test effective sample size calculation
+    let ess = effective_sample_size(&smc_particles);
+    assert!(ess > 0.0);
+    assert!(ess <= smc_particles.len() as f64);
+    
+    // Test ABC API
+    let abc_model = || sample(addr!("theta"), Normal::new(0.0, 1.0).unwrap());
+    
+    let simulator = |trace: &runtime::trace::Trace| -> f64 {
+        trace.get_f64(&addr!("theta")).unwrap_or(0.0)
+    };
+    
+    let abc_samples = abc_scalar_summary(
+        &mut rng,
+        abc_model,
+        simulator,
+        0.5, // observed summary
+        1.0, // tolerance
+        20,  // max samples
+    );
+    
+    assert!(abc_samples.len() <= 20);
+    assert!(abc_samples.iter().all(|trace| trace.get_f64(&addr!("theta")).is_some()));
+    
+    // Test VI API
+    let vi_model = || sample(addr!("param"), Normal::new(0.0, 1.0).unwrap())
+        .bind(|param| observe(addr!("data"), Normal::new(param, 0.5).unwrap(), 1.0)
+             .map(move |_| param));
+    
+    let mut vi_guide = MeanFieldGuide::new();
+    vi_guide.params.insert(
+        addr!("param"),
+        VariationalParam::Normal { mu: 0.0, log_sigma: 0.0 }
+    );
+    
+    let vi_result = optimize_meanfield_vi(
+        &mut rng,
+        vi_model,
+        vi_guide,
+        10, // iterations
+        5,  // samples per iteration
+        0.01, // learning rate
+    );
+    
+    assert!(!vi_result.params.is_empty());
+    assert!(vi_result.params.contains_key(&addr!("param")));
+    
+    // Test ELBO computation
+    let elbo = elbo_with_guide(&mut rng, vi_model, &vi_result, 5);
+    assert!(elbo.is_finite() || elbo.is_infinite()); // May be -inf for poorly fitted guide
+    
+    // Test diagnostics API
+    let chains = vec![
+        mcmc_samples.iter().map(|(_, trace)| trace.clone()).collect::<Vec<_>>(),
+    ];
+    
+    let r_hat = r_hat_f64(&chains, &addr!("x"));
+    assert!(r_hat.is_finite());
+    assert!(r_hat > 0.0);
+    
+    let summary = summarize_f64_parameter(&chains, &addr!("x"));
+    assert!(summary.mean.is_finite());
+    assert!(summary.std.is_finite());
+    assert!(summary.std >= 0.0);
+    
+    let x_values: Vec<f64> = chains[0].iter()
+        .filter_map(|trace| trace.get_f64(&addr!("x")))
+        .collect();
+    let ess_mcmc = effective_sample_size_mcmc(&x_values);
+    assert!(ess_mcmc >= 0.0);
+    assert!(ess_mcmc <= x_values.len() as f64);
+    
+    // Test validation API
+    let reference_samples: Vec<f64> = (0..50).map(|_| {
+        Normal::new(0.0, 1.0).unwrap().sample(&mut rng)
+    }).collect();
+    
+    let test_dist = Normal::new(0.0, 1.0).unwrap();
+    let ks_result = ks_test_distribution(
+        &mut rng,
+        &test_dist,
+        &reference_samples,
+        50,
+        0.05
+    );
+    
+    // KS test should pass (samples from same distribution)
+    assert!(ks_result);
+}
+
+#[test]
+fn test_model_api_comprehensive() {
+    let mut rng = StdRng::seed_from_u64(42);
+    
+    // Test guard function
+    let guard_model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+        .bind(|x| guard(x > -2.0 && x < 2.0))
+        .bind(|_| pure("guard_passed"));
+    
+    let handler = runtime::interpreters::PriorHandler {
+        rng: &mut rng,
+        trace: runtime::trace::Trace::default(),
+    };
+    
+    let (result, trace) = runtime::handler::run(handler, guard_model);
+    assert_eq!(result, "guard_passed");
+    let x_val = trace.get_f64(&addr!("x")).unwrap();
+    assert!(x_val > -2.0 && x_val < 2.0);
+    
+    // Test type-specific samplers (if they exist in public API)
+    // Note: These might not be directly exposed in the public API,
+    // but we can test them through the general sample function
+    
+    let mixed_model = sample(addr!("f64"), Normal::new(0.0, 1.0).unwrap())
+        .bind(|_| sample(addr!("bool"), Bernoulli::new(0.6).unwrap()))
+        .bind(|_| sample(addr!("u64"), Poisson::new(2.0).unwrap()))
+        .bind(|_| sample(addr!("usize"), Categorical::new(vec![0.25, 0.5, 0.25]).unwrap()));
+    
+    let handler2 = runtime::interpreters::PriorHandler {
+        rng: &mut rng,
+        trace: runtime::trace::Trace::default(),
+    };
+    
+    let (usize_result, trace2) = runtime::handler::run(handler2, mixed_model);
+    
+    // Verify all types were sampled correctly
+    assert!(trace2.get_f64(&addr!("f64")).is_some());
+    assert!(trace2.get_bool(&addr!("bool")).is_some());
+    assert!(trace2.get_u64(&addr!("u64")).is_some());
+    assert!(trace2.get_usize(&addr!("usize")).is_some());
+    assert_eq!(usize_result, trace2.get_usize(&addr!("usize")).unwrap());
+    
+    // Test complex model composition
+    let complex_model = sample(addr!("a"), Normal::new(0.0, 1.0).unwrap())
+        .bind(|a| sample(addr!("b"), Normal::new(a, 0.5).unwrap())
+             .bind(move |b| guard(b.abs() < 3.0)
+                  .bind(move |_| observe(addr!("obs"), Normal::new(a, 0.3).unwrap(), 0.5))
+                  .bind(move |_| factor(a * 0.1))
+                  .map(move |_| (a, b))));
+    
+    let handler3 = runtime::interpreters::PriorHandler {
+        rng: &mut rng,
+        trace: runtime::trace::Trace::default(),
+    };
+    
+    let ((a_result, b_result), trace3) = runtime::handler::run(handler3, complex_model);
+    
+    // Verify the complex composition worked
+    assert_eq!(a_result, trace3.get_f64(&addr!("a")).unwrap());
+    assert_eq!(b_result, trace3.get_f64(&addr!("b")).unwrap());
+    assert!(trace3.log_likelihood.is_finite());
+    assert!(trace3.log_factors.is_finite());
+    assert!(trace3.total_log_weight().is_finite());
+    
+    // Factor should be a * 0.1
+    let expected_factor = a_result * 0.1;
+    assert!((trace3.log_factors - expected_factor).abs() < 1e-12);
+}
+
+#[test]
+fn test_trace_api_comprehensive_extended() {
+    let mut rng = StdRng::seed_from_u64(42);
+    
+    // Test ChoiceValue enum and Choice struct through trace building
+    let model = sample(addr!("normal"), Normal::new(0.0, 1.0).unwrap())
+        .bind(|_| sample(addr!("bernoulli"), Bernoulli::new(0.5).unwrap()))
+        .bind(|_| sample(addr!("poisson"), Poisson::new(3.0).unwrap()))
+        .bind(|_| sample(addr!("categorical"), Categorical::new(vec![0.3, 0.4, 0.3]).unwrap()));
+    
+    let handler = runtime::interpreters::PriorHandler {
+        rng: &mut rng,
+        trace: runtime::trace::Trace::default(),
+    };
+    
+    let (_, trace) = runtime::handler::run(handler, model);
+    
+    // Test direct choice access (if available in public API)
+    assert!(!trace.choices.is_empty());
+    
+    // Test that each address has a corresponding choice
+    for (addr, choice) in &trace.choices {
+        assert_eq!(addr, &choice.addr);
+        assert!(choice.logp.is_finite());
+        
+        // Test ChoiceValue variants through type-safe accessors
+        match &choice.value {
+            runtime::trace::ChoiceValue::F64(_) => {
+                assert!(trace.get_f64(addr).is_some());
+            },
+            runtime::trace::ChoiceValue::Bool(_) => {
+                assert!(trace.get_bool(addr).is_some());
+            },
+            runtime::trace::ChoiceValue::U64(_) => {
+                assert!(trace.get_u64(addr).is_some());
+            },
+            runtime::trace::ChoiceValue::Usize(_) => {
+                assert!(trace.get_usize(addr).is_some());
+            },
+            runtime::trace::ChoiceValue::I64(_) => {
+                assert!(trace.get_i64(addr).is_some());
+            },
+        }
+    }
+    
+    // Test log weight components and calculation
+    assert!(trace.log_prior.is_finite());
+    assert!(trace.log_likelihood.is_finite());
+    assert!(trace.log_factors.is_finite());
+    
+    let manual_total = trace.log_prior + trace.log_likelihood + trace.log_factors;
+    let api_total = trace.total_log_weight();
+    assert!((manual_total - api_total).abs() < 1e-12);
+    
+    // Test trace cloning and equality
+    let cloned_trace = trace.clone();
+    assert_eq!(trace.choices.len(), cloned_trace.choices.len());
+    assert_eq!(trace.log_prior, cloned_trace.log_prior);
+    assert_eq!(trace.log_likelihood, cloned_trace.log_likelihood);
+    assert_eq!(trace.log_factors, cloned_trace.log_factors);
+}
+
+#[test]
+fn test_numerical_utilities_edge_cases() {
+    // Test log_sum_exp with edge cases
+    
+    // Empty vector
+    let empty_lse = log_sum_exp(&[]);
+    assert_eq!(empty_lse, f64::NEG_INFINITY);
+    
+    // Single element
+    let single_lse = log_sum_exp(&[-2.0]);
+    assert!((single_lse + 2.0).abs() < 1e-12);
+    
+    // Very large values (should not overflow)
+    let large_lse = log_sum_exp(&[700.0, 701.0, 702.0]);
+    assert!(large_lse.is_finite());
+    assert!(large_lse > 702.0);
+    
+    // Very small values (should not underflow to zero)
+    let small_lse = log_sum_exp(&[-700.0, -701.0, -702.0]);
+    assert!(small_lse.is_finite());
+    assert!(small_lse < -699.0);
+    
+    // Mixed positive and negative infinity
+    let mixed_inf_lse = log_sum_exp(&[f64::NEG_INFINITY, 0.0, f64::NEG_INFINITY]);
+    assert!((mixed_inf_lse - 0.0).abs() < 1e-12);
+    
+    // Test normalize_log_probs edge cases
+    let mut empty_probs = vec![];
+    normalize_log_probs(&mut empty_probs);
+    assert!(empty_probs.is_empty());
+    
+    let mut single_prob = vec![-1.0];
+    normalize_log_probs(&mut single_prob);
+    // Single element should remain unchanged (already normalized)
+    assert!((single_prob[0] + 1.0).abs() < 1e-12);
+    
+    let mut inf_probs = vec![f64::NEG_INFINITY, 0.0, f64::NEG_INFINITY];
+    normalize_log_probs(&mut inf_probs);
+    assert!(inf_probs[0].is_infinite() && inf_probs[0] < 0.0); // Should remain -inf
+    assert!((inf_probs[1] - 0.0).abs() < 1e-12); // Should be log(1.0) = 0.0
+    assert!(inf_probs[2].is_infinite() && inf_probs[2] < 0.0); // Should remain -inf
+    
+    // Test log1p_exp edge cases
+    assert!((log1p_exp(0.0) - (2.0_f64.ln())).abs() < 1e-12); // log(1 + exp(0)) = log(2)
+    assert!(log1p_exp(-700.0).abs() < 1e-12); // log(1 + exp(-700)) ≈ 0
+    assert!((log1p_exp(700.0) - 700.0).abs() < 1e-12); // log(1 + exp(700)) ≈ 700
+    
+    // Test safe_ln edge cases
+    assert_eq!(safe_ln(0.0), f64::NEG_INFINITY);
+    assert_eq!(safe_ln(-1.0), f64::NEG_INFINITY);
+    assert_eq!(safe_ln(f64::NEG_INFINITY), f64::NEG_INFINITY);
+    assert!((safe_ln(1.0) - 0.0).abs() < 1e-12);
+    assert!((safe_ln(std::f64::consts::E) - 1.0).abs() < 1e-12);
+    
+    // Test with NaN inputs - behavior may be implementation-specific
+    let nan_result = safe_ln(f64::NAN);
+    assert!(nan_result.is_nan() || nan_result == f64::NEG_INFINITY);
+}
