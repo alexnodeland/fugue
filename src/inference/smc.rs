@@ -492,7 +492,7 @@ mod tests {
     #[test]
     fn ess_and_resampling_behave() {
         // Construct 4 particles with uneven weights
-        let mut particles = vec![
+        let particles = vec![
             Particle { trace: Trace::default(), weight: 0.7, log_weight: (0.7f64).ln() },
             Particle { trace: Trace::default(), weight: 0.2, log_weight: (0.2f64).ln() },
             Particle { trace: Trace::default(), weight: 0.09, log_weight: (0.09f64).ln() },

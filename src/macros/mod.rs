@@ -43,10 +43,10 @@ macro_rules! scoped_addr {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    
     use crate::addr;
     use crate::core::distribution::*;
-    use crate::core::model::{observe, sample, ModelExt, pure};
+    use crate::core::model::{observe, sample, pure};
     use crate::runtime::handler::run;
     use crate::runtime::interpreters::PriorHandler;
     use crate::runtime::trace::Trace;

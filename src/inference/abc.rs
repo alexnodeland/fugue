@@ -548,7 +548,7 @@ mod tests {
     use crate::addr;
     use crate::core::distribution::*;
     use crate::core::model::sample;
-    use crate::runtime::trace::Trace;
+    
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 

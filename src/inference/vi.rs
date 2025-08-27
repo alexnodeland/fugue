@@ -551,7 +551,7 @@ pub fn estimate_elbo<A, R: Rng>(
 mod tests {
     use super::*;
     use crate::addr;
-    use crate::core::distribution::*;
+    
     use crate::core::model::{observe, sample, ModelExt};
     use crate::runtime::trace::{Choice, ChoiceValue, Trace};
     use rand::rngs::StdRng;

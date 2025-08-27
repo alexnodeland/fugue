@@ -777,7 +777,7 @@ impl Validate for Categorical {
 mod tests {
     use super::*;
     use crate::addr;
-    use crate::core::distribution::*;
+    
 
     #[test]
     fn error_code_category_and_description() {
