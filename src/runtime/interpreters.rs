@@ -1,4 +1,4 @@
-#![doc = include_str!("../../docs/api/runtime/interpreters/README.md")]
+#![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/api/runtime/interpreters.md"))]
 
 use crate::core::address::Address;
 use crate::core::distribution::Distribution;
@@ -7,7 +7,32 @@ use crate::runtime::trace::{Choice, ChoiceValue, Trace};
 
 use rand::RngCore;
 
-#[doc = include_str!("../../docs/api/runtime/interpreters/prior_handler.md")]
+/// Handler for prior sampling - generates fresh random values from distributions.
+/// 
+/// This is the foundational interpreter that implements standard "forward sampling" 
+/// from probabilistic models. It draws fresh values from distributions and accumulates
+/// log-probabilities in the trace.
+/// 
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// # use fugue::runtime::interpreters::PriorHandler;
+/// # use rand::rngs::StdRng;
+/// # use rand::SeedableRng;
+/// 
+/// let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+///     .bind(|x| observe(addr!("y"), Normal::new(x, 0.5).unwrap(), 1.2)
+///         .map(move |_| x));
+/// 
+/// let mut rng = StdRng::seed_from_u64(42);
+/// let (result, trace) = runtime::handler::run(
+///     PriorHandler { rng: &mut rng, trace: Trace::default() },
+///     model
+/// );
+/// 
+/// assert!(result.is_finite());
+/// assert!(trace.log_likelihood.is_finite());
+/// ```
 pub struct PriorHandler<'r, R: RngCore> {
     /// Random number generator for sampling.
     pub rng: &'r mut R,
@@ -100,7 +125,40 @@ impl<'r, R: RngCore> Handler for PriorHandler<'r, R> {
     }
 }
 
-#[doc = include_str!("../../docs/api/runtime/interpreters/replay_handler.md")]
+/// Handler for replaying models with values from an existing trace.
+/// 
+/// ReplayHandler replays a model execution using stored trace values. When a sampling 
+/// site is encountered: if the address exists in the base trace, use that value; 
+/// if missing, sample fresh. Essential for MCMC where you replay most choices 
+/// but sample new values at specific sites.
+/// 
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// # use fugue::runtime::interpreters::*;
+/// # use rand::rngs::StdRng;
+/// # use rand::SeedableRng;
+/// 
+/// // Create base trace
+/// let mut rng = StdRng::seed_from_u64(42);
+/// let model_fn = || sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
+/// let (original, base_trace) = runtime::handler::run(
+///     PriorHandler { rng: &mut rng, trace: Trace::default() },
+///     model_fn()
+/// );
+/// 
+/// // Replay using base trace values
+/// let (replayed, _) = runtime::handler::run(
+///     ReplayHandler { 
+///         rng: &mut rng, 
+///         base: base_trace, 
+///         trace: Trace::default() 
+///     },
+///     model_fn()
+/// );
+/// 
+/// assert_eq!(original, replayed); // Same value replayed
+/// ```
 pub struct ReplayHandler<'r, R: RngCore> {
     /// Random number generator for sampling at addresses not in base trace.
     pub rng: &'r mut R,
@@ -223,7 +281,38 @@ impl<'r, R: RngCore> Handler for ReplayHandler<'r, R> {
     }
 }
 
-#[doc = include_str!("../../docs/api/runtime/interpreters/score_given_trace.md")]
+/// Handler for scoring a model given a complete trace of fixed choices.
+/// 
+/// ScoreGivenTrace computes log-probability of a model execution where all random 
+/// choices are predetermined. No sampling occurs - values are looked up from the 
+/// base trace and their log-probabilities computed. Essential for MCMC acceptance 
+/// ratios, importance sampling, and model comparison.
+/// 
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// # use fugue::runtime::interpreters::*;
+/// # use rand::rngs::StdRng;
+/// # use rand::SeedableRng;
+/// 
+/// // Create a complete trace
+/// let mut rng = StdRng::seed_from_u64(42);
+/// let (_, complete_trace) = runtime::handler::run(
+///     PriorHandler { rng: &mut rng, trace: Trace::default() },
+///     sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+/// );
+/// 
+/// // Score under different model parameters  
+/// let (value, score_trace) = runtime::handler::run(
+///     ScoreGivenTrace { 
+///         base: complete_trace, 
+///         trace: Trace::default() 
+///     },
+///     sample(addr!("x"), Normal::new(1.0, 2.0).unwrap()) // Different parameters
+/// );
+/// 
+/// assert!(score_trace.total_log_weight().is_finite());
+/// ```
 pub struct ScoreGivenTrace {
     /// Base trace containing the fixed choices to score.
     pub base: Trace,
@@ -320,7 +409,40 @@ impl Handler for ScoreGivenTrace {
     }
 }
 
-#[doc = include_str!("../../docs/api/runtime/interpreters/safe_replay_handler.md")]
+/// Safe version of ReplayHandler that gracefully handles trace inconsistencies.
+/// 
+/// SafeReplayHandler replays model execution like ReplayHandler, but handles type 
+/// mismatches and missing addresses gracefully by logging warnings and sampling 
+/// fresh values instead of panicking. Essential for production systems where 
+/// trace consistency cannot be guaranteed.
+/// 
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// # use fugue::runtime::interpreters::*;
+/// # use rand::rngs::StdRng;
+/// # use rand::SeedableRng;
+/// 
+/// // Create trace with potential inconsistencies
+/// let mut rng = StdRng::seed_from_u64(42);
+/// let (_, base_trace) = runtime::handler::run(
+///     PriorHandler { rng: &mut rng, trace: Trace::default() },
+///     sample(addr!("x"), Normal::new(0.0, 1.0).unwrap()) // f64 value
+/// );
+/// 
+/// // Safe replay handles type mismatch gracefully
+/// let (result, trace) = runtime::handler::run(
+///     SafeReplayHandler {
+///         rng: &mut rng,
+///         base: base_trace,
+///         trace: Trace::default(),
+///         warn_on_mismatch: true, // Enable warnings
+///     },
+///     sample(addr!("x"), Bernoulli::new(0.5).unwrap()) // Expects bool
+/// );
+/// 
+/// assert!(trace.total_log_weight().is_finite()); // Continues execution
+/// ```
 pub struct SafeReplayHandler<'r, R: RngCore> {
     /// Random number generator for sampling at addresses not in base trace.
     pub rng: &'r mut R,
@@ -473,7 +595,39 @@ impl<'r, R: RngCore> Handler for SafeReplayHandler<'r, R> {
     }
 }
 
-#[doc = include_str!("../../docs/api/runtime/interpreters/safe_score_given_trace.md")]
+/// Safe version of ScoreGivenTrace that gracefully handles incomplete traces.
+/// 
+/// SafeScoreGivenTrace computes log-probability like ScoreGivenTrace, but handles 
+/// missing addresses or type mismatches by returning negative infinity log-weight 
+/// instead of panicking. Essential for production inference where trace validity 
+/// cannot be guaranteed.
+/// 
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// # use fugue::runtime::interpreters::*;
+/// # use rand::rngs::StdRng;
+/// # use rand::SeedableRng;
+/// 
+/// // Create incomplete trace
+/// let mut rng = StdRng::seed_from_u64(42);
+/// let (_, incomplete_trace) = runtime::handler::run(
+///     PriorHandler { rng: &mut rng, trace: Trace::default() },
+///     sample(addr!("x"), Normal::new(0.0, 1.0).unwrap()) // Only has "x"
+/// );
+/// 
+/// // Safe scoring handles missing address gracefully
+/// let (_, score_trace) = runtime::handler::run(
+///     SafeScoreGivenTrace {
+///         base: incomplete_trace,
+///         trace: Trace::default(),
+///         warn_on_error: true, // Enable warnings
+///     },
+///     sample(addr!("missing"), Normal::new(0.0, 1.0).unwrap()) // Address not in base
+/// );
+/// 
+/// assert_eq!(score_trace.total_log_weight(), f64::NEG_INFINITY); // Graceful failure
+/// ```
 pub struct SafeScoreGivenTrace {
     /// Base trace containing the fixed choices to score.
     pub base: Trace,

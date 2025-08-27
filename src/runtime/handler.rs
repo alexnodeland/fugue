@@ -1,11 +1,31 @@
-#![doc = include_str!("../../docs/api/runtime/handler/README.md")]
+#![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/api/runtime/handler.md"))]
 
 use crate::core::address::Address;
 use crate::core::distribution::Distribution;
 use crate::core::model::Model;
 use crate::runtime::trace::Trace;
 
-#[doc = include_str!("../../docs/api/runtime/handler/handler.md")]
+/// Core trait for interpreting probabilistic model effects.
+/// 
+/// Handlers define how to interpret the three fundamental effects in probabilistic programming:
+/// sampling, observation, and factoring. Different implementations enable different execution modes.
+/// 
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// # use fugue::runtime::interpreters::PriorHandler;
+/// # use rand::rngs::StdRng;
+/// # use rand::SeedableRng;
+/// 
+/// // Use a built-in handler
+/// let mut rng = StdRng::seed_from_u64(42);
+/// let handler = PriorHandler { 
+///     rng: &mut rng, 
+///     trace: Trace::default() 
+/// };
+/// let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
+/// let (result, trace) = runtime::handler::run(handler, model);
+/// ```
 pub trait Handler {
     /// Handle an f64 sampling operation (continuous distributions).
     fn on_sample_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>) -> f64;
@@ -50,7 +70,32 @@ pub trait Handler {
         Self: Sized;
 }
 
-#[doc = include_str!("../../docs/api/runtime/handler/run.md")]
+/// Execute a probabilistic model using the provided handler.
+/// 
+/// This is the core execution engine for probabilistic models. It walks through
+/// the model structure and dispatches effects to the handler, returning both
+/// the model's final result and the accumulated execution trace.
+/// 
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// # use fugue::runtime::interpreters::PriorHandler;
+/// # use rand::rngs::StdRng;
+/// # use rand::SeedableRng;
+/// 
+/// // Create a simple model
+/// let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+///     .bind(|x| observe(addr!("y"), Normal::new(x, 0.1).unwrap(), 1.2))
+///     .map(|_| "completed");
+/// 
+/// let mut rng = StdRng::seed_from_u64(123);
+/// let (result, trace) = runtime::handler::run(
+///     PriorHandler { rng: &mut rng, trace: Trace::default() },
+///     model
+/// );
+/// assert_eq!(result, "completed");
+/// assert!(trace.total_log_weight().is_finite());
+/// ```
 pub fn run<A>(mut h: impl Handler, m: Model<A>) -> (A, Trace) {
     fn go<A>(h: &mut impl Handler, m: Model<A>) -> A {
         match m {

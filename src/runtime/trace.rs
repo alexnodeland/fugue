@@ -1,10 +1,33 @@
-#![doc = include_str!("../../docs/api/runtime/trace/README.md")]
+#![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/api/runtime/trace.md"))]
 
 use crate::core::address::Address;
 use crate::error::{FugueError, FugueResult};
 use std::collections::BTreeMap;
 
-#[doc = include_str!("../../docs/api/runtime/trace/choice_value.md")]
+/// Type-safe storage for values from different distribution types.
+/// 
+/// ChoiceValue enables traces to store values from any supported distribution
+/// while maintaining type safety. Each variant corresponds to a distribution
+/// return type, preventing runtime type errors.
+/// 
+/// Example:
+/// ```rust
+/// # use fugue::runtime::trace::ChoiceValue;
+/// 
+/// // Different value types from distributions
+/// let continuous = ChoiceValue::F64(3.14159);  // Normal, Uniform, etc.
+/// let discrete = ChoiceValue::U64(42);         // Poisson, Binomial
+/// let categorical = ChoiceValue::Usize(2);     // Categorical selection
+/// let binary = ChoiceValue::Bool(true);        // Bernoulli outcome
+/// 
+/// // Type-safe extraction
+/// assert_eq!(continuous.as_f64(), Some(3.14159));
+/// assert_eq!(discrete.as_u64(), Some(42));
+/// assert_eq!(binary.as_bool(), Some(true));
+/// 
+/// // Type mismatches return None
+/// assert_eq!(continuous.as_bool(), None);
+/// ```
 #[derive(Clone, Debug, PartialEq)]
 pub enum ChoiceValue {
     /// Floating-point value (continuous distributions).
@@ -71,7 +94,32 @@ impl ChoiceValue {
     }
 }
 
-#[doc = include_str!("../../docs/api/runtime/trace/choice.md")]
+/// A single recorded choice made during model execution.
+/// 
+/// Each Choice represents a random variable assignment at a specific address,
+/// complete with the value chosen and its log-probability. Choices form the
+/// building blocks of execution traces.
+/// 
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// # use fugue::runtime::trace::{Choice, ChoiceValue};
+/// 
+/// // Choices are typically created by handlers during execution
+/// let choice = Choice {
+///     addr: addr!("theta"),
+///     value: ChoiceValue::F64(1.5),
+///     logp: -0.918, // log-probability under generating distribution
+/// };
+/// 
+/// println!("Choice at {}: {:?} (logp: {:.3})", 
+///          choice.addr, choice.value, choice.logp);
+/// 
+/// // Extract the value with type safety
+/// if let Some(val) = choice.value.as_f64() {
+///     println!("Theta value: {:.3}", val);
+/// }
+/// ```
 #[derive(Clone, Debug)]
 pub struct Choice {
     /// Address where this choice was made.
@@ -82,7 +130,40 @@ pub struct Choice {
     pub logp: f64,
 }
 
-#[doc = include_str!("../../docs/api/runtime/trace/trace.md")]
+/// Complete execution trace of a probabilistic model.
+/// 
+/// A Trace records the complete execution history of a probabilistic model,
+/// including all choices made and accumulated log-weights from different sources.
+/// This enables replay, scoring, and inference operations.
+/// 
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// # use fugue::runtime::interpreters::PriorHandler;
+/// # use rand::rngs::StdRng;
+/// # use rand::SeedableRng;
+/// 
+/// // Execute a model and examine the trace
+/// let model = sample(addr!("theta"), Normal::new(0.0, 1.0).unwrap())
+///     .bind(|theta| observe(addr!("y"), Normal::new(theta, 0.5).unwrap(), 1.2)
+///         .map(move |_| theta));
+/// 
+/// let mut rng = StdRng::seed_from_u64(42);
+/// let (result, trace) = runtime::handler::run(
+///     PriorHandler { rng: &mut rng, trace: Trace::default() },
+///     model
+/// );
+/// 
+/// // Examine trace components
+/// println!("Sampled theta: {:.3}", result);
+/// println!("Prior log-weight: {:.3}", trace.log_prior);
+/// println!("Likelihood log-weight: {:.3}", trace.log_likelihood);
+/// println!("Total log-weight: {:.3}", trace.total_log_weight());
+/// 
+/// // Type-safe value access
+/// let theta_value = trace.get_f64(&addr!("theta")).unwrap();
+/// assert_eq!(theta_value, result);
+/// ```
 #[derive(Clone, Debug, Default)]
 pub struct Trace {
     /// Map from addresses to the choices made at those sites.
@@ -96,7 +177,24 @@ pub struct Trace {
 }
 
 impl Trace {
-    #[doc = include_str!("../../docs/api/runtime/trace/total_log_weight.md")]
+    /// Compute the total unnormalized log-probability of this execution.
+    /// 
+    /// The total log-weight combines all three components (prior, likelihood, factors)
+    /// and represents the unnormalized log-probability of this execution path.
+    /// 
+    /// Example:
+    /// ```rust
+    /// # use fugue::runtime::trace::Trace;
+    /// 
+    /// let trace = Trace {
+    ///     log_prior: -1.5,
+    ///     log_likelihood: -2.3,
+    ///     log_factors: 0.8,
+    ///     ..Default::default()
+    /// };
+    /// 
+    /// assert_eq!(trace.total_log_weight(), -3.0);
+    /// ```
     pub fn total_log_weight(&self) -> f64 {
         self.log_prior + self.log_likelihood + self.log_factors
     }
@@ -236,7 +334,31 @@ impl Trace {
             ))
     }
 
-    #[doc = include_str!("../../docs/api/runtime/trace/insert_choice.md")]
+    /// Insert a typed choice into the trace with type safety.
+    /// 
+    /// This is a convenience method for manually constructing traces. Note that
+    /// this method only updates the choices map - it does not modify the 
+    /// log-weight accumulators (log_prior, log_likelihood, log_factors).
+    /// 
+    /// Example:
+    /// ```rust
+    /// # use fugue::*;
+    /// # use fugue::runtime::trace::{Trace, ChoiceValue};
+    /// 
+    /// let mut trace = Trace::default();
+    /// 
+    /// // Insert different types of choices
+    /// trace.insert_choice(addr!("mu"), ChoiceValue::F64(1.5), -0.125);
+    /// trace.insert_choice(addr!("success"), ChoiceValue::Bool(true), -0.693);
+    /// trace.insert_choice(addr!("count"), ChoiceValue::U64(10), -2.303);
+    /// 
+    /// // Retrieve with type safety
+    /// assert_eq!(trace.get_f64(&addr!("mu")), Some(1.5));
+    /// assert_eq!(trace.get_bool(&addr!("success")), Some(true));
+    /// assert_eq!(trace.get_u64(&addr!("count")), Some(10));
+    /// 
+    /// println!("Trace has {} choices", trace.choices.len());
+    /// ```
     pub fn insert_choice(&mut self, addr: Address, value: ChoiceValue, logp: f64) {
         let choice = Choice {
             addr: addr.clone(),

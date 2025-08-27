@@ -1,242 +1,229 @@
-# `runtime` module
+# Runtime System: Probabilistic Model Execution Engine
 
 ## Overview
 
-The runtime module provides the execution engine for probabilistic models through a clean effect handler architecture. It enables different interpretations of the same model (prior sampling, conditioning, scoring) while maintaining type safety and providing efficient trace management with memory optimization.
+The **runtime system** is the **execution heart** of Fugue's probabilistic programming infrastructure. It transforms the declarative `Model<A>` representations from the core module into concrete executions that can be sampled, conditioned, scored, and manipulated.
 
-## Quick Start
+The runtime solves the fundamental challenge in probabilistic programming: **how to execute the same model description in radically different ways**. A single `Model<A>` can be:
+
+- **Forward sampled** to generate data from priors
+- **Conditioned** on observed data to perform inference  
+- **Scored** to compute log-probabilities for specific executions
+- **Replayed** with modified choices for MCMC proposals
+- **Optimized** with memory pooling for high-throughput scenarios
+
+This flexibility is achieved through a **clean effect handler architecture** with four integrated components:
+
+- **[Handler System](handler.md)**: The `Handler` trait and `run` function provide type-safe execution with algebraic effects
+- **[Built-in Interpreters](interpreters.md)**: Five foundational handlers (`PriorHandler`, `ReplayHandler`, `ScoreGivenTrace`, etc.)
+- **[Trace System](trace.md)**: The foundational data structures (`Trace`, `Choice`, `ChoiceValue`) that record execution history
+- **[Memory Optimization](memory.md)**: Efficient allocation strategies (`TracePool`, `CowTrace`, `TraceBuilder`) for production performance
+
+The key architectural insight is the **separation of model description from execution strategy**: models describe *what* should happen, handlers define *how* it happens, and traces record *what actually happened*.
+
+## Usage Examples
+
+### Basic Model Execution
 
 ```rust
-use fugue::*;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
+# use fugue::*;
+# use fugue::runtime::interpreters::PriorHandler;
+# use rand::rngs::StdRng;
+# use rand::SeedableRng;
 
-// Execute a model with prior sampling
-let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
+// Define a Bayesian linear regression model
+let linear_model = || {
+    sample(addr!("slope"), Normal::new(0.0, 2.0).unwrap())
+        .bind(|slope| sample(addr!("intercept"), Normal::new(0.0, 1.0).unwrap())
+            .bind(move |intercept| sample(addr!("noise"), Gamma::new(2.0, 1.0).unwrap())
+                .bind(move |noise| {
+                    // Synthetic observations
+                    let x_values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+                    let y_observed = vec![2.1, 4.2, 5.8, 8.1, 10.3];
+                    
+                    let obs_models = x_values.into_iter().zip(y_observed).enumerate()
+                        .map(|(i, (x, y_obs))| {
+                            let y_pred = slope * x + intercept;
+                            observe(addr!("y", i), Normal::new(y_pred, noise.sqrt()).unwrap(), y_obs)
+                        }).collect::<Vec<_>>();
+                    
+                    sequence_vec(obs_models).map(move |_| (slope, intercept, noise))
+                })))
+};
+
+// Execute with prior sampling handler
 let mut rng = StdRng::seed_from_u64(42);
-let (value, trace) = run(
+let (result, trace) = runtime::handler::run(
     PriorHandler { rng: &mut rng, trace: Trace::default() },
-    model
-);
-println!("Sampled value: {:.3}, Log weight: {:.3}", value, trace.total_log_weight());
-```
-
-## Components
-
-### `handler.rs` - Type-Safe Handler Interface
-
-- `Handler` trait: Defines how to interpret model effects with full type safety
-- `run` function: Executes a model with a handler, returning value and trace
-
-```rust
-pub trait Handler {
-    // Type-specific sampling handlers
-    fn on_sample_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>) -> f64;
-    fn on_sample_bool(&mut self, addr: &Address, dist: &dyn Distribution<bool>) -> bool;
-    fn on_sample_u64(&mut self, addr: &Address, dist: &dyn Distribution<u64>) -> u64;
-    fn on_sample_usize(&mut self, addr: &Address, dist: &dyn Distribution<usize>) -> usize;
-
-    // Type-specific observation handlers
-    fn on_observe_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>, value: f64);
-    fn on_observe_bool(&mut self, addr: &Address, dist: &dyn Distribution<bool>, value: bool);
-    fn on_observe_u64(&mut self, addr: &Address, dist: &dyn Distribution<u64>, value: u64);
-    fn on_observe_usize(&mut self, addr: &Address, dist: &dyn Distribution<usize>, value: usize);
-
-    fn on_factor(&mut self, logw: f64);
-    fn finish(self) -> Trace where Self: Sized;
-}
-
-let (result, trace) = run(handler, model);
-```
-
-### `interpreters.rs` - Built-in Handlers
-
-- `PriorHandler`: Samples from priors, accumulates log-densities
-- `ReplayHandler`: Reuses values from a base trace, falls back to sampling
-- `ScoreGivenTrace`: Scores a fixed trace under the model
-
-```rust
-// Prior sampling
-let (value, trace) = run(PriorHandler{rng: &mut rng, trace: Trace::default()}, model);
-
-// Replay with different observations
-let (value2, trace2) = run(ReplayHandler{rng: &mut rng, base: trace, trace: Trace::default()}, model2);
-
-// Score existing trace
-let (value3, trace3) = run(ScoreGivenTrace{base: trace, trace: Trace::default()}, model);
-```
-
-### `trace.rs` - Execution Traces
-
-- `Trace`: Records choices and accumulated log-weights
-- `Choice`: Individual random choice with address, value, and log-probability
-- `ChoiceValue`: Type-safe value storage - supports `F64`, `Bool`, `U64`, `Usize`, `I64`
-
-```rust
-#[derive(Clone, Debug, Default)]
-pub struct Trace {
-    pub choices: BTreeMap<Address, Choice>,
-    pub log_prior: f64,
-    pub log_likelihood: f64,
-    pub log_factors: f64,
-}
-
-impl Trace {
-    pub fn total_log_weight(&self) -> f64 {
-        self.log_prior + self.log_likelihood + self.log_factors
-    }
-}
-```
-
-### `memory.rs` - Memory Optimization
-
-**Key Types/Functions:**
-
-- `TracePool`: Reusable trace allocation
-- `CowTrace`: Copy-on-write trace optimization
-- `TraceBuilder`: Efficient trace construction
-- `PooledPriorHandler`: Memory-pooled handler
-
-**Example:**
-
-```rust
-let pool = TracePool::new();
-let handler = PooledPriorHandler::new(&mut rng, &pool);
-let (value, trace) = run(handler, model);
-```
-
-## Common Patterns
-
-### Multi-Handler Execution Pipeline
-
-Chain handlers for complex inference workflows.
-
-```rust
-// 1. Generate base trace from prior
-let (_, base_trace) = run(
-    PriorHandler { rng: &mut rng, trace: Trace::default() },
-    model.clone()
+    linear_model()
 );
 
-// 2. Replay with observations
-let (_, conditioned_trace) = run(
-    ReplayHandler {
-        rng: &mut rng,
-        base: base_trace.clone(),
-        trace: Trace::default()
-    },
-    model_with_observations
-);
+let (slope, intercept, noise) = result;
+println!("Posterior sample:");
+println!("├─ Slope: {:.3}", slope);
+println!("├─ Intercept: {:.3}", intercept);
+println!("└─ Noise: {:.3}", noise);
 
-// 3. Score the result
-let (_, final_trace) = run(
-    ScoreGivenTrace {
-        base: conditioned_trace,
-        trace: Trace::default()
-    },
-    model.clone()
-);
+println!("\nTrace diagnostics:");
+println!("├─ Choices recorded: {}", trace.choices.len());
+println!("├─ Prior log-weight: {:.3}", trace.log_prior);
+println!("├─ Likelihood log-weight: {:.3}", trace.log_likelihood);
+println!("└─ Total log-weight: {:.3}", trace.total_log_weight());
 ```
 
-### Memory-Efficient Batch Processing
+## Architecture Components
 
-Use trace pooling for high-throughput scenarios.
+The runtime system consists of four tightly integrated components, each documented in detail:
 
-```rust
-let pool = TracePool::new();
-let results: Vec<_> = (0..1000).map(|i| {
-    let mut rng = StdRng::seed_from_u64(i);
-    let handler = PooledPriorHandler::new(&mut rng, &pool);
-    run(handler, model.clone())
-}).collect();
-```
+### [Handler System](handler.md) - Type-Safe Execution Engine
 
-### Type-Safe Trace Inspection
+The foundational abstraction that separates model description from execution strategy through algebraic effects.
 
-Extract values with compile-time type checking.
+**Core Types:**
 
-```rust
-let trace = execution_trace;
+- `Handler` trait: Type-safe interpretation of model effects with guaranteed return types
+- `run` function: Executes any `Model<A>` with any `Handler` implementation
 
-// Type-safe value extraction
-let mu: Option<f64> = trace.get_f64(&addr!("mu"));
-let is_outlier: Option<bool> = trace.get_bool(&addr!("outlier"));  // Returns bool!
-let count: Option<u64> = trace.get_u64(&addr!("events"));  // Returns u64!
-let category: Option<usize> = trace.get_usize(&addr!("choice"));  // Returns usize!
+**Key Features:**
 
-// Validation and debugging
-trace.validate().expect("Trace should be valid");
-println!("Total choices: {}", trace.choices.len());
-println!("Log weight breakdown: prior={:.3}, likelihood={:.3}, factors={:.3}",
-    trace.log_prior, trace.log_likelihood, trace.log_factors);
-```
+- Zero-cost abstractions with compile-time dispatch
+- Type-specific methods prevent runtime casting errors
+- Composable execution strategies for complex workflows
 
-## Performance Considerations
+### [Built-in Interpreters](interpreters.md) - Foundational Execution Modes
 
-- **Memory**: Use `TracePool` for repeated allocations, `CowTrace` for read-heavy workloads
-- **Computation**: Handlers are zero-cost abstractions with no runtime dispatch overhead
-- **Best Practices**:
-  - Reuse trace pools across inference runs
-  - Use appropriate handler for your use case (don't use `ReplayHandler` if you don't need replay)
-  - Validate traces only in debug builds for production performance
-  - Consider batch processing with pooled handlers for high-throughput scenarios
+Five essential handlers that cover all fundamental probabilistic programming operations.
 
-## Integration
+**Core Interpreters:**
 
-**Related Modules:**
+- `PriorHandler`: Forward sampling from prior distributions (the baseline)
+- `ReplayHandler`: Deterministic replay with fallback sampling (MCMC proposals)
+- `ScoreGivenTrace`: Log-probability computation for fixed traces (importance sampling)
 
-- [`core`](../core/README.md): Execute `Model<T>` values defined in core
-- [`inference`](../inference/README.md): Provide execution infrastructure for all inference algorithms
-- [`error`](../error.rs): Handle runtime errors and trace validation failures
+**Safety Variants:**
 
-**See Also:**
+- `SafeReplayHandler`: Error-resilient replay with graceful type mismatch handling
+- `SafeScoreGivenTrace`: Production-safe scoring with invalid trace handling
 
-- Main documentation: [API docs](https://docs.rs/fugue)
-- Examples: [`examples/trace_manipulation.rs`](../../examples/trace_manipulation.rs)
-- Memory benchmarks: [`benches/memory_benchmarks.rs`](../../benches/memory_benchmarks.rs)
+### [Trace System](trace.md) - Execution History Foundation
 
-## Extension Points
+The data structures that make probabilistic programming possible by recording execution history.
 
-How to extend the runtime system:
+**Core Types:**
 
-1. **Custom Handlers**: Implement specialized execution strategies
+- `Trace`: Complete execution record with decomposed log-weights (prior + likelihood + factors)
+- `Choice`: Single random decision with address, value, and log-probability
+- `ChoiceValue`: Type-safe value storage for all distribution return types
 
-   ```rust
-   pub struct CustomHandler {
-       // Your state here
-   }
+**Key Capabilities:**
 
-   impl Handler for CustomHandler {
-       fn on_sample_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>) -> f64 {
-           // Custom continuous sampling logic
-       }
+- Enables replay, scoring, and conditioning operations
+- Type-safe value access with both Option and Result APIs
+- Three-component log-weight decomposition for algorithmic flexibility
 
-       fn on_sample_bool(&mut self, addr: &Address, dist: &dyn Distribution<bool>) -> bool {
-           // Custom boolean sampling logic - returns bool directly!
-       }
+### [Memory Optimization](memory.md) - Production Performance Strategies
 
-       fn on_sample_u64(&mut self, addr: &Address, dist: &dyn Distribution<u64>) -> u64 {
-           // Custom counting sampling logic - returns u64 directly!
-       }
+Advanced allocation strategies for high-throughput probabilistic computing.
 
-       fn on_sample_usize(&mut self, addr: &Address, dist: &dyn Distribution<usize>) -> usize {
-           // Custom categorical sampling logic - returns usize directly!
-       }
+**Core Types:**
 
-       // ... other required methods
-   }
-   ```
+- `TracePool`: Reusable trace allocation for batch processing
+- `CowTrace`: Copy-on-write semantics for efficient trace sharing
+- `TraceBuilder`: Optimized trace construction with pre-sized allocations
+- `PooledPriorHandler`: Memory-pooled handler for production workloads
 
-2. **Custom Trace Types**: Extend trace functionality for specialized use cases
-3. **Memory Optimizations**: Implement custom pooling strategies for specific workloads
-4. **Debugging Tools**: Add instrumentation and logging handlers
+**Performance Benefits:**
 
-## Design Principles
+- Reduces garbage collection pressure in high-frequency sampling
+- Enables efficient parallel execution with shared trace data
+- Provides detailed allocation statistics for performance monitoring
 
-- **Effect Handlers**: Clean separation between model definition and execution
-- **Trace-based**: All execution produces replayable, scorable traces
-- **Type Safety**: Handlers are fully type-safe with compile-time guarantees
-- **Composable**: Handlers can be chained and combined for complex workflows
-- **Deterministic**: Same trace + same model = same result (reproducible execution)
-- **Memory Efficient**: Copy-on-write semantics and pooling minimize allocations
-- **Introspectable**: Full visibility into random choices and weights for debugging and analysis
+## Design & Evolution
+
+### Status
+
+- **Stable**: The runtime system has been stable since v0.1 and provides the foundation for all probabilistic programming operations
+- **Complete**: All four components (handler, interpreters, trace, memory) provide comprehensive execution capabilities
+- **Performance Critical**: Extensively optimized for high-throughput inference workloads
+- **Extensible**: Clean abstractions allow custom handlers and optimization strategies
+
+### Architectural Principles
+
+1. **Effect Handler Separation**: Clean separation between model definition (`Model<A>`) and execution strategy (`Handler`)
+2. **Trace-Centric Design**: All executions produce replayable, scorable traces that enable advanced inference
+3. **Type Safety Throughout**: All value handling is type-safe with compile-time guarantees
+4. **Zero-Cost Abstractions**: Handler dispatch and trace operations have no runtime overhead
+5. **Memory Conscious**: Copy-on-write semantics and pooling strategies minimize allocation pressure
+6. **Composable Architecture**: Handlers can be chained, combined, and extended for complex workflows
+
+### Evolution Strategy
+
+- **Additive Changes Only**: New handler methods, trace fields, and optimization strategies are added without breaking existing code
+- **Performance Optimizations**: Internal improvements (pooling, COW) are transparent to user code
+- **Extension Points**: Clean abstractions allow library users to add custom functionality
+- **Backwards Compatibility**: All v0.1 code continues to work unchanged
+
+## Integration Notes
+
+### With Core Module
+
+The runtime system executes `Model<A>` values defined in the core module:
+
+- **`Model<A>` Execution**: The `run` function interprets model descriptions into concrete executions
+- **Address System**: Runtime uses addresses from `core::address` for choice identification
+- **Distribution Integration**: Handlers dispatch to distribution methods from `core::distribution`
+- **Type Safety Bridge**: Runtime preserves the type safety guarantees established in core
+
+### With Inference Module
+
+The runtime provides execution infrastructure for all inference algorithms:
+
+- **MCMC**: Trace manipulation enables proposal generation and acceptance decisions
+- **SMC**: Particle generation through `PriorHandler` and reweighting via `ScoreGivenTrace`
+- **Variational Inference**: Trace-based gradient computation for optimization
+- **ABC**: Forward simulation capabilities for approximate Bayesian computation
+
+### Performance Characteristics
+
+| Operation | Complexity | Notes |
+|---|---|---|
+| **Handler Dispatch** | O(1) | Compile-time monomorphization, no virtual calls |
+| **Choice Lookup** | O(log n) | BTreeMap lookup by address |
+| **Trace Cloning** | O(n) | Optimized with COW strategies |
+| **Pool Allocation** | O(1) amortized | Pre-allocated objects reused |
+| **Type Access** | O(log n + 1) | Address lookup plus constant-time type extraction |
+
+## Reference Links
+
+### Core Components
+
+- **[Handler System](handler.md)** - Type-safe execution engine with algebraic effects pattern
+- **[Built-in Interpreters](interpreters.md)** - Five foundational handlers for all execution modes
+- **[Trace System](trace.md)** - Execution history recording with type-safe value access
+- **[Memory Optimization](memory.md)** - Efficient allocation strategies for production performance
+
+### Related Modules
+
+- **[Core Module](../core/README.md)** - Model definitions and type system that runtime executes
+- **[Inference Module](../inference/README.md)** - Advanced algorithms built on runtime infrastructure
+- **[Error Module](../error.rs)** - Comprehensive error handling used throughout runtime
+
+### Implementation Guides
+
+- [Custom Handler Implementation](../../src/how-to/custom-handlers.md) - Building specialized execution strategies
+- [Memory Optimization Strategies](../../src/how-to/memory-optimization.md) - High-performance allocation patterns
+- [Production Deployment](../../src/how-to/production-deployment.md) - Runtime configuration for production systems
+- [Debugging Runtime Issues](../../src/how-to/runtime-debugging.md) - Tools and techniques for runtime analysis
+
+### Examples
+
+- [`trace_manipulation.rs`](../../../examples/trace_manipulation.rs) - Comprehensive trace operations
+- [`handler_patterns.rs`](../../../examples/handler_patterns.rs) - Advanced handler usage patterns
+- [`memory_optimization.rs`](../../../examples/memory_optimization.rs) - High-performance memory strategies
+- [`production_inference.rs`](../../../examples/production_inference.rs) - Production deployment patterns
+
+### Benchmarks
+
+- [`memory_benchmarks.rs`](../../../benches/memory_benchmarks.rs) - Memory allocation performance analysis
+- [`handler_benchmarks.rs`](../../../benches/handler_benchmarks.rs) - Handler dispatch and trace operation benchmarks
+- [`inference_benchmarks.rs`](../../../benches/inference_benchmarks.rs) - End-to-end inference performance testing
