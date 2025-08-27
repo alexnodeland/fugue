@@ -1,4 +1,6 @@
-#![doc = include_str!("../docs/api/error/README.md")]
+//! Error handling for probabilistic programming operations.
+//!
+//! This module provides structured error types with rich context information for graceful handling of common failure modes in probabilistic computation.
 
 use crate::core::address::Address;
 use crate::core::distribution::*;
@@ -543,7 +545,15 @@ impl From<String> for FugueError {
 // Macros for Convenient Error Creation
 // =============================================================================
 
-#[doc = include_str!("../docs/api/error/invalid_params.md")]
+/// Create an InvalidParameters error with optional context.
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// let err = invalid_params!("Normal", "sigma must be positive", InvalidVariance);
+/// let err_with_ctx = invalid_params!("Normal", "sigma must be positive", InvalidVariance, 
+///     "sigma" => "-1.0", "expected" => "> 0.0");
+/// ```
 #[macro_export]
 macro_rules! invalid_params {
     ($dist:expr, $reason:expr, $code:ident) => {
@@ -555,7 +565,15 @@ macro_rules! invalid_params {
     };
 }
 
-#[doc = include_str!("../docs/api/error/numerical_error.md")]
+/// Create a NumericalError with optional context.
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// let err = numerical_error!("log", "input was negative", NumericalInstability);
+/// let err_with_ctx = numerical_error!("log", "input was negative", NumericalInstability,
+///     "input" => "-1.5");
+/// ```
 #[macro_export]
 macro_rules! numerical_error {
     ($op:expr, $details:expr, $code:ident) => {
@@ -567,7 +585,13 @@ macro_rules! numerical_error {
     };
 }
 
-#[doc = include_str!("../docs/api/error/trace_error.md")]
+/// Create a TraceError with optional context.
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// let err = trace_error!("get_f64", Some(addr!("mu")), "address not found", TraceAddressNotFound);
+/// ```
 #[macro_export]
 macro_rules! trace_error {
     ($op:expr, $addr:expr, $reason:expr, $code:ident) => {
