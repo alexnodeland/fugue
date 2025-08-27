@@ -7,7 +7,7 @@ The core module provides the fundamental building blocks for probabilistic progr
 ## Quick Start
 
 ```rust
-use fugue::*;
+# use fugue::*;
 
 // Create a simple Bayesian model
 let model = prob! {
@@ -28,6 +28,7 @@ let model = prob! {
 - `scoped_addr!` macro: Creates hierarchical addresses with scoping
 
 ```rust
+# use fugue::*;
 let a1 = addr!("mu");           // Address("mu")
 let a2 = addr!("x", 5);         // Address("x#5")
 let a3 = scoped_addr!("layer1", "weight"); // Address("layer1::weight")
@@ -45,20 +46,23 @@ let a3 = scoped_addr!("layer1", "weight"); // Address("layer1::weight")
 - All distributions support sampling and log-density evaluation
 
 ```rust
+# use fugue::*;
+# use rand::thread_rng;
+# let mut rng = thread_rng();
 // Continuous distribution
-let normal = Normal{mu: 0.0, sigma: 1.0};
+let normal = Normal::new(0.0, 1.0).unwrap();
 let x: f64 = normal.sample(&mut rng);
 let logp = normal.log_prob(&x);
 
 // Discrete distributions now type-safe!
-let coin = Bernoulli{p: 0.5};
+let coin = Bernoulli::new(0.5).unwrap();
 let flip: bool = coin.sample(&mut rng);  // Returns bool directly!
 let prob = coin.log_prob(&flip);
 
-let counter = Poisson{lambda: 3.0};
+let counter = Poisson::new(3.0).unwrap();
 let count: u64 = counter.sample(&mut rng);  // Returns u64 directly!
 
-let choice = Categorical{probs: vec![0.3, 0.5, 0.2]};
+let choice = Categorical::new(vec![0.3, 0.5, 0.2]).unwrap();
 let idx: usize = choice.sample(&mut rng);  // Returns usize for safe indexing!
 ```
 
@@ -74,6 +78,7 @@ let idx: usize = choice.sample(&mut rng);  // Returns usize for safe indexing!
 **Example:**
 
 ```rust
+# use fugue::*;
 let model = prob! {
     let mu <- sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap());  // Returns f64
     let is_outlier <- sample(addr!("outlier"), Bernoulli::new(0.1).unwrap());  // Returns bool!
@@ -95,6 +100,7 @@ let model = prob! {
 **Example:**
 
 ```rust
+# use fugue::*;
 let log_probs = vec![-1.0, -2.0, -0.5];
 let normalized = normalize_log_probs(&log_probs);
 ```
@@ -106,6 +112,7 @@ let normalized = normalize_log_probs(&log_probs);
 Build complex models step-by-step using monadic composition.
 
 ```rust
+# use fugue::*;
 let hierarchical_model = prob! {
     let global_mu <- sample(addr!("global_mu"), Normal::new(0.0, 1.0).unwrap());
     let local_effects <- plate!(i in 0..10 => {
@@ -120,6 +127,8 @@ let hierarchical_model = prob! {
 Leverage type safety for cleaner conditional models.
 
 ```rust
+# use fugue::*;
+# let observed_value = 1.5;
 let mixture_model = prob! {
     let component <- sample(addr!("component"), Categorical::new(vec![0.3, 0.7]).unwrap()); // Returns usize!
     let mu = match component {
@@ -138,6 +147,7 @@ let mixture_model = prob! {
 **`prob!` - Do-notation Style Composition:**
 
 ```rust
+# use fugue::*;
 let model = prob! {
     let x <- sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
     let y = x * 2.0;  // Regular let binding
@@ -149,6 +159,7 @@ let model = prob! {
 **`plate!` - Vectorized Operations:**
 
 ```rust
+# use fugue::*;
 let model = plate!(i in 0..10 => {
     sample(addr!("x", i), Normal::new(0.0, 1.0).unwrap())
 });
