@@ -18,25 +18,19 @@
 //! - Re-exports work correctly
 //! - Module structure is as documented
 //!
-//! ### 3. Documentation Example Validation (`test_docs_examples_*`)
-//! - Code examples in documentation compile and run
-//! - Examples produce expected results
-//! - Examples demonstrate correct usage patterns
-//! - Edge cases mentioned in docs are handled correctly
-//!
-//! ### 4. API Consistency Validation (`test_consistency_*`)
+//! ### 3. API Consistency Validation (`test_consistency_*`)
 //! - Similar functions have consistent interfaces
 //! - Naming conventions are followed consistently
 //! - Error types and messages are consistent
 //! - Type safety is enforced consistently
 //!
-//! ### 5. Backwards Compatibility (`test_compatibility_*`)
+//! ### 4. Backwards Compatibility (`test_compatibility_*`)
 //! - Existing code patterns continue to work
 //! - Deprecation warnings are appropriate
 //! - Migration paths are clear
 //! - Breaking changes are documented
 //!
-//! ### 6. Ergonomics Validation (`test_ergonomics_*`)
+//! ### 5. Ergonomics Validation (`test_ergonomics_*`)
 //! - Common use cases are straightforward
 //! - Type inference works as expected
 //! - Error messages are helpful
@@ -530,7 +524,7 @@ fn test_api_contract_memory_management() {
     assert_eq!(converted_back.choices.len(), base_trace.choices.len());
     
     // Test CowTrace creation and choices access
-    let mut cow_trace2 = CowTrace::new();
+    let cow_trace2 = CowTrace::new();
     let choices = cow_trace2.choices(); // Read-only access
     assert!(choices.is_empty());
     
@@ -549,4 +543,186 @@ fn test_api_contract_memory_management() {
     assert_eq!(built_trace2.get_bool(&addr!("bool_test")), Some(true));
     assert!((built_trace2.log_likelihood + 1.2).abs() < 1e-12);
     assert!((built_trace2.log_factors + 0.3).abs() < 1e-12);
+}
+
+#[test]
+fn test_compatibility_legacy_patterns() {
+    // Test that common patterns from earlier versions still work
+    let mut rng = StdRng::seed_from_u64(42);
+    
+    // Legacy pattern 1: Direct handler usage
+    let model = sample(addr!("param"), Normal::new(0.0, 1.0).unwrap());
+    let handler = runtime::interpreters::PriorHandler {
+        rng: &mut rng,
+        trace: runtime::trace::Trace::default(),
+    };
+    let (result, trace) = runtime::handler::run(handler, model);
+    
+    assert!(result.is_finite());
+    assert!(trace.get_f64(&addr!("param")).is_some());
+    
+    // Legacy pattern 2: Manual trace building (if supported)
+    let mut builder = runtime::memory::TraceBuilder::new();
+    builder.add_sample(addr!("manual"), 2.5, -1.0);
+    let manual_trace = builder.build();
+    
+    assert_eq!(manual_trace.get_f64(&addr!("manual")), Some(2.5));
+    assert!((manual_trace.log_prior + 1.0).abs() < 1e-12);
+    
+    // Legacy pattern 3: Basic MCMC usage
+    let legacy_mcmc_model = || sample(addr!("theta"), Normal::new(0.0, 1.0).unwrap());
+    let legacy_samples = adaptive_mcmc_chain(&mut rng, legacy_mcmc_model, 20, 5);
+    
+    assert_eq!(legacy_samples.len(), 20);
+    assert!(legacy_samples.iter().all(|(val, _)| val.is_finite()));
+    
+    // Legacy pattern 4: Simple model composition
+    let legacy_composition = pure(1.0)
+        .bind(|x| pure(x + 1.0))
+        .map(|x| x * 2.0);
+    
+    let handler2 = runtime::interpreters::PriorHandler {
+        rng: &mut rng,
+        trace: runtime::trace::Trace::default(),
+    };
+    let (legacy_result, _) = runtime::handler::run(handler2, legacy_composition);
+    assert_eq!(legacy_result, 4.0); // (1 + 1) * 2
+}
+
+#[test]
+fn test_compatibility_api_stability() {
+    // Test that core API signatures remain stable
+    
+    // Distribution constructors should maintain their signatures
+    let _normal: Normal = Normal::new(0.0, 1.0).unwrap();
+    let _bernoulli: Bernoulli = Bernoulli::new(0.5).unwrap();
+    let _uniform: Uniform = Uniform::new(0.0, 1.0).unwrap();
+    
+    // Model functions should maintain their signatures
+    let _pure_model: Model<i32> = pure(42);
+    let _sample_model: Model<f64> = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
+    let _observe_model: Model<()> = observe(addr!("y"), Normal::new(0.0, 1.0).unwrap(), 0.0);
+    let _factor_model: Model<()> = factor(-0.5);
+    
+    // Trace accessors should maintain their signatures
+    let trace = runtime::trace::Trace::default();
+    let _f64_option: Option<f64> = trace.get_f64(&addr!("test"));
+    let _bool_option: Option<bool> = trace.get_bool(&addr!("test"));
+    let _f64_result: Result<f64, FugueError> = trace.get_f64_result(&addr!("test"));
+    let _bool_result: Result<bool, FugueError> = trace.get_bool_result(&addr!("test"));
+    
+    // Handler types should be constructible
+    let mut rng = StdRng::seed_from_u64(42);
+    let _prior_handler = runtime::interpreters::PriorHandler {
+        rng: &mut rng,
+        trace: runtime::trace::Trace::default(),
+    };
+    
+    // Inference functions should maintain their signatures
+    let model_fn = || sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
+    let _mcmc_samples: Vec<(f64, runtime::trace::Trace)> = adaptive_mcmc_chain(&mut rng, model_fn, 10, 2);
+    
+    // Error types should be accessible
+    let _error_code: ErrorCode = ErrorCode::InvalidVariance;
+    let _error_category: ErrorCategory = ErrorCategory::DistributionValidation;
+    
+    // API stability confirmed - test passes if it compiles
+    assert!(true);
+}
+
+#[test]
+fn test_api_contract_comprehensive_validation() {
+    let mut rng = StdRng::seed_from_u64(42);
+    
+    // Comprehensive validation of all major API contracts
+    
+    // 1. All distributions should implement Distribution trait consistently
+    let distributions: Vec<Box<dyn Distribution<f64>>> = vec![
+        Box::new(Normal::new(0.0, 1.0).unwrap()),
+        Box::new(Uniform::new(0.0, 1.0).unwrap()),
+        Box::new(Exponential::new(1.0).unwrap()),
+        Box::new(Beta::new(1.0, 1.0).unwrap()),
+        Box::new(Gamma::new(1.0, 1.0).unwrap()),
+        Box::new(LogNormal::new(0.0, 1.0).unwrap()),
+    ];
+    
+    for dist in distributions {
+        let sample = dist.sample(&mut rng);
+        let log_prob = dist.log_prob(&sample);
+        assert!(sample.is_finite());
+        assert!(log_prob.is_finite());
+    }
+    
+    // 2. All handler types should work with the same model
+    let make_test_model = || sample(addr!("test"), Normal::new(0.0, 1.0).unwrap());
+    
+    // PriorHandler
+    let prior_handler = runtime::interpreters::PriorHandler {
+        rng: &mut rng,
+        trace: runtime::trace::Trace::default(),
+    };
+    let (_, base_trace) = runtime::handler::run(prior_handler, make_test_model());
+    
+    // ReplayHandler
+    let replay_handler = runtime::interpreters::ReplayHandler {
+        rng: &mut rng,
+        base: base_trace.clone(),
+        trace: runtime::trace::Trace::default(),
+    };
+    let (_, replay_trace) = runtime::handler::run(replay_handler, make_test_model());
+    assert_eq!(base_trace.get_f64(&addr!("test")), replay_trace.get_f64(&addr!("test")));
+    
+    // SafeReplayHandler
+    let safe_replay_handler = runtime::interpreters::SafeReplayHandler {
+        rng: &mut rng,
+        base: base_trace.clone(),
+        trace: runtime::trace::Trace::default(),
+        warn_on_mismatch: false,
+    };
+    let (_, safe_replay_trace) = runtime::handler::run(safe_replay_handler, make_test_model());
+    assert_eq!(base_trace.get_f64(&addr!("test")), safe_replay_trace.get_f64(&addr!("test")));
+    
+    // ScoreGivenTrace
+    let score_handler = runtime::interpreters::ScoreGivenTrace {
+        base: base_trace.clone(),
+        trace: runtime::trace::Trace::default(),
+    };
+    let (_, score_trace) = runtime::handler::run(score_handler, make_test_model());
+    assert_eq!(base_trace.get_f64(&addr!("test")), score_trace.get_f64(&addr!("test")));
+    
+    // SafeScoreGivenTrace
+    let safe_score_handler = runtime::interpreters::SafeScoreGivenTrace {
+        base: base_trace.clone(),
+        trace: runtime::trace::Trace::default(),
+        warn_on_error: false,
+    };
+    let (_, safe_score_trace) = runtime::handler::run(safe_score_handler, make_test_model());
+    assert_eq!(base_trace.get_f64(&addr!("test")), safe_score_trace.get_f64(&addr!("test")));
+    
+    // 3. All inference algorithms should handle the same model type
+    let inference_model = || sample(addr!("param"), Normal::new(0.0, 1.0).unwrap())
+        .bind(|param| observe(addr!("obs"), Normal::new(param, 0.5).unwrap(), 0.5)
+             .map(move |_| param));
+    
+    // MCMC
+    let mcmc_samples = adaptive_mcmc_chain(&mut rng, &inference_model, 20, 5);
+    assert_eq!(mcmc_samples.len(), 20);
+    
+    // SMC
+    let smc_config = SMCConfig::default();
+    let smc_particles = adaptive_smc(&mut rng, 15, &inference_model, smc_config);
+    assert_eq!(smc_particles.len(), 15);
+    
+    // ABC
+    let abc_model = || sample(addr!("param"), Normal::new(0.0, 1.0).unwrap());
+    let simulator = |trace: &runtime::trace::Trace| trace.get_f64(&addr!("param")).unwrap_or(0.0);
+    let abc_samples = abc_scalar_summary(&mut rng, abc_model, simulator, 0.5, 1.0, 10);
+    assert!(abc_samples.len() <= 10);
+    
+    // VI
+    let vi_model = || sample(addr!("param"), Normal::new(0.0, 1.0).unwrap());
+    let mut guide = MeanFieldGuide::new();
+    guide.params.insert(addr!("param"), VariationalParam::Normal { mu: 0.0, log_sigma: 0.0 });
+    let optimized_guide = optimize_meanfield_vi(&mut rng, vi_model, guide, 5, 5, 0.1);
+    assert!(!optimized_guide.params.is_empty());
 }
