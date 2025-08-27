@@ -1,4 +1,4 @@
-#![doc = include_str!("../../docs/api/core/address.md")]
+#![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/api/core/address.md"))]
 use std::fmt::{Display, Formatter};
 
 /// A unique identifier for random variables and observation sites in probabilistic models.
