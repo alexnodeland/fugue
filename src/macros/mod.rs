@@ -1,6 +1,17 @@
-#![doc = include_str!("../../docs/api/macros/README.md")]
+#![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/api/macros/README.md"))]
 
-#[doc = include_str!("../../docs/api/macros/prob.md")]
+/// Probabilistic programming macro, used to define probabilistic programs with do-notation.
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+///
+/// let model = prob! {
+///     let x <- sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
+///     let y <- sample(addr!("y"), Normal::new(x, 1.0).unwrap());
+///     pure(y)
+/// };
+/// ```
 #[macro_export]
 macro_rules! prob {
     // Simple cases first
@@ -22,7 +33,16 @@ macro_rules! prob {
     };
 }
 
-#[doc = include_str!("../../docs/api/macros/plate.md")]
+/// Plate notation for replicating models over ranges.
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+///
+/// let model = plate!(i in 0..10 => {
+///     sample(addr!("x", i), Normal::new(0.0, 1.0).unwrap())
+/// });
+/// ```
 #[macro_export]
 macro_rules! plate {
     ($var:ident in $range:expr => $body:expr) => {
@@ -30,7 +50,15 @@ macro_rules! plate {
     };
 }
 
-#[doc = include_str!("../../docs/api/macros/scoped_addr.md")]
+/// Enhanced address macro with scoping support.
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+///
+/// let a = scoped_addr!("scope", "name");
+/// let b = scoped_addr!("scope", "name", "{}", 3);
+/// ```
 #[macro_export]
 macro_rules! scoped_addr {
     ($scope:expr, $name:expr) => {
