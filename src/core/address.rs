@@ -1,7 +1,22 @@
-#![doc = include_str!("../../docs/api/core/address/README.md")]
+#![doc = include_str!("../../docs/api/core/address.md")]
 use std::fmt::{Display, Formatter};
 
-#[doc = include_str!("../../docs/api/core/address/address.md")]
+/// A unique identifier for random variables and observation sites in probabilistic models.
+/// Addresses serve as stable names for probabilistic choices, enabling conditioning, inference, and replay.
+/// They are implemented as wrapped strings with ordering and hashing support for use in collections.
+///
+/// Example:
+/// ```rust
+/// use fugue::*;
+/// // Create addresses using the addr! macro
+/// let addr1 = addr!("parameter");
+/// let addr2 = addr!("data", 5);
+/// // Addresses can be compared and used in collections
+/// use std::collections::HashMap;
+/// let mut map = HashMap::new();
+/// map.insert(addr1, 1.0);
+/// map.insert(addr2, 2.0);
+/// ```
 #[derive(Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Address(pub String);
 impl Display for Address {
@@ -10,7 +25,30 @@ impl Display for Address {
     }
 }
 
-#[doc = include_str!("../../docs/api/core/address/addr.md")]
+/// Create an address for naming random variables and observation sites.
+/// This macro provides a convenient way to create `Address` instances with human-readable names and optional indices.
+/// The macro supports two forms:
+///
+/// - `addr!("name")` - Simple named address
+/// - `addr!("name", index)` - Indexed address using "name#index" format
+///
+/// Example:
+/// ```rust
+/// use fugue::*;
+/// // Simple addresses
+/// let mu = addr!("mu");
+/// let sigma = addr!("sigma");
+/// // Indexed addresses for collections
+/// let data_0 = addr!("data", 0);
+/// let data_1 = addr!("data", 1);
+/// // Use in models
+/// let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+///     .bind(|x| {
+///         // Index can be dynamic
+///         let i = 42;
+///         sample(addr!("y", i), Normal::new(x, 0.1).unwrap())
+///     });
+/// ```
 #[macro_export]
 macro_rules! addr {
     ($name:expr) => {
