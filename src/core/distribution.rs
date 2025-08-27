@@ -1,4 +1,4 @@
-#![doc = include_str!("../../docs/api/core/distribution/README.md")]
+#![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/api/core/distribution.md"))]
 use rand::{Rng, RngCore};
 use rand_distr::{
     Beta as RDBeta, Binomial as RDBinomial, Distribution as RandDistr, Exp as RDExp,
@@ -10,19 +10,116 @@ use rand_distr::{
 /// zero probability, while finite values represent the natural logarithm of probabilities.
 pub type LogF64 = f64;
 
-#[doc = include_str!("../../docs/api/core/distribution/distribution.md")]
+/// Generic interface for type-safe probability distributions.
+/// All distributions implement `Distribution<T>` where `T` is the natural return type.
+/// Example:
+///
+/// ```rust
+/// # use fugue::*;
+/// # use rand::thread_rng;
+///
+/// let mut rng = thread_rng();
+///
+/// // Type-safe sampling
+/// let coin = Bernoulli::new(0.5).unwrap();
+/// let flip: bool = coin.sample(&mut rng);  // Natural boolean
+/// let prob = coin.log_prob(&flip);
+///
+/// // Safe indexing
+/// let choice = Categorical::uniform(3).unwrap();
+/// let idx: usize = choice.sample(&mut rng);  // Safe for arrays
+/// let choice_prob = choice.log_prob(&idx);
+///
+/// // Natural counting
+/// let events = Poisson::new(3.0).unwrap();
+/// let count: u64 = events.sample(&mut rng);  // Natural count type
+/// let count_prob = events.log_prob(&count);
+/// ```
 pub trait Distribution<T>: Send + Sync {
-    #[doc = include_str!("../../docs/api/core/distribution/sample.md")]
+    /// Generate a random sample (with its natural type), `T`, from the distribution, using the provided random number generator, `rng`.
+    ///
+    /// Example:
+    /// ```rust
+    /// # use fugue::*;
+    /// # use rand::thread_rng;
+    ///
+    /// let mut rng = thread_rng();
+    ///
+    /// // Sample different distribution types
+    /// let normal_sample: f64 = Normal::new(0.0, 1.0).unwrap().sample(&mut rng);
+    /// let coin_flip: bool = Bernoulli::new(0.5).unwrap().sample(&mut rng);
+    /// let event_count: u64 = Poisson::new(3.0).unwrap().sample(&mut rng);
+    /// let category_idx: usize = Categorical::uniform(5).unwrap().sample(&mut rng);
+    /// ```
     fn sample(&self, rng: &mut dyn RngCore) -> T;
 
-    #[doc = include_str!("../../docs/api/core/distribution/log_prob.md")]
+    /// Compute the log-probability density (continuous) or mass (discrete) of a value, `x`, from the distribution.
+    ///
+    /// Example:
+    /// ```rust
+    /// # use fugue::*;
+    ///
+    /// // Continuous distribution (probability density)
+    /// let normal = Normal::new(0.0, 1.0).unwrap();
+    /// let density = normal.log_prob(&0.0);  // Peak of standard normal
+    ///
+    /// // Discrete distribution (probability mass)
+    /// let coin = Bernoulli::new(0.7).unwrap();
+    /// let prob_true = coin.log_prob(&true);   // ln(0.7)
+    /// let prob_false = coin.log_prob(&false); // ln(0.3)
+    ///
+    /// // Outside support returns -∞
+    /// let poisson = Poisson::new(3.0).unwrap();
+    /// let invalid = poisson.log_prob(&u64::MAX); // Very unlikely, returns -∞
+    /// ```
     fn log_prob(&self, x: &T) -> LogF64;
 
-    #[doc = include_str!("../../docs/api/core/distribution/clone_box.md")]
+    /// Clone the distribution into a boxed trait object, `Box<dyn Distribution<T>>`.
+    ///
+    /// Example:
+    /// ```rust
+    /// # use fugue::*;
+    ///
+    /// // Clone a distribution into a box
+    /// let original = Normal::new(0.0, 1.0).unwrap();
+    /// let boxed: Box<dyn Distribution<f64>> = original.clone_box();
+    ///
+    /// // Useful for storing different distribution types
+    /// let mut distributions: Vec<Box<dyn Distribution<f64>>> = vec![];
+    /// distributions.push(Normal::new(0.0, 1.0).unwrap().clone_box());
+    /// distributions.push(Uniform::new(-1.0, 1.0).unwrap().clone_box());
+    /// ```
     fn clone_box(&self) -> Box<dyn Distribution<T>>;
 }
 
-#[doc = include_str!("../../docs/api/core/distribution/distributions/normal.md")]
+/// A continuous distribution characterized by its mean, `mu`, and standard deviation, `sigma`.
+///
+/// Mathematical Properties:
+/// - **Support**: (-∞, +∞)
+/// - **PDF**: f(x) = (1/(σ√(2π))) × exp(-0.5 × ((x-μ)/σ)²)
+/// - **Mean**: μ
+/// - **Variance**: σ²
+/// - **68-95-99.7 rule**: ~68% within 1σ, ~95% within 2σ, ~99.7% within 3σ
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+///
+/// // Standard normal (mean=0, std=1)
+/// let standard = sample(addr!("z"), Normal::new(0.0, 1.0).unwrap());
+///
+/// // Parameter with prior
+/// let theta = sample(addr!("theta"), Normal::new(0.0, 2.0).unwrap());
+///
+/// // Likelihood with observation
+/// let likelihood = observe(addr!("y"), Normal::new(1.5, 0.5).unwrap(), 2.0);
+///
+/// // Measurement error model
+/// let true_value = sample(addr!("true_val"), Normal::new(100.0, 10.0).unwrap());
+/// let measurement = true_value.bind(|val| {
+///     observe(addr!("measured"), Normal::new(val, 2.0).unwrap(), 98.5)
+/// });
+/// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Normal {
     /// Mean of the normal distribution.
@@ -91,7 +188,33 @@ impl Distribution<f64> for Normal {
     }
 }
 
-#[doc = include_str!("../../docs/api/core/distribution/distributions/uniform.md")]
+/// A continuous distribution that assigns equal probability density to all values within a specified interval, from `low` to `high`.
+/// 
+/// Commonly used as an uninformative prior when you want to express complete uncertainty over a bounded range.
+/// 
+/// Mathematical Properties:
+/// - **Support**: [low, high)
+/// - **PDF**: f(x) = 1/(high-low) for low ≤ x < high, 0 otherwise
+/// - **Mean**: (low + high) / 2
+/// - **Variance**: (high - low)² / 12
+/// 
+/// Example:
+/// 
+/// ```rust
+/// # use fugue::*;
+/// 
+/// // Unit interval [0, 1)
+/// let unit = sample(addr!("p"), Uniform::new(0.0, 1.0).unwrap());
+/// 
+/// // Symmetric around zero
+/// let symmetric = sample(addr!("x"), Uniform::new(-5.0, 5.0).unwrap());
+/// 
+/// // Uninformative prior for weight
+/// let weight = sample(addr!("weight"), Uniform::new(0.0, 100.0).unwrap());
+/// 
+/// // Random angle in radians
+/// let angle = sample(addr!("angle"), Uniform::new(0.0, 2.0 * std::f64::consts::PI).unwrap());
+/// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Uniform {
     /// Lower bound of the uniform distribution (inclusive).
@@ -166,7 +289,36 @@ impl Distribution<f64> for Uniform {
     }
 }
 
-#[doc = include_str!("../../docs/api/core/distribution/distributions/lognormal.md")]
+/// A continuous distribution where the logarithm follows a normal distribution.
+///
+/// Useful for modeling positive-valued quantities that are naturally multiplicative or skewed.
+///
+/// Mathematical Properties:
+/// - **Support**: (0, +∞)
+/// - **PDF**: f(x) = (1/(xσ√(2π))) × exp(-0.5 × ((ln(x)-μ)/σ)²)
+/// - **Mean**: exp(μ + σ²/2)
+/// - **Variance**: (exp(σ²) - 1) × exp(2μ + σ²)
+/// - **Relationship**: If X ~ LogNormal(μ, σ), then ln(X) ~ Normal(μ, σ)
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+///
+/// // Standard log-normal (median = 1)
+/// let standard = sample(addr!("x"), LogNormal::new(0.0, 1.0).unwrap());
+///
+/// // Positive scale parameter
+/// let scale = sample(addr!("scale"), LogNormal::new(0.0, 0.5).unwrap());
+///
+/// // Income distribution
+/// let income = sample(addr!("income"), LogNormal::new(10.0, 0.8).unwrap())
+///     .map(|x| x.round() as u64); // Convert to dollars
+///
+/// // Multiplicative error model
+/// let true_value = 100.0;
+/// let measured = sample(addr!("error"), LogNormal::new(0.0, 0.1).unwrap())
+///     .map(move |error| true_value * error);
+/// ```
 #[derive(Clone, Copy, Debug)]
 pub struct LogNormal {
     /// Mean of the underlying normal distribution.
@@ -239,7 +391,37 @@ impl Distribution<f64> for LogNormal {
     }
 }
 
-#[doc = include_str!("../../docs/api/core/distribution/distributions/exponential.md")]
+/// A continuous distribution often used to model waiting times between events.
+///
+/// Characterized by the memoryless property.
+///
+/// Mathematical Properties:
+/// - **Support**: [0, +∞)
+/// - **PDF**: f(x) = λ × exp(-λx) for x ≥ 0
+/// - **Mean**: 1 / λ
+/// - **Variance**: 1 / λ²
+/// - **Memoryless**: P(X > s + t | X > s) = P(X > t)
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+///
+/// // Average wait time of 2 minutes (rate = 0.5 per minute)
+/// let wait_time = sample(addr!("wait"), Exponential::new(0.5).unwrap());
+///
+/// // Service time model
+/// let service = sample(addr!("service_time"), Exponential::new(1.5).unwrap())
+///     .bind(|time| {
+///         if time > 5.0 {
+///             pure("slow")
+///         } else {
+///             pure("fast")
+///         }
+///     });
+///
+/// // Observe actual waiting time
+/// let observed = observe(addr!("actual_wait"), Exponential::new(0.3).unwrap(), 4.2);
+/// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Exponential {
     /// Rate parameter λ of the exponential distribution (must be positive).
@@ -292,7 +474,33 @@ impl Distribution<f64> for Exponential {
     }
 }
 
-#[doc = include_str!("../../docs/api/core/distribution/distributions/bernoulli.md")]
+/// A discrete distribution for binary outcomes (true/false, success/failure).
+///
+/// Returns `bool` directly for type-safe boolean logic.
+///
+/// Mathematical Properties:
+/// - **Support**: {false, true}
+/// - **PMF**: P(X = true) = p, P(X = false) = 1 - p
+/// - **Mean**: p
+/// - **Variance**: p(1 - p)
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+///
+/// // Fair coin flip
+/// let coin = sample(addr!("coin"), Bernoulli::new(0.5).unwrap());
+/// let result = coin.bind(|heads| {
+///     if heads {
+///         pure("Heads!")
+///     } else {
+///         pure("Tails!")
+///     }
+/// });
+///
+/// // Biased coin with observation
+/// let biased = observe(addr!("biased_coin"), Bernoulli::new(0.7).unwrap(), true);
+/// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Bernoulli {
     /// Probability of success (must be in [0, 1]).
@@ -352,7 +560,35 @@ impl Distribution<bool> for Bernoulli {
     }
 }
 
-#[doc = include_str!("../../docs/api/core/distribution/distributions/categorical.md")]
+/// A discrete distribution for choosing among multiple categories with specified probabilities.
+///
+/// Returns `usize` for safe array indexing.
+///
+/// Mathematical Properties:
+/// - **Support**: {0, 1, ..., k-1} where k = number of categories
+/// - **PMF**: P(X = i) = probs[i]
+/// - **Mean**: Σ(i × probs[i])
+/// - **Variance**: Σ(i² × probs[i]) - mean²
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+///
+/// // Custom probabilities
+/// let weighted = Categorical::new(vec![0.1, 0.2, 0.3, 0.4]).unwrap();
+///
+/// // Uniform distribution over k categories
+/// let uniform = Categorical::uniform(4).unwrap();
+///
+/// // Choose from three options
+/// let options = vec!["red", "green", "blue"];
+/// let choice = sample(addr!("color"), Categorical::new(vec![0.5, 0.3, 0.2]).unwrap())
+///     .map(move |idx| options[idx].to_string());
+///
+/// // Observe a specific choice
+/// let observed = observe(addr!("user_choice"), 
+///     Categorical::uniform(3).unwrap(), 1usize);
+/// ```
 #[derive(Clone, Debug)]
 pub struct Categorical {
     /// Probabilities for each category (should sum to 1.0).
@@ -470,7 +706,33 @@ impl Distribution<usize> for Categorical {
     }
 }
 
-#[doc = include_str!("../../docs/api/core/distribution/distributions/beta.md")]
+/// A continuous distribution on the interval (0, 1), commonly used for modeling probabilities and proportions.
+///
+/// Conjugate prior for Bernoulli/Binomial distributions.
+///
+/// Mathematical Properties:
+/// - **Support**: (0, 1)
+/// - **PDF**: f(x) = (x^(α-1) × (1-x)^(β-1)) / B(α,β)
+/// - **Mean**: α / (α + β)
+/// - **Variance**: (αβ) / ((α+β)²(α+β+1))
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+///
+/// // Uniform on [0,1]
+/// let uniform = sample(addr!("p"), Beta::new(1.0, 1.0).unwrap());
+///
+/// // Prior for success probability
+/// let prob_prior = sample(addr!("success_rate"), Beta::new(2.0, 5.0).unwrap());
+///
+/// // Conjugate prior-likelihood pair
+/// let model = sample(addr!("p"), Beta::new(3.0, 7.0).unwrap())
+///     .bind(|p| observe(addr!("trial"), Bernoulli::new(p).unwrap(), true));
+///
+/// // Skewed towards 0 (beta > alpha)
+/// let skewed = sample(addr!("proportion"), Beta::new(2.0, 8.0).unwrap());
+/// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Beta {
     /// First shape parameter α (must be positive).
@@ -558,7 +820,33 @@ impl Distribution<f64> for Beta {
     }
 }
 
-#[doc = include_str!("../../docs/api/core/distribution/distributions/gamma.md")]
+/// A continuous distribution over positive real numbers, parameterized by shape and rate.
+///
+/// Commonly used for modeling waiting times and as a conjugate prior for Poisson distributions.
+///
+/// Mathematical Properties:
+/// - **Support**: (0, +∞)
+/// - **PDF**: f(x) = (λ^k / Γ(k)) × x^(k-1) × exp(-λx)
+/// - **Mean**: k / λ
+/// - **Variance**: k / λ²
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+///
+/// // Shape=1 gives Exponential distribution
+/// let exponential_like = sample(addr!("wait_time"), Gamma::new(1.0, 2.0).unwrap());
+///
+/// // Prior for precision parameter
+/// let precision = sample(addr!("precision"), Gamma::new(2.0, 1.0).unwrap());
+///
+/// // Conjugate prior for Poisson rate
+/// let model = sample(addr!("rate"), Gamma::new(3.0, 2.0).unwrap())
+///     .bind(|lambda| observe(addr!("count"), Poisson::new(lambda).unwrap(), 5u64));
+///
+/// // Scale parameter (rate = 1/scale)
+/// let scale_param = sample(addr!("scale"), Gamma::new(2.0, 0.5).unwrap()); // mean = 4
+/// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Gamma {
     /// Shape parameter k (must be positive).
@@ -640,7 +928,34 @@ impl Distribution<f64> for Gamma {
     }
 }
 
-#[doc = include_str!("../../docs/api/core/distribution/distributions/binomial.md")]
+/// A discrete distribution representing the number of successes in n independent trials, with probability of success p.
+///
+/// Returns `u64` for natural success counting.
+///
+/// Mathematical Properties:
+/// - **Support**: {0, 1, ..., n}
+/// - **PMF**: P(X = k) = C(n,k) × p^k × (1-p)^(n-k)
+/// - **Mean**: n × p
+/// - **Variance**: n × p × (1-p)
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+///
+/// // 10 coin flips
+/// let successes = sample(addr!("heads"), Binomial::new(10, 0.5).unwrap())
+///     .bind(|count| {
+///         let rate = count as f64 / 10.0;
+///         pure(format!("Success rate: {:.1}%", rate * 100.0))
+///     });
+///
+/// // Clinical trial
+/// let trial = sample(addr!("success_rate"), Beta::new(1.0, 1.0).unwrap())
+///     .bind(|p| sample(addr!("successes"), Binomial::new(100, p).unwrap()));
+///
+/// // Observe trial results
+/// let observed = observe(addr!("trial_successes"), Binomial::new(20, 0.3).unwrap(), 7u64);
+/// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Binomial {
     /// Number of trials.
@@ -692,7 +1007,40 @@ impl Distribution<u64> for Binomial {
     }
 }
 
-#[doc = include_str!("../../docs/api/core/distribution/distributions/poisson.md")]
+/// A discrete distribution for modeling the number of events occurring in a fixed interval.
+///
+/// Returns `u64` for natural counting arithmetic.
+///
+/// Mathematical Properties:
+/// - **Support**: {0, 1, 2, 3, ...}
+/// - **PMF**: P(X = k) = (λ^k × e^(-λ)) / k!
+/// - **Mean**: λ
+/// - **Variance**: λ
+/// - **Memoryless**: Past events don't affect future rates
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+///
+/// // Model event counts
+/// let events = sample(addr!("events"), Poisson::new(3.0).unwrap())
+///     .bind(|count| {
+///         let status = match count {
+///             0 => "No events",
+///             1 => "Single event",
+///             n if n > 10 => "High activity",
+///             _ => "Normal activity"
+///         };
+///         pure(status.to_string())
+///     });
+///
+/// // Hierarchical model with Gamma prior
+/// let hierarchical = sample(addr!("rate"), Gamma::new(2.0, 1.0).unwrap())
+///     .bind(|lambda| sample(addr!("count"), Poisson::new(lambda).unwrap()));
+///
+/// // Observe count data
+/// let observed = observe(addr!("observed_count"), Poisson::new(4.0).unwrap(), 7u64);
+/// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Poisson {
     /// Rate parameter λ (must be positive). Mean and variance of the distribution.
