@@ -207,7 +207,7 @@ fn test_model_composition() {
     let (result1, trace1) = runtime::handler::run(handler1, model1);
     
     // Check that both addresses are in the trace
-    let x_val = trace1.get_f64(&addr!("x")).unwrap();
+    let _x_val = trace1.get_f64(&addr!("x")).unwrap();
     let y_val = trace1.get_f64(&addr!("y")).unwrap();
     
     // Result should be y * 2.0
@@ -357,4 +357,298 @@ fn test_macro_integration() {
         assert!(val.is_some());
         assert_eq!(plate_results[i], val.unwrap());
     }
+}
+
+#[test]
+fn test_factor_guard_integration() {
+    let mut rng = StdRng::seed_from_u64(42);
+    
+    // Test guard() conditions
+    let guard_model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+        .bind(|x| guard(x > -2.0 && x < 2.0))  // Should usually pass for standard normal
+        .bind(|_| factor(-0.5))
+        .bind(|_| pure("guard_passed"));
+    
+    let handler = runtime::interpreters::PriorHandler {
+        rng: &mut rng,
+        trace: runtime::trace::Trace::default(),
+    };
+    
+    let (result, trace) = runtime::handler::run(handler, guard_model);
+    
+    // If we get here, the guard passed
+    assert_eq!(result, "guard_passed");
+    
+    // Check that both factor and guard affected the trace
+    assert!(trace.log_factors.is_finite());
+    assert!((trace.log_factors + 0.5).abs() < 1e-12);
+    
+    // The sampled x should be within the guard bounds
+    let x_val = trace.get_f64(&addr!("x")).unwrap();
+    assert!(x_val > -2.0 && x_val < 2.0);
+    
+    // Test complex model with factors, guards, and observations
+    let complex_model = sample(addr!("mu"), Normal::new(0.0, 2.0).unwrap())
+        .bind(|mu| guard(mu.abs() < 5.0)  // Reasonable bound
+             .bind(move |_| sample(addr!("sigma"), Exponential::new(1.0).unwrap())
+                  .bind(move |sigma| guard(sigma > 0.1 && sigma < 10.0)  // Reasonable sigma bounds
+                       .bind(move |_| observe(addr!("y"), Normal::new(mu, sigma).unwrap(), 1.5))
+                       .bind(move |_| factor(mu * 0.1))  // Small preference for positive mu
+                       .map(move |_| (mu, sigma)))));
+    
+    let handler2 = runtime::interpreters::PriorHandler {
+        rng: &mut rng,
+        trace: runtime::trace::Trace::default(),
+    };
+    
+    let ((mu_result, sigma_result), trace2) = runtime::handler::run(handler2, complex_model);
+    
+    // All guards should have passed
+    assert!(mu_result.abs() < 5.0);
+    assert!(sigma_result > 0.1 && sigma_result < 10.0);
+    
+    // Check trace components
+    assert!(trace2.log_prior.is_finite());
+    assert!(trace2.log_likelihood.is_finite());
+    assert!(trace2.log_factors.is_finite());
+    assert!(trace2.total_log_weight().is_finite());
+    
+    // Factor should be mu * 0.1
+    assert!((trace2.log_factors - mu_result * 0.1).abs() < 1e-12);
+}
+
+#[test]
+fn test_distribution_coverage() {
+    let mut rng = StdRng::seed_from_u64(42);
+    
+    // Test all continuous distributions in models
+    let continuous_model = sample(addr!("normal"), Normal::new(0.0, 1.0).unwrap())
+        .bind(|_| sample(addr!("uniform"), Uniform::new(0.0, 1.0).unwrap()))
+        .bind(|_| sample(addr!("exponential"), Exponential::new(1.0).unwrap()))
+        .bind(|_| sample(addr!("beta"), Beta::new(2.0, 3.0).unwrap()))
+        .bind(|_| sample(addr!("gamma"), Gamma::new(2.0, 1.0).unwrap()))
+        .bind(|_| sample(addr!("lognormal"), LogNormal::new(0.0, 1.0).unwrap()));
+    
+    let handler1 = runtime::interpreters::PriorHandler {
+        rng: &mut rng,
+        trace: runtime::trace::Trace::default(),
+    };
+    
+    let (lognormal_val, trace1) = runtime::handler::run(handler1, continuous_model);
+    
+    // Check that all continuous distributions produced finite values
+    assert!(trace1.get_f64(&addr!("normal")).unwrap().is_finite());
+    assert!(trace1.get_f64(&addr!("uniform")).unwrap().is_finite());
+    assert!(trace1.get_f64(&addr!("exponential")).unwrap().is_finite());
+    assert!(trace1.get_f64(&addr!("beta")).unwrap().is_finite());
+    assert!(trace1.get_f64(&addr!("gamma")).unwrap().is_finite());
+    assert!(trace1.get_f64(&addr!("lognormal")).unwrap().is_finite());
+    assert_eq!(lognormal_val, trace1.get_f64(&addr!("lognormal")).unwrap());
+    
+    // Test all discrete distributions in models
+    let discrete_model = sample(addr!("bernoulli"), Bernoulli::new(0.7).unwrap())
+        .bind(|_| sample(addr!("poisson"), Poisson::new(3.0).unwrap()))
+        .bind(|_| sample(addr!("binomial"), Binomial::new(10, 0.4).unwrap()))
+        .bind(|_| sample(addr!("categorical"), Categorical::new(vec![0.2, 0.3, 0.5]).unwrap()));
+    
+    let handler2 = runtime::interpreters::PriorHandler {
+        rng: &mut rng,
+        trace: runtime::trace::Trace::default(),
+    };
+    
+    let (categorical_val, trace2) = runtime::handler::run(handler2, discrete_model);
+    
+    // Check that all discrete distributions produced valid values
+    let bernoulli_val = trace2.get_bool(&addr!("bernoulli")).unwrap();
+    let poisson_val = trace2.get_u64(&addr!("poisson")).unwrap();
+    let binomial_val = trace2.get_u64(&addr!("binomial")).unwrap();
+    let categorical_result = trace2.get_usize(&addr!("categorical")).unwrap();
+    
+    assert!(bernoulli_val == true || bernoulli_val == false);
+    assert!(poisson_val >= 0);
+    assert!(binomial_val >= 0 && binomial_val <= 10);
+    assert!(categorical_result < 3);  // Should be 0, 1, or 2
+    assert_eq!(categorical_val, categorical_result);
+    
+    // Test mixed continuous and discrete in one model with observations
+    let mixed_model = sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
+        .bind(|mu| sample(addr!("success"), Bernoulli::new(0.6).unwrap())
+             .bind(move |success| {
+                 if success {
+                     observe(addr!("obs"), Normal::new(mu, 0.5).unwrap(), 0.8)
+                         .map(move |_| (mu, success))
+                 } else {
+                     observe(addr!("obs"), Normal::new(mu, 0.5).unwrap(), -0.3)
+                         .map(move |_| (mu, success))
+                 }
+             }));
+    
+    let handler3 = runtime::interpreters::PriorHandler {
+        rng: &mut rng,
+        trace: runtime::trace::Trace::default(),
+    };
+    
+    let ((mu_mixed, success_mixed), trace3) = runtime::handler::run(handler3, mixed_model);
+    
+    // Check integration between continuous and discrete
+    assert!(mu_mixed.is_finite());
+    assert!(success_mixed == true || success_mixed == false);
+    assert!(trace3.log_likelihood.is_finite());
+    assert_eq!(mu_mixed, trace3.get_f64(&addr!("mu")).unwrap());
+    assert_eq!(success_mixed, trace3.get_bool(&addr!("success")).unwrap());
+}
+
+#[test]
+fn test_handler_compatibility_complete() {
+    let mut rng = StdRng::seed_from_u64(42);
+    
+    // Define a model that tests all handler capabilities
+    let model = || sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+        .bind(|x| sample(addr!("y"), Bernoulli::new(0.6).unwrap())
+             .bind(move |y| observe(addr!("obs"), Normal::new(x, 0.5).unwrap(), 0.5)
+                  .bind(move |_| factor(if y { 0.1 } else { -0.1 }))
+                  .map(move |_| (x, y))));
+    
+    // 1. Get baseline with PriorHandler
+    let prior_handler = runtime::interpreters::PriorHandler {
+        rng: &mut rng,
+        trace: runtime::trace::Trace::default(),
+    };
+    
+    let (baseline_result, baseline_trace) = runtime::handler::run(prior_handler, model());
+    
+    // 2. Test ReplayHandler (exact replay)
+    let replay_handler = runtime::interpreters::ReplayHandler {
+        rng: &mut rng,
+        base: baseline_trace.clone(),
+        trace: runtime::trace::Trace::default(),
+    };
+    
+    let (replay_result, replay_trace) = runtime::handler::run(replay_handler, model());
+    
+    // ReplayHandler should produce identical results
+    assert_eq!(baseline_result, replay_result);
+    assert_eq!(baseline_trace.get_f64(&addr!("x")), replay_trace.get_f64(&addr!("x")));
+    assert_eq!(baseline_trace.get_bool(&addr!("y")), replay_trace.get_bool(&addr!("y")));
+    
+    // 3. Test SafeReplayHandler (falls back to sampling for missing addresses)
+    let safe_replay_handler = runtime::interpreters::SafeReplayHandler {
+        rng: &mut rng,
+        base: baseline_trace.clone(),
+        trace: runtime::trace::Trace::default(),
+        warn_on_mismatch: false,
+    };
+    
+    let (safe_replay_result, safe_replay_trace) = runtime::handler::run(safe_replay_handler, model());
+    
+    // SafeReplayHandler should produce same results when all addresses exist
+    assert_eq!(baseline_result, safe_replay_result);
+    assert_eq!(baseline_trace.get_f64(&addr!("x")), safe_replay_trace.get_f64(&addr!("x")));
+    assert_eq!(baseline_trace.get_bool(&addr!("y")), safe_replay_trace.get_bool(&addr!("y")));
+    
+    // 4. Test ScoreGivenTrace (deterministic scoring)
+    let score_handler = runtime::interpreters::ScoreGivenTrace {
+        base: baseline_trace.clone(),
+        trace: runtime::trace::Trace::default(),
+    };
+    
+    let (score_result, score_trace) = runtime::handler::run(score_handler, model());
+    
+    // ScoreGivenTrace should produce same results
+    assert_eq!(baseline_result, score_result);
+    assert_eq!(baseline_trace.get_f64(&addr!("x")), score_trace.get_f64(&addr!("x")));
+    assert_eq!(baseline_trace.get_bool(&addr!("y")), score_trace.get_bool(&addr!("y")));
+    
+    // 5. Test SafeScoreGivenTrace (safe scoring with fallbacks)
+    let safe_score_handler = runtime::interpreters::SafeScoreGivenTrace {
+        base: baseline_trace.clone(),
+        trace: runtime::trace::Trace::default(),
+        warn_on_error: false,
+    };
+    
+    let (safe_score_result, safe_score_trace) = runtime::handler::run(safe_score_handler, model());
+    
+    // SafeScoreGivenTrace should produce same results when all addresses exist
+    assert_eq!(baseline_result, safe_score_result);
+    assert_eq!(baseline_trace.get_f64(&addr!("x")), safe_score_trace.get_f64(&addr!("x")));
+    assert_eq!(baseline_trace.get_bool(&addr!("y")), safe_score_trace.get_bool(&addr!("y")));
+    
+    // All handlers should produce finite log weights
+    assert!(baseline_trace.total_log_weight().is_finite());
+    assert!(replay_trace.total_log_weight().is_finite());
+    assert!(safe_replay_trace.total_log_weight().is_finite());
+    assert!(score_trace.total_log_weight().is_finite());
+    assert!(safe_score_trace.total_log_weight().is_finite());
+}
+
+#[test]
+fn test_model_composition_complete() {
+    let mut rng = StdRng::seed_from_u64(42);
+    
+    // Test and_then operation (should be equivalent to bind)
+    let and_then_model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+        .and_then(|x| sample(addr!("y"), Normal::new(x, 0.5).unwrap()))
+        .map(|y| y * 2.0);
+    
+    let handler1 = runtime::interpreters::PriorHandler {
+        rng: &mut rng,
+        trace: runtime::trace::Trace::default(),
+    };
+    
+    let (and_then_result, trace1) = runtime::handler::run(handler1, and_then_model);
+    
+    // Check that and_then works like bind
+    let _x_val = trace1.get_f64(&addr!("x")).unwrap();
+    let y_val = trace1.get_f64(&addr!("y")).unwrap();
+    assert_eq!(and_then_result, y_val * 2.0);
+    
+    // Test traverse_vec operation
+    let data = vec![1.0, 2.0, 3.0];
+    let traverse_model = traverse_vec(data.clone(), |x| {
+        let idx = (x as usize).saturating_sub(1);  // Convert 1.0->0, 2.0->1, 3.0->2
+        sample(addr!("traverse", idx), Normal::new(x, 0.5).unwrap())
+    });
+    
+    let handler2 = runtime::interpreters::PriorHandler {
+        rng: &mut rng,
+        trace: runtime::trace::Trace::default(),
+    };
+    
+    let (traverse_results, trace2) = runtime::handler::run(handler2, traverse_model);
+    
+    // Check that traverse_vec processes all elements
+    assert_eq!(traverse_results.len(), 3);
+    for (i, _original_val) in data.iter().enumerate() {
+        let addr = addr!("traverse", i);
+        let sampled_val = trace2.get_f64(&addr).unwrap();
+        assert_eq!(traverse_results[i], sampled_val);
+        // The sampled value should be reasonably close to the mean (original_val)
+        // but we can't assert exact equality due to randomness
+        assert!(sampled_val.is_finite());
+    }
+    
+    // Test complex composition with multiple operations
+    let complex_composition = sample(addr!("a"), Normal::new(0.0, 1.0).unwrap())
+        .bind(|a| sample(addr!("b"), Normal::new(a, 0.5).unwrap())
+             .map(move |b| (a, b)))
+        .and_then(|(a, b)| zip(pure(a + b), pure(a - b)))
+        .bind(|(sum, diff)| sequence_vec(vec![pure(sum), pure(diff), pure(sum * diff)]))
+        .map(|results| results.iter().sum::<f64>());
+    
+    let handler3 = runtime::interpreters::PriorHandler {
+        rng: &mut rng,
+        trace: runtime::trace::Trace::default(),
+    };
+    
+    let (complex_result, trace3) = runtime::handler::run(handler3, complex_composition);
+    
+    // Verify the complex composition worked correctly
+    let a_val = trace3.get_f64(&addr!("a")).unwrap();
+    let b_val = trace3.get_f64(&addr!("b")).unwrap();
+    let sum = a_val + b_val;
+    let diff = a_val - b_val;
+    let expected_result = sum + diff + (sum * diff);
+    
+    assert!((complex_result - expected_result).abs() < 1e-12);
+    assert!(complex_result.is_finite());
 }
