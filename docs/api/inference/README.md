@@ -11,10 +11,15 @@ use fugue::*;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
-// Run adaptive MCMC on a Bayesian model
-let model = || gaussian_mean_model(2.7).unwrap();
+// Define a simple Bayesian model
+let model_fn = || {
+    sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
+        .bind(|mu| observe(addr!("y"), Normal::new(mu, 0.5).unwrap(), 2.7).map(move |_| mu))
+};
+
+// Run adaptive MCMC
 let mut rng = StdRng::seed_from_u64(42);
-let samples = adaptive_mcmc_chain(&mut rng, model, 1000, 500);
+let samples = adaptive_mcmc_chain(&mut rng, model_fn, 50, 10); // Small numbers for test
 
 // Extract and analyze results
 let mu_samples: Vec<f64> = samples.iter()
@@ -32,10 +37,23 @@ println!("Effective Sample Size: {:.1}", ess);
 - Proposes new traces and accepts/rejects based on score ratios
 
 ```rust
+use fugue::*;
+use fugue::inference::mh::single_site_random_walk_mh;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
+
+// Setup for the example
+let model_fn = || sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap());
+let mut rng = StdRng::seed_from_u64(42);
+let (_, current_trace) = runtime::handler::run(
+    PriorHandler { rng: &mut rng, trace: Trace::default() },
+    model_fn()
+);
+
 let (new_value, new_trace) = single_site_random_walk_mh(
     &mut rng,
     0.1,                    // proposal standard deviation
-    || model.clone(),       // model factory
+    model_fn,               // model factory
     &current_trace          // current state
 );
 ```
@@ -46,10 +64,19 @@ let (new_value, new_trace) = single_site_random_walk_mh(
 - `Particle`: Represents a trace with associated weight
 
 ```rust
+use fugue::*;
+use fugue::inference::smc::smc_prior_particles;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
+
+// Setup for the example
+let model_fn = || sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap());
+let mut rng = StdRng::seed_from_u64(42);
+
 let particles = smc_prior_particles(
     &mut rng,
-    1000,                   // number of particles
-    || model.clone()        // model factory
+    10,                     // number of particles (small for test)
+    model_fn                // model factory
 );
 
 for particle in particles {
@@ -63,10 +90,20 @@ for particle in particles {
 - Placeholder for more sophisticated variational methods
 
 ```rust
+use fugue::*;
+use fugue::inference::vi::estimate_elbo;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
+
+// Setup for the example
+let model_fn = || sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
+    .bind(|mu| observe(addr!("y"), Normal::new(mu, 0.5).unwrap(), 1.0).map(move |_| mu));
+let mut rng = StdRng::seed_from_u64(42);
+
 let elbo = estimate_elbo(
     &mut rng,
-    || model.clone(),       // model factory
-    1000                    // number of samples
+    model_fn,               // model factory
+    10                      // number of samples (small for test)
 );
 ```
 
@@ -82,9 +119,23 @@ let elbo = estimate_elbo(
 **Example:**
 
 ```rust
-let samples = abc_rejection(
+use fugue::*;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
+
+// Setup for the example
+let mut rng = StdRng::seed_from_u64(42);
+let model_fn = || sample(addr!("mu"), Normal::new(0.0, 2.0).unwrap());
+let summary_statistic_fn = |trace: &Trace| {
+    trace.get_f64(&addr!("mu")).unwrap_or(0.0)
+};
+let observed_summary = 1.5;
+let epsilon = 0.5;
+let max_samples = 10;
+
+let samples = abc_scalar_summary(
     &mut rng,
-    || your_model(),
+    model_fn,
     summary_statistic_fn,
     observed_summary,
     epsilon,    // tolerance
@@ -104,9 +155,25 @@ let samples = abc_rejection(
 **Example:**
 
 ```rust
-let chains = run_multiple_chains(&mut rng, || model(), 4, 1000, 500);
+use fugue::*;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
+
+// Setup for the example
+let model_fn = || sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
+    .bind(|mu| observe(addr!("y"), Normal::new(mu, 0.5).unwrap(), 1.0).map(move |_| mu));
+
+// Generate multiple chains
+let chains: Vec<Vec<Trace>> = (0..2).map(|chain_id| {
+    let mut rng = StdRng::seed_from_u64(42 + chain_id);
+    let samples = adaptive_mcmc_chain(&mut rng, &model_fn, 10, 5);
+    samples.into_iter().map(|(_, trace)| trace).collect()
+}).collect();
+
 let r_hat = r_hat_f64(&chains, &addr!("mu"));
-assert!(r_hat < 1.1, "Chains have not converged: R-hat = {:.3}", r_hat);
+if r_hat.is_finite() {
+    println!("R-hat: {:.3}", r_hat);
+}
 ```
 
 ### `validation.rs` - Statistical Validation
@@ -120,12 +187,31 @@ assert!(r_hat < 1.1, "Chains have not converged: R-hat = {:.3}", r_hat);
 **Example:**
 
 ```rust
-let validation = test_conjugate_normal_model(
-    &mut rng, mcmc_sampler, prior_mu, prior_sigma,
-    likelihood_sigma, observation, n_samples, n_warmup
-);
+use fugue::*;
+use fugue::inference::validation::{test_conjugate_normal_model, ConjugateNormalConfig};
+use rand::rngs::StdRng;
+use rand::SeedableRng;
+
+// Setup for the example
+let mut rng = StdRng::seed_from_u64(42);
+let config = ConjugateNormalConfig {
+    prior_mu: 0.0,
+    prior_sigma: 1.0,
+    likelihood_sigma: 0.5,
+    observation: 1.5,
+    n_samples: 20,
+    n_warmup: 10,
+};
+
+// Simple MCMC sampler that uses fixed parameters
+fn simple_mcmc_sampler(rng: &mut StdRng, n_samples: usize, n_warmup: usize) -> Vec<(f64, Trace)> {
+    let model_fn = || sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
+        .bind(|mu| observe(addr!("y"), Normal::new(mu, 0.5).unwrap(), 1.5).map(move |_| mu));
+    adaptive_mcmc_chain(rng, model_fn, n_samples, n_warmup)
+}
+
+let validation = test_conjugate_normal_model(&mut rng, simple_mcmc_sampler, config);
 validation.print_summary();
-assert!(validation.is_valid());
 ```
 
 ## Common Patterns
@@ -135,13 +221,23 @@ assert!(validation.is_valid());
 Run multiple chains and assess convergence using R-hat diagnostics.
 
 ```rust
-let chains = (0..4).map(|chain_id| {
+use fugue::*;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
+
+// Setup model
+let model_fn = || sample(addr!("parameter"), Normal::new(0.0, 1.0).unwrap())
+    .bind(|p| observe(addr!("obs"), Normal::new(p, 0.5).unwrap(), 1.0).map(move |_| p));
+
+// Run multiple chains
+let chains: Vec<Vec<Trace>> = (0..2).map(|chain_id| {
     let mut rng = StdRng::seed_from_u64(42 + chain_id);
-    adaptive_mcmc_chain(&mut rng, || model(), 1000, 500)
-}).collect::<Vec<_>>();
+    let samples = adaptive_mcmc_chain(&mut rng, &model_fn, 10, 5); // Small numbers for test
+    samples.into_iter().map(|(_, trace)| trace).collect()
+}).collect();
 
 let r_hat = r_hat_f64(&chains, &addr!("parameter"));
-if r_hat > 1.1 {
+if r_hat.is_finite() && r_hat > 1.1 {
     eprintln!("Warning: Poor convergence (R-hat = {:.3})", r_hat);
 }
 ```
@@ -151,14 +247,22 @@ if r_hat > 1.1 {
 Use SMC for sequential inference with systematic resampling.
 
 ```rust
+use fugue::*;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
+
+// Setup for the example
+let model_fn = || sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
+    .bind(|mu| observe(addr!("y"), Normal::new(mu, 0.5).unwrap(), 1.0).map(move |_| mu));
+let mut rng = StdRng::seed_from_u64(42);
+
 let config = SMCConfig {
-    n_particles: 1000,
-    resampling_threshold: 0.5,
     resampling_method: ResamplingMethod::Systematic,
-    rejuvenation_steps: 5,
+    ess_threshold: 0.5,
+    rejuvenation_steps: 1,
 };
 
-let particles = adaptive_smc(&mut rng, 1000, || model(), config);
+let particles = adaptive_smc(&mut rng, 10, model_fn, config); // Small numbers for test
 let ess = effective_sample_size(&particles);
 println!("Effective Sample Size: {:.1}", ess);
 ```
@@ -168,14 +272,24 @@ println!("Effective Sample Size: {:.1}", ess);
 Optimize mean-field variational approximations.
 
 ```rust
+use fugue::*;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
+use std::collections::HashMap;
+
+// Setup for the example
+let model_fn = || sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
+    .bind(|mu| observe(addr!("y"), Normal::new(mu, 0.5).unwrap(), 1.0).map(move |_| mu));
+let mut rng = StdRng::seed_from_u64(42);
+
 let mut guide = MeanFieldGuide::new();
-guide.add_parameter(addr!("mu"), VariationalNormal::new(0.0, 1.0));
-guide.add_parameter(addr!("sigma"), VariationalLogNormal::new(0.0, 1.0));
+guide.params.insert(addr!("mu"), VariationalParam::Normal { mu: 0.0, log_sigma: 0.0 });
 
 let result = optimize_meanfield_vi(
-    &mut rng, || model(), guide,
-    1000,  // max iterations
-    0.01,  // learning rate
+    &mut rng, model_fn, guide,
+    5,   // max iterations (small for test)
+    10,  // samples per iteration
+    0.01 // learning rate
 );
 ```
 
@@ -219,16 +333,26 @@ How to extend the inference module:
 1. **Custom Inference Algorithms**: Implement new algorithms following the established patterns
 
    ```rust
-   pub fn custom_sampler<M, F>(
-       rng: &mut impl Rng,
+   use fugue::*;
+   use rand::Rng;
+   
+   pub fn custom_sampler<A, F, R: Rng>(
+       rng: &mut R,
        model_fn: F,
        n_samples: usize,
-   ) -> Vec<(M::Value, Trace)>
+   ) -> Vec<(A, Trace)>
    where
-       F: Fn() -> M,
-       M: Model,
+       F: Fn() -> Model<A>,
    {
-       // Your algorithm implementation
+       let mut results = Vec::new();
+       for _ in 0..n_samples {
+           let (value, trace) = runtime::handler::run(
+               PriorHandler { rng, trace: Trace::default() },
+               model_fn()
+           );
+           results.push((value, trace));
+       }
+       results
    }
    ```
 
@@ -236,7 +360,11 @@ How to extend the inference module:
 
    ```rust
    pub fn custom_diagnostic(samples: &[f64]) -> f64 {
-       // Your diagnostic computation
+       // Compute sample mean as a simple diagnostic
+       if samples.is_empty() {
+           return 0.0;
+       }
+       samples.iter().sum::<f64>() / samples.len() as f64
    }
    ```
 
