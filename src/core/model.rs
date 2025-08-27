@@ -1,8 +1,22 @@
-#![doc = include_str!("../../docs/api/core/model/README.md")]
+#![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/api/core/model.md"))]
 use crate::core::address::Address;
 use crate::core::distribution::{Distribution, LogF64};
 
-#[doc = include_str!("../../docs/api/core/model/model.md")]
+/// `Model<A>` represents a probabilistic program that yields a value of type `A` when executed by a handler.
+/// Models are built from four variants: `Pure`, `Sample*`, `Observe*`, and `Factor`.
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// // Deterministic value
+/// let m = pure(42.0);
+/// 
+/// // Sample from distribution
+/// let s = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
+/// 
+/// // Dependent sampling
+/// let chain = s.bind(|x| sample(addr!("y"), Normal::new(x, 0.5).unwrap()));
+/// ```
 pub enum Model<A> {
     /// A deterministic computation yielding a pure value.
     Pure(A),
@@ -95,11 +109,28 @@ pub enum Model<A> {
     },
 }
 
-#[doc = include_str!("../../docs/api/core/model/pure.md")]
+/// Lift a deterministic value, `a`, into the model monad.
+/// Creates a `Model` that always returns the given value, `a`, without any probabilistic behavior.
+/// This is the unit operation for the model monad.
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+///
+/// let model = pure(42.0);
+/// // When executed, this model will always return 42.0
+/// ```
 pub fn pure<A>(a: A) -> Model<A> {
     Model::Pure(a)
 }
 /// Sample from an f64 distribution (continuous distributions).
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+///
+/// let model = sample_f64(addr!("x"), Normal::new(0.0, 1.0).unwrap());
+/// ```
 pub fn sample_f64(addr: Address, dist: impl Distribution<f64> + 'static) -> Model<f64> {
     Model::SampleF64 {
         addr,
@@ -108,6 +139,13 @@ pub fn sample_f64(addr: Address, dist: impl Distribution<f64> + 'static) -> Mode
     }
 }
 /// Sample from a bool distribution (Bernoulli).
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+///
+/// let model = sample_bool(addr!("coin"), Bernoulli::new(0.5).unwrap());
+/// ```
 pub fn sample_bool(addr: Address, dist: impl Distribution<bool> + 'static) -> Model<bool> {
     Model::SampleBool {
         addr,
@@ -116,6 +154,13 @@ pub fn sample_bool(addr: Address, dist: impl Distribution<bool> + 'static) -> Mo
     }
 }
 /// Sample from a u64 distribution (Poisson, Binomial).
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+///
+/// let model = sample_u64(addr!("count"), Poisson::new(3.0).unwrap());
+/// ```
 pub fn sample_u64(addr: Address, dist: impl Distribution<u64> + 'static) -> Model<u64> {
     Model::SampleU64 {
         addr,
@@ -124,6 +169,13 @@ pub fn sample_u64(addr: Address, dist: impl Distribution<u64> + 'static) -> Mode
     }
 }
 /// Sample from a usize distribution (Categorical).
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+///
+/// let model = sample_usize(addr!("choice"), Categorical::new(vec![0.3, 0.5, 0.2]).unwrap());
+/// ```
 pub fn sample_usize(addr: Address, dist: impl Distribution<usize> + 'static) -> Model<usize> {
     Model::SampleUsize {
         addr,
@@ -132,7 +184,29 @@ pub fn sample_usize(addr: Address, dist: impl Distribution<usize> + 'static) -> 
     }
 }
 
-#[doc = include_str!("../../docs/api/core/model/sample.md")]
+/// Sample from a distribution (generic version - chooses the right variant automatically).
+// This is the main sampling function that works with any distribution type.
+// The return type is inferred from the distribution type.
+///
+/// Type-specific variants:
+/// - `sample_f64` - Sample from f64 distributions (continuous distributions)
+/// - `sample_bool` - Sample from bool distributions (Bernoulli)
+/// - `sample_u64` - Sample from u64 distributions (Poisson, Binomial)
+/// - `sample_usize` - Sample from usize distributions (Categorical)
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// // Automatically returns f64 for continuous distributions
+/// let normal_sample: Model<f64> = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
+/// // Automatically returns bool for Bernoulli
+/// let coin_flip: Model<bool> = sample(addr!("coin"), Bernoulli::new(0.5).unwrap());
+/// // Automatically returns u64 for Poisson
+/// let count: Model<u64> = sample(addr!("count"), Poisson::new(3.0).unwrap());
+/// // Automatically returns usize for Categorical
+/// let choice: Model<usize> = sample(addr!("choice"),
+///     Categorical::new(vec![0.3, 0.5, 0.2]).unwrap());
+/// ```
 pub fn sample<T>(addr: Address, dist: impl Distribution<T> + 'static) -> Model<T>
 where
     T: SampleType,
@@ -235,7 +309,22 @@ impl SampleType for usize {
     }
 }
 
-#[doc = include_str!("../../docs/api/core/model/observe.md")]
+/// Observe a value from a distribution (generic version).
+/// This function automatically chooses the right observation variant based on the distribution type and observed value type.
+///
+/// Example:
+/// ```rust
+/// use fugue::*;
+/// // Observe f64 value from continuous distribution
+/// let model = observe(addr!("y"), Normal::new(1.0, 0.5).unwrap(), 2.5);
+/// // Observe bool value from Bernoulli
+/// let model = observe(addr!("coin"), Bernoulli::new(0.6).unwrap(), true);
+/// // Observe u64 count from Poisson
+/// let model = observe(addr!("count"), Poisson::new(3.0).unwrap(), 5u64);
+/// // Observe usize choice from Categorical
+/// let model = observe(addr!("choice"),
+///     Categorical::new(vec![0.3, 0.5, 0.2]).unwrap(), 1usize);
+/// ```
 pub fn observe<T>(addr: Address, dist: impl Distribution<T> + 'static, value: T) -> Model<()>
 where
     T: SampleType,
@@ -243,7 +332,28 @@ where
     T::make_observe_model(addr, Box::new(dist), value)
 }
 
-#[doc = include_str!("../../docs/api/core/model/factor.md")]
+/// Add an unnormalized log-weight `logw` to the model, returning a `Model<()>`.
+///
+/// Factors allow encoding soft constraints or arbitrary log-probability contributions to the model. 
+/// They are particularly useful for:
+///
+/// - Encoding constraints that should be "mostly satisfied"
+/// - Adding custom log-likelihood terms
+/// - Implementing rejection sampling (using negative infinity)
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// // Add positive log-weight (increases probability)
+/// let model = factor(1.0); // Adds log(e) = 1.0 to weight
+/// // Add negative log-weight (decreases probability)
+/// let model = factor(-2.0); // Subtracts 2.0 from log-weight
+/// // Reject/fail (zero probability)
+/// let model = factor(f64::NEG_INFINITY);
+/// // Soft constraint: prefer values near zero
+/// let x = 5.0;
+/// let soft_constraint = factor(-0.5 * x * x); // Gaussian-like penalty
+/// ```
 pub fn factor(logw: LogF64) -> Model<()> {
     Model::Factor {
         logw,
@@ -251,17 +361,60 @@ pub fn factor(logw: LogF64) -> Model<()> {
     }
 }
 
-#[doc = include_str!("../../docs/api/core/model/model_ext.md")]
+/// `ModelExt<A>` provides monadic operations for composing `Model<A>` values.
+/// Provides `bind`, `map`, and `and_then` for chaining and transforming probabilistic computations.
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// // Transform result with map
+/// let transformed = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+/// .map(|x| x * 2.0);
+///
+/// // Chain dependent computations with bind
+/// let dependent = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+/// .bind(|x| sample(addr!("y"), Normal::new(x, 0.5).unwrap()));
+/// ```
 pub trait ModelExt<A>: Sized {
-    #[doc = include_str!("../../docs/api/core/model/bind.md")]
+    /// Monadic bind operation (>>=).
+    ///
+    /// Chains two probabilistic computations where the second depends on the result of the first. 
+    /// This is the fundamental operation for building complex probabilistic models from simpler parts.
+    /// The function `k` takes the result of this model and returns a new model.
+    ///
+    /// Example:
+    /// ```rust
+    /// # use fugue::*;
+    /// // Dependent sampling: y depends on x
+    /// let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+    ///     .bind(|x| sample(addr!("y"), Normal::new(x, 0.1).unwrap()));
+    /// ```
     fn bind<B>(self, k: impl FnOnce(A) -> Model<B> + Send + 'static) -> Model<B>;
 
-    #[doc = include_str!("../../docs/api/core/model/map.md")]
+    /// Apply a function, `f`, to transform the result of this model.
+    /// This is the functor map operation - it transforms the output of a model without adding any additional probabilistic behavior.
+    ///
+    /// Example:
+    /// ```rust
+    /// # use fugue::*;
+    /// // Transform the sampled value
+    /// let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+    ///     .map(|x| x.exp()); // Apply exponential function
+    /// ```
     fn map<B>(self, f: impl FnOnce(A) -> B + Send + 'static) -> Model<B> {
         self.bind(|a| pure(f(a)))
     }
 
-    #[doc = include_str!("../../docs/api/core/model/and_then.md")]
+    /// Alias for `bind` - chains dependent probabilistic computations.
+    /// This method provides a more familiar interface for Rust developers used to `Option::and_then` and `Result::and_then`.
+    ///
+    /// Example:
+    /// ```rust
+    /// # use fugue::*;
+    /// // Dependent sampling: y depends on x
+    /// let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+    ///     .and_then(|x| sample(addr!("y"), Normal::new(x, 0.1).unwrap()));
+    /// ```
     fn and_then<B>(self, k: impl FnOnce(A) -> Model<B> + Send + 'static) -> Model<B> {
         self.bind(k)
     }
@@ -342,12 +495,46 @@ impl<A: 'static> ModelExt<A> for Model<A> {
     }
 }
 
-#[doc = include_str!("../../docs/api/core/model/zip.md")]
+/// Combine two independent models, `ma` and `mb`, into a model of their paired results.
+/// This operation runs both models and combines their results into a tuple.
+/// The models are executed independently (neither depends on the other's result).
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// // Sample two independent random variables
+/// let x_model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
+/// let y_model = sample(addr!("y"), Uniform::new(0.0, 1.0).unwrap());
+/// let paired = zip(x_model, y_model); // Model<(f64, f64)>
+/// // Can be used with any model types
+/// let mixed = zip(pure(42.0), sample(addr!("z"), Exponential::new(1.0).unwrap()));
+/// ```
 pub fn zip<A: Send + 'static, B: Send + 'static>(ma: Model<A>, mb: Model<B>) -> Model<(A, B)> {
     ma.bind(|a| mb.map(move |b| (a, b)))
 }
 
-#[doc = include_str!("../../docs/api/core/model/sequence_vec.md")]
+/// Execute a vector of models, `models`, and collect their results into a single model of a vector. 
+/// This function takes a collection of independent models and runs them all, collecting their results into a vector. 
+/// This is useful for running multiple similar probabilistic computations.
+/// 
+/// Example:
+/// ```rust
+/// use fugue::*;
+/// // Create multiple independent samples
+/// let models = vec![
+///     sample(addr!("x", 0), Normal::new(0.0, 1.0).unwrap()),
+///     sample(addr!("x", 1), Normal::new(1.0, 1.0).unwrap()),
+///     sample(addr!("x", 2), Normal::new(2.0, 1.0).unwrap()),
+/// ];
+/// let all_samples = sequence_vec(models); // Model<Vec<f64>>
+/// // Mix deterministic and probabilistic models
+/// let mixed_models = vec![
+///     pure(1.0),
+///     sample(addr!("random"), Uniform::new(0.0, 1.0).unwrap()),
+///     pure(3.0),
+/// ];
+/// let results = sequence_vec(mixed_models);
+/// ```
 pub fn sequence_vec<A: Send + 'static>(models: Vec<Model<A>>) -> Model<Vec<A>> {
     models.into_iter().fold(pure(Vec::new()), |acc, m| {
         zip(acc, m).map(|(mut v, a)| {
@@ -357,7 +544,26 @@ pub fn sequence_vec<A: Send + 'static>(models: Vec<Model<A>>) -> Model<Vec<A>> {
     })
 }
 
-#[doc = include_str!("../../docs/api/core/model/traverse_vec.md")]
+/// Apply a function, `f`, that produces models to each item in a vector, `items`, collecting the results. 
+/// This is a higher-order function that maps each item in the input vector through a function that produces a model, 
+/// then sequences all the resulting models into a single model of a vector. 
+/// This is equivalent to `sequence_vec(items.map(f))` but more convenient.
+///
+/// Example:
+/// ```rust
+/// use fugue::*;
+/// // Add noise to each data point
+/// let data = vec![1.0, 2.0, 3.0];
+/// let noisy_data = traverse_vec(data, |x| {
+///     sample(addr!("noise", x as usize), Normal::new(0.0, 0.1).unwrap())
+///         .map(move |noise| x + noise)
+/// });
+/// // Create observations for each data point
+/// let observations = vec![1.2, 2.1, 2.9];
+/// let model = traverse_vec(observations, |obs| {
+///     observe(addr!("y", obs as usize), Normal::new(2.0, 0.5).unwrap(), obs)
+/// });
+/// ```
 pub fn traverse_vec<T, A: Send + 'static>(
     items: Vec<T>,
     f: impl Fn(T) -> Model<A> + Send + Sync + 'static,
@@ -365,7 +571,29 @@ pub fn traverse_vec<T, A: Send + 'static>(
     sequence_vec(items.into_iter().map(f).collect())
 }
 
-#[doc = include_str!("../../docs/api/core/model/guard.md")]
+/// Conditional execution: fail with zero probability when predicate is false. 
+///
+/// Guards provide a way to enforce hard constraints in probabilistic models.
+/// When the predicate `pred` is true, the model continues normally. 
+/// When false, the model receives negative infinite log-weight, effectively ruling out that execution path, 
+/// returning a `Model<()>` that fails with zero probability.
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// // Ensure a sampled value is positive
+/// let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+///     .bind(|x| {
+///         guard(x > 0.0).bind(move |_| pure(x))
+///     });
+/// // Multiple constraints
+/// let model = sample(addr!("x"), Uniform::new(-2.0, 2.0).unwrap())
+///     .bind(|x| {
+///         guard(x > -1.0).bind(move |_|
+///             guard(x < 1.0).bind(move |_| pure(x * x))
+///         )
+///     });
+/// ```
 pub fn guard(pred: bool) -> Model<()> {
     if pred {
         pure(())
