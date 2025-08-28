@@ -244,8 +244,7 @@ fn propose_using_strategies<R: RngCore>(rng: &mut R, choice: &Choice, scale: f64
                                        addr_str.contains("lambda") ||
                                        addr_str.contains("tau") ||
                                        addr_str.contains("precision") ||
-                                       addr_str.contains("nu") ||
-                                       (current_val > 0.0 && current_val < 100.0); // Additional heuristic
+                                       addr_str.contains("nu");
             
             let strategy: Box<dyn ProposalStrategy<f64>> = if current_val > 0.0 && looks_like_scale_param {
                 Box::new(LogSpaceWalkProposal)
