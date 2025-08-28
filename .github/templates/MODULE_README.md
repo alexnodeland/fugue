@@ -96,7 +96,6 @@ let result = sample(addr!("x"), some_dist);
 
 - **Internal modules**: `[core](../core/README.md)`
 - **API docs**: `[API docs](https://docs.rs/fugue)`
-- **Examples**: `[examples/gaussian_mean.rs](../../examples/gaussian_mean.rs)`
 - **Source files**: `[error.rs](../error.rs)`
 
 ### Reference Consistency

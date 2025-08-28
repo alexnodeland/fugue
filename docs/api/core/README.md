@@ -185,7 +185,6 @@ let model = plate!(i in 0..10 => {
 **See Also:**
 
 - Main documentation: [API docs](https://docs.rs/fugue)
-- Examples: [`examples/gaussian_mean.rs`](../../examples/gaussian_mean.rs), [`examples/fully_type_safe.rs`](../../examples/fully_type_safe.rs)
 
 ## Extension Points
 
