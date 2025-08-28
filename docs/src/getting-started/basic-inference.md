@@ -1,447 +1,362 @@
-# Basic Inference
+# Running Inference
 
-So far you've learned to build probabilistic models, but models alone don't solve problems - you need **inference** to extract insights from them. This guide introduces Fugue's inference algorithms and shows you how to use them effectively.
+You now know how to build probabilistic models. But models alone don't give you answers - you need **inference** to extract insights from them. Let's explore Fugue's inference algorithms!
+
+```admonish note
+Learning Goals
+
+In 5 minutes, you'll understand:
+- What inference is and why you need it
+- Fugue's main inference algorithms (MCMC, SMC, VI, ABC)  
+- When to use each algorithm
+- How to run inference and interpret results
+
+**Time**: ~5 minutes
+```
 
 ## What is Inference?
 
-Inference is the process of computing the **posterior distribution** - what we believe about our model's parameters after seeing data. In Bayesian terms:
+**Inference** is the process of learning about model parameters after seeing data. In Bayesian terms:
 
+$$\text{Posterior} = \frac{\text{Prior} \times \text{Likelihood}}{\text{Evidence}}$$
+
+```mermaid
+graph LR
+    subgraph "Before Data"
+        P[Prior Beliefs<br/>p⟨θ⟩]
+    end
+    
+    subgraph "Observing Data"  
+        L[Likelihood<br/>p⟨y|θ⟩]
+        D[Data<br/>y₁, y₂, ...]
+    end
+    
+    subgraph "After Data"
+        Post[Posterior Beliefs<br/>p⟨θ|y⟩]
+    end
+    
+    P --> Post
+    L --> Post  
+    D --> Post
+    
+    style P fill:#e8f5e8
+    style L fill:#fff3e0
+    style D fill:#fff3e0  
+    style Post fill:#f3e5f5
 ```
-Posterior ∝ Prior × Likelihood
-```
 
-Fugue provides several inference algorithms, each with different trade-offs:
+## The Challenge
 
-- **Prior Sampling** - Generate samples from the prior (no inference)
-- **MCMC** - Markov Chain Monte Carlo for exact posterior sampling
-- **SMC** - Sequential Monte Carlo for approximate inference  
-- **VI** - Variational Inference for fast approximate inference
-- **ABC** - Approximate Bayesian Computation for likelihood-free inference
+Most real models don't have analytical solutions. We need **algorithms** to approximate the posterior distribution.
 
-## Prior Sampling (The Starting Point)
+## Fugue's Inference Arsenal
 
-Before doing real inference, let's understand prior sampling - running your model without considering observations:
+### 1. MCMC (Markov Chain Monte Carlo) 🥇
 
-```rust
+**Best for**: Most general-purpose Bayesian inference
+
+**How it works**: Generates samples that approximate the posterior distribution
+
+```rust,ignore
 use fugue::*;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
-fn simple_model(observation: f64) -> Model<f64> {
-    prob! {
-        let mu <- sample(addr!("mu"), Normal::new(0.0, 2.0).unwrap());
-        observe(addr!("y"), Normal::new(mu, 1.0).unwrap(), observation);
-        pure(mu)
-    }
+fn coin_bias_model(heads: u64, total: u64) -> Model<f64> {
+    sample(addr!("bias"), Beta::new(1.0, 1.0).unwrap())  // Prior
+        .bind(move |bias| {
+            observe(addr!("heads"), Binomial::new(total, bias).unwrap(), heads)  // Likelihood
+                .map(move |_| bias)
+        })
 }
 
-fn prior_sampling_example() {
-    let model = simple_model(3.0);  // We observed 3.0
-    
-    println!("Prior samples (ignoring observation):");
-    for i in 0..5 {
-        let mut rng = StdRng::seed_from_u64(i);
-        let (mu, trace) = runtime::handler::run(
-            runtime::interpreters::PriorHandler {
-                rng: &mut rng,
-                trace: Trace::default(),
-            },
-            model.clone(),
-        );
-        
-        println!("  Sample {}: mu = {:.3}, log weight = {:.3}", 
-                 i + 1, mu, trace.total_log_weight());
-    }
-}
-```
-
-**Key insight**: Prior sampling ignores observations - it's useful for debugging models and understanding priors, but not for real inference.
-
-## MCMC: The Gold Standard
-
-Markov Chain Monte Carlo (MCMC) is the most commonly used inference method. It generates samples from the exact posterior distribution.
-
-### Basic MCMC with Metropolis-Hastings
-
-```rust
-use fugue::*;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
-
-fn mcmc_example() {
-    let observation = 2.5;
-    let model = || simple_model(observation);
-    
+fn main() {
     let mut rng = StdRng::seed_from_u64(42);
     
-    // Run MCMC chain
-    let n_samples = 1000;
-    let mut samples = Vec::new();
-    
-    // Start with a sample from the prior
-    let (mut current_value, mut current_trace) = runtime::handler::run(
-        runtime::interpreters::PriorHandler {
-            rng: &mut rng,
-            trace: Trace::default(),
-        },
-        model(),
-    );
-    
-    for i in 0..n_samples {
-        // Propose new state using single-site MH
-        let (new_value, new_trace) = inference::mh::single_site_random_walk_mh(
-            &mut rng,
-            0.5,  // proposal standard deviation
-            model,
-            &current_trace,
-        );
-        
-        // Accept or reject (handled automatically by the algorithm)
-        current_value = new_value;
-        current_trace = new_trace;
-        
-        samples.push(current_value);
-        
-        if i % 200 == 0 {
-            println!("Iteration {}: mu = {:.3}, log weight = {:.3}", 
-                     i, current_value, current_trace.total_log_weight());
-        }
-    }
-    
-    // Analyze results
-    let mean = samples.iter().sum::<f64>() / samples.len() as f64;
-    println!("\nPosterior mean estimate: {:.3}", mean);
-    println!("(True posterior mean ≈ 1.67 for this model)");
-}
-```
-
-### Adaptive MCMC (Recommended)
-
-For production use, Fugue provides adaptive MCMC that automatically tunes the proposal distribution:
-
-```rust
-fn adaptive_mcmc_example() {
-    let observation = 2.5;
-    let model = || simple_model(observation);
-    
-    let mut rng = StdRng::seed_from_u64(42);
-    
-    // Use adaptive MCMC with automatic tuning
-    let samples = inference::mcmc::adaptive_mcmc_chain(
+    // Run adaptive MCMC
+    let samples = inference::mh::adaptive_mcmc_chain(
         &mut rng,
-        model,
-        1000,  // n_samples
-        500,   // n_warmup (tuning phase)
+        || coin_bias_model(7, 10),  // 7 heads out of 10 flips
+        1000,  // number of samples
+        500,   // warmup samples
     );
     
-    // Extract parameter values
-    let mu_samples: Vec<f64> = samples
-        .iter()
-        .filter_map(|(_, trace)| trace.get_f64(&addr!("mu")))
+    // Extract bias estimates
+    let bias_samples: Vec<f64> = samples.iter()
+        .filter_map(|(_, trace)| trace.get_f64(&addr!("bias")))
         .collect();
     
-    // Basic statistics
-    let mean = mu_samples.iter().sum::<f64>() / mu_samples.len() as f64;
-    let variance = mu_samples.iter()
-        .map(|x| (x - mean).powi(2))
-        .sum::<f64>() / (mu_samples.len() - 1) as f64;
+    let mean_bias = bias_samples.iter().sum::<f64>() / bias_samples.len() as f64;
+    println!("Estimated bias: {:.3}", mean_bias);
     
-    println!("Adaptive MCMC Results:");
-    println!("  Posterior mean: {:.3}", mean);
-    println!("  Posterior std:  {:.3}", variance.sqrt());
-    println!("  Effective samples: {}", mu_samples.len());
-    
-    // Convergence diagnostics
-    let ess = inference::diagnostics::effective_sample_size_mcmc(&mu_samples);
-    println!("  Effective sample size: {:.1}", ess);
+    // Compute 90% credible interval
+    let mut sorted = bias_samples.clone();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let lower = sorted[(0.05 * sorted.len() as f64) as usize];
+    let upper = sorted[(0.95 * sorted.len() as f64) as usize];
+    println!("90% credible interval: [{:.3}, {:.3}]", lower, upper);
 }
 ```
 
-## Sequential Monte Carlo (SMC)
+**When to use MCMC:**
 
-SMC uses a population of particles to approximate the posterior. It's especially useful for sequential data and online inference:
+- ✅ Want exact posterior samples  
+- ✅ Moderate number of parameters (< 100)
+- ✅ Can afford computation time
+- ✅ Model evaluation is reasonably fast
 
-```rust
-fn smc_example() {
-    let observation = 2.5;
-    let model = || simple_model(observation);
-    
+### 2. SMC (Sequential Monte Carlo) 🎯
+
+**Best for**: Sequential data and online learning
+
+**How it works**: Uses particles to approximate the posterior, good for streaming data
+
+```rust,ignore
+use fugue::*;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
+
+fn main() {
     let mut rng = StdRng::seed_from_u64(42);
     
-    // Generate particles from the prior
+    // Generate particles from prior
     let particles = inference::smc::smc_prior_particles(
         &mut rng,
         1000,  // number of particles
-        model,
+        || coin_bias_model(7, 10),
     );
     
-    println!("SMC Results:");
-    println!("  Number of particles: {}", particles.len());
+    println!("Generated {} particles", particles.len());
     
-    // Compute weighted statistics
+    // Compute weighted posterior mean
     let total_weight: f64 = particles.iter().map(|p| p.weight).sum();
-    let weighted_mean: f64 = particles
-        .iter()
+    let weighted_mean: f64 = particles.iter()
         .filter_map(|p| {
-            p.trace.get_f64(&addr!("mu")).map(|mu| mu * p.weight)
+            p.trace.get_f64(&addr!("bias"))
+                .map(|bias| bias * p.weight)
         })
         .sum::<f64>() / total_weight;
     
-    println!("  Weighted posterior mean: {:.3}", weighted_mean);
+    println!("Weighted posterior mean: {:.3}", weighted_mean);
     
-    // Effective sample size
+    // Check effective sample size
     let weights: Vec<f64> = particles.iter().map(|p| p.weight).collect();
     let ess = 1.0 / weights.iter().map(|w| w * w).sum::<f64>();
-    println!("  Effective sample size: {:.1}", ess);
+    println!("Effective sample size: {:.1}", ess);
 }
 ```
 
-## Choosing the Right Inference Method
+**When to use SMC:**
 
-Here's a practical guide for choosing inference methods:
+- ✅ Sequential/streaming data
+- ✅ Online inference needed  
+- ✅ Many discrete latent variables
+- ✅ Want to visualize inference process
 
-### Use MCMC when:
-- ✅ You want exact posterior samples
-- ✅ You have a moderate number of parameters (< 100)
-- ✅ You can afford longer computation time
-- ✅ Model evaluation is fast
+### 3. Variational Inference (VI) ⚡
 
-```rust
-// Best for: Standard Bayesian models
-let mcmc_samples = inference::mcmc::adaptive_mcmc_chain(
-    &mut rng,
-    || your_model(),
-    2000,  // samples
-    1000,  // warmup
-);
-```
+**Best for**: Fast approximate inference with many parameters
 
-### Use SMC when:
-- ✅ You have sequential/streaming data
-- ✅ You need online inference
-- ✅ Model has many discrete latent variables
-- ✅ You want to visualize the inference process
+**How it works**: Finds the best approximation within a family of simple distributions
 
-```rust
-// Best for: Time series, online learning
-let particles = inference::smc::adaptive_smc(
-    &mut rng,
-    1000,  // particles
-    || your_model(),
-    smc_config,
-);
-```
-
-### Use VI when:
-- ✅ You need fast approximate inference
-- ✅ You have many parameters (> 100)
-- ✅ You can accept approximate results
-- ✅ You want predictable runtime
-
-```rust
-// Best for: Large models, production systems
-let vi_result = inference::vi::mean_field_vi(
-    &mut rng,
-    || your_model(),
-    guide,
-    1000,  // iterations
-    0.01,  // learning rate
-);
-```
-
-## Real-World Example: Bayesian Linear Regression
-
-Here's a complete example showing inference on a realistic model:
-
-```rust
+```rust,ignore
 use fugue::*;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
-fn bayesian_regression(x_data: &[f64], y_data: &[f64]) -> Model<(f64, f64, f64)> {
-    prob! {
-        // Priors
-        let slope <- sample(addr!("slope"), Normal::new(0.0, 1.0).unwrap());
-        let intercept <- sample(addr!("intercept"), Normal::new(0.0, 1.0).unwrap());
-        let noise <- sample(addr!("noise"), LogNormal::new(0.0, 0.5).unwrap());
-        
-        // Likelihood
-        for (i, (&x, &y)) in x_data.iter().zip(y_data.iter()).enumerate() {
-            let y_pred = slope * x + intercept;
-            observe(addr!("y", i), Normal::new(y_pred, noise).unwrap(), y);
-        }
-        
-        pure((slope, intercept, noise))
-    }
-}
-
-fn regression_inference_example() {
-    // Generate some synthetic data
-    let x_data = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-    let y_data = vec![2.1, 3.9, 6.1, 8.0, 9.9];  // slope ≈ 2, intercept ≈ 0
-    
-    let model = || bayesian_regression(&x_data, &y_data);
-    
+fn main() {
     let mut rng = StdRng::seed_from_u64(42);
     
-    println!("🔍 Bayesian Linear Regression");
-    println!("Data points: {:?}", x_data.iter().zip(&y_data).collect::<Vec<_>>());
+    // Estimate ELBO (Evidence Lower BOund) 
+    let elbo = inference::vi::estimate_elbo(
+        &mut rng,
+        || coin_bias_model(7, 10),
+        100,  // number of samples for estimation
+    );
     
-    // Run adaptive MCMC
-    let samples = inference::mcmc::adaptive_mcmc_chain(
+    println!("ELBO estimate: {:.3}", elbo);
+    
+    // For more sophisticated VI, you'd set up a variational guide
+    // and optimize it (see the VI tutorial for details)
+}
+```
+
+**When to use VI:**
+
+- ✅ Need fast approximate inference
+- ✅ Many parameters (> 100)
+- ✅ Can accept approximation error  
+- ✅ Want predictable runtime
+
+### 4. ABC (Approximate Bayesian Computation) 🎲
+
+**Best for**: Models where likelihood is intractable or expensive
+
+**How it works**: Simulation-based inference using distance between simulated and observed data
+
+```rust,ignore
+use fugue::*;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
+
+fn main() {
+    let mut rng = StdRng::seed_from_u64(42);
+    
+    // ABC with summary statistics
+    let observed_summary = 0.7; // 7/10 = 0.7 success rate
+    let samples = inference::abc::abc_scalar_summary(
+        &mut rng,
+        || sample(addr!("bias"), Beta::new(1.0, 1.0).unwrap()), // Prior only
+        |trace| trace.get_f64(&addr!("bias")).unwrap_or(0.0), // Extract bias
+        observed_summary,  // Target summary statistic
+        0.1,              // Tolerance  
+        1000,             // Max samples to try
+    );
+    
+    println!("ABC accepted {} samples", samples.len());
+    
+    if !samples.is_empty() {
+        let abc_estimates: Vec<f64> = samples.iter()
+            .filter_map(|trace| trace.get_f64(&addr!("bias")))
+            .collect();
+        let abc_mean = abc_estimates.iter().sum::<f64>() / abc_estimates.len() as f64;
+        println!("ABC estimated bias: {:.3}", abc_mean);
+    }
+}
+```
+
+**When to use ABC:**
+
+- ✅ Likelihood is intractable or very expensive
+- ✅ Can simulate from the model easily
+- ✅ Have good summary statistics
+- ✅ Can tolerate approximation error
+
+## Algorithm Comparison
+
+| Method | Speed | Accuracy | Use Case |
+|--------|-------|----------|----------|
+| **MCMC** | 🐌 Slow | 🎯 Exact | General-purpose, exact inference |
+| **SMC** | 🏃 Medium | 🎯 Good | Sequential data, online learning |  
+| **VI** | 🚀 Fast | ⚠️ Approximate | Large models, fast approximate inference |
+| **ABC** | 🐌 Slow | ⚠️ Approximate | Intractable likelihoods |
+
+## Practical Inference Workflow
+
+Here's a typical workflow for real inference:
+
+```rust,ignore
+use fugue::*;
+use rand::rngs::StdRng;  
+use rand::SeedableRng;
+
+fn inference_workflow() {
+    let mut rng = StdRng::seed_from_u64(42);
+    
+    // 1. Define your model
+    let model = || coin_bias_model(17, 25);  // 17 heads out of 25 flips
+    
+    // 2. Run inference (adaptive MCMC is often a good default)
+    let samples = inference::mh::adaptive_mcmc_chain(
         &mut rng,
         model,
         2000,  // samples
         1000,  // warmup
     );
     
-    // Extract parameters
-    let slopes: Vec<f64> = samples.iter()
-        .filter_map(|(_, trace)| trace.get_f64(&addr!("slope")))
-        .collect();
-    let intercepts: Vec<f64> = samples.iter()
-        .filter_map(|(_, trace)| trace.get_f64(&addr!("intercept")))
-        .collect();
-    let noises: Vec<f64> = samples.iter()
-        .filter_map(|(_, trace)| trace.get_f64(&addr!("noise")))
+    // 3. Extract parameter values
+    let bias_samples: Vec<f64> = samples.iter()
+        .filter_map(|(_, trace)| trace.get_f64(&addr!("bias")))
         .collect();
     
-    // Compute statistics
-    println!("\n📊 Posterior Results:");
-    println!("  Slope:     {:.3} ± {:.3}", 
-             mean(&slopes), std(&slopes));
-    println!("  Intercept: {:.3} ± {:.3}", 
-             mean(&intercepts), std(&intercepts));
-    println!("  Noise:     {:.3} ± {:.3}", 
-             mean(&noises), std(&noises));
+    // 4. Compute summary statistics  
+    let mean = bias_samples.iter().sum::<f64>() / bias_samples.len() as f64;
+    let variance = bias_samples.iter()
+        .map(|&x| (x - mean).powi(2))
+        .sum::<f64>() / (bias_samples.len() - 1) as f64;
+    let std_dev = variance.sqrt();
     
-    // Convergence diagnostics
-    println!("\n🔬 Diagnostics:");
-    println!("  Slope ESS:     {:.1}", 
-             inference::diagnostics::effective_sample_size_mcmc(&slopes));
-    println!("  Intercept ESS: {:.1}", 
-             inference::diagnostics::effective_sample_size_mcmc(&intercepts));
-}
-
-// Helper functions
-fn mean(values: &[f64]) -> f64 {
-    values.iter().sum::<f64>() / values.len() as f64
-}
-
-fn std(values: &[f64]) -> f64 {
-    let m = mean(values);
-    let variance = values.iter()
-        .map(|x| (x - m).powi(2))
-        .sum::<f64>() / (values.len() - 1) as f64;
-    variance.sqrt()
-}
-```
-
-## Debugging Inference Problems
-
-Common issues and solutions:
-
-### Problem: Poor Mixing (MCMC)
-**Symptoms**: Samples don't explore the space well, high autocorrelation
-
-**Solutions**:
-```rust
-// 1. Increase proposal variance
-let samples = single_site_random_walk_mh(
-    &mut rng,
-    1.0,  // Try larger step size
-    model,
-    &trace,
-);
-
-// 2. Use adaptive MCMC (automatically tunes)
-let samples = adaptive_mcmc_chain(&mut rng, model, 2000, 1000);
-
-// 3. More warmup
-let samples = adaptive_mcmc_chain(&mut rng, model, 2000, 2000);
-```
-
-### Problem: Low Effective Sample Size (SMC)
-**Symptoms**: Most particles have very low weights
-
-**Solutions**:
-```rust
-// 1. More particles
-let particles = smc_prior_particles(&mut rng, 5000, model);
-
-// 2. Use resampling
-let config = SMCConfig {
-    resampling_threshold: 0.5,  // Resample when ESS < 50%
-    resampling_method: ResamplingMethod::Systematic,
-};
-```
-
-### Problem: Numerical Instability
-**Symptoms**: NaN or infinite log weights
-
-**Solutions**:
-```rust
-// 1. Check your distributions
-let safe_normal = Normal::new(mu, sigma)?;  // Returns Result
-let safe_model = sample(addr!("x"), safe_normal);
-
-// 2. Add bounds checking
-let bounded_model = prob! {
-    let x <- sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
-    if x.is_finite() && x.abs() < 10.0 {
-        pure(x)
+    println!("Posterior Summary:");
+    println!("  Mean: {:.3}", mean);
+    println!("  Std Dev: {:.3}", std_dev);
+    
+    // 5. Check convergence (effective sample size)
+    let ess = inference::diagnostics::effective_sample_size(&bias_samples);
+    println!("  Effective Sample Size: {:.1}", ess);
+    
+    if ess > 100.0 {
+        println!("  ✅ Good mixing!");
     } else {
-        factor(f64::NEG_INFINITY);  // Reject bad values
-        pure(0.0)
+        println!("  ⚠️ Poor mixing - consider more samples");
     }
-};
-```
-
-## Performance Tips
-
-### 1. Use Efficient Addressing
-```rust
-// ❌ Inefficient: string concatenation in hot loops
-for i in 0..1000 {
-    sample(addr!(&format!("x_{}", i)), dist)
-}
-
-// ✅ Efficient: pre-computed addresses or simple indexing
-for i in 0..1000 {
-    sample(addr!("x", i), dist)  // Uses built-in indexing
+    
+    // 6. Make predictions
+    println!("\nPredictions:");
+    println!("  P(bias > 0.5) = {:.2}", 
+        bias_samples.iter().filter(|&&b| b > 0.5).count() as f64 / bias_samples.len() as f64);
 }
 ```
 
-### 2. Minimize Model Allocations
-```rust
-// ❌ Creates new model each time
-fn slow_model() -> Model<f64> {
-    sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
-}
+## Choosing the Right Algorithm
 
-// ✅ Reuse model instances
-let fast_model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
+### Decision Tree
+
+```mermaid
+graph TD
+    A[Need inference?] -->|Yes| B[Real-time/online?]
+    A -->|No| Z[Use PriorHandler<br/>for forward sampling]
+    
+    B -->|Yes| SMC[SMC]
+    B -->|No| C[Likelihood tractable?]
+    
+    C -->|No| ABC[ABC]
+    C -->|Yes| D[Many parameters?]
+    
+    D -->|Yes > 100| VI[Variational Inference]
+    D -->|No < 100| E[Need exact samples?]
+    
+    E -->|Yes| MCMC[MCMC]
+    E -->|No| VI2[VI for speed]
+    
+    style MCMC fill:#e8f5e8
+    style SMC fill:#fff3e0
+    style VI fill:#f3e5f5  
+    style ABC fill:#fce4ec
 ```
 
-### 3. Batch Observations
-```rust
-// ❌ Many individual observations
-for (i, &y) in data.iter().enumerate() {
-    observe(addr!("y", i), Normal::new(mu, sigma).unwrap(), y);
-}
+### Rules of Thumb
 
-// ✅ Use vector distributions when available
-// (Note: This is conceptual - Fugue doesn't have MultivariateNormal yet)
+1. **Start with MCMC** for most problems - it's the most general
+2. **Use SMC** if you have sequential/streaming data
+3. **Use VI** if you need speed and can accept approximation
+4. **Use ABC** only when likelihood is truly intractable
+
+## Key Takeaways
+
+You now know how to extract insights from your models:
+
+✅ **Inference Purpose**: Learn parameters from data using Bayesian updating  
+✅ **Algorithm Options**: MCMC, SMC, VI, ABC each have their strengths  
+✅ **Practical Workflow**: Define model → Run inference → Extract parameters → Check diagnostics  
+✅ **Algorithm Selection**: Choose based on problem characteristics and requirements
+
+## What's Next?
+
+You've completed Getting Started! 🎉
+
+```admonish tip
+Ready for Real Applications?
+
+**Complete Tutorials** - End-to-end projects with real-world applications:
+- **[Bayesian Coin Flip](../tutorials/bayesian-coin-flip.md)** - Complete analysis workflow
+- **[Linear Regression](../tutorials/linear-regression.md)** - Advanced modeling and diagnostics
+- **[Mixture Models](../tutorials/mixture-models.md)** - Latent variable models
+
+**How-To Guides** - Specific techniques and best practices:
+- **[Working with Distributions](../how-to/working-with-distributions.md)** - Master all distribution types
+- **[Debugging Models](../how-to/debugging-models.md)** - Troubleshoot inference problems
 ```
-
-## Next Steps
-
-Now that you understand basic inference:
-
-1. **[Working with Distributions](../how-to/working-with-distributions.md)** - Master all distribution types
-2. **[Trace Manipulation](../how-to/trace-manipulation.md)** - Advanced debugging and analysis
-3. **[Bayesian Coin Flip Tutorial](../tutorials/bayesian-coin-flip.md)** - Complete worked example
 
 ---
 
-**Ready for practical how-to guides?** → **[How-To Guides](../how-to/README.md)**
+**Time**: ~5 minutes • **Next**: [Complete Tutorials](../tutorials/README.md)
