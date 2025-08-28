@@ -1,93 +1,4 @@
-//! Type-safe probability distributions with natural return types.
-//!
-//! This module provides a unified, type-safe interface for probability distributions used in Fugue models.
-//! All distributions implement the `Distribution<T>` trait, which provides sampling and
-//! log-probability density computation. The trait is generic over the sample type `T`,
-//! enabling natural return types for each distribution.
-//!
-//! ## Key Innovation: Type Safety
-//!
-//! Unlike traditional probabilistic programming libraries that force all distributions
-//! to return `f64`, Fugue's distributions return their natural types:
-//!
-//! - **Continuous distributions** → `f64` (as expected)
-//! - **Bernoulli** → `bool` (not 0.0/1.0!)
-//! - **Poisson/Binomial** → `u64` (natural counting)
-//! - **Categorical** → `usize` (safe array indexing)
-//!
-//! ## Available Distributions
-//!
-//! ### Continuous Distributions (return `f64`)
-//! - [`Normal`]: Normal/Gaussian distribution
-//! - [`LogNormal`]: Log-normal distribution  
-//! - [`Uniform`]: Uniform distribution over an interval
-//! - [`Exponential`]: Exponential distribution
-//! - [`Beta`]: Beta distribution on \[0,1\]
-//! - [`Gamma`]: Gamma distribution
-//!
-//! ### Discrete Distributions (return natural types!)
-//! - [`Bernoulli`]: Bernoulli distribution → **`bool`**
-//! - [`Binomial`]: Binomial distribution → **`u64`**
-//! - [`Categorical`]: Categorical distribution → **`usize`**
-//! - [`Poisson`]: Poisson distribution → **`u64`**
-//!
-//! All distributions can be used both within the Model system (with `sample()` and `observe()`)
-//! and for direct statistical computation outside the Model system by calling `sample()` and
-//! `log_prob()` directly on distribution instances.
-//!
-//! ## Usage Examples
-//!
-//! ### Type-Safe Sampling
-//! ```rust
-//! use fugue::*;
-//!
-//! // Continuous distribution returns f64
-//! let normal_model: Model<f64> = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
-//!
-//! // Bernoulli returns bool - no more awkward comparisons!
-//! let coin_model: Model<bool> = sample(addr!("coin"), Bernoulli::new(0.5).unwrap());
-//! let decision = coin_model.bind(|heads| {
-//!     if heads {
-//!         pure("Take action!".to_string())
-//!     } else {
-//!         pure("Wait...".to_string())
-//!     }
-//! });
-//!
-//! // Poisson returns u64 - perfect for counting!
-//! let count_model: Model<u64> = sample(addr!("events"), Poisson::new(3.0).unwrap());
-//! let analysis = count_model.bind(|count| {
-//!     let status = match count {
-//!         0 => "No events",
-//!         1 => "Single event",
-//!         n if n > 10 => "Many events!",
-//!         n => &format!("{} events", n),
-//!     };
-//!     pure(status.to_string())
-//! });
-//!
-//! // Categorical returns usize - safe array indexing!
-//! let choice_model: Model<usize> = sample(addr!("color"),
-//!     Categorical::new(vec![0.5, 0.3, 0.2]).unwrap());
-//! let colors = vec!["red", "green", "blue"];
-//! let result = choice_model.bind(move |color_idx| {
-//!     let chosen_color = colors[color_idx]; // Direct indexing - no casting!
-//!     pure(chosen_color.to_string())
-//! });
-//! ```
-//!
-//! ### Type-Safe Observations
-//! ```rust
-//! use fugue::*;
-//!
-//! // Observe with natural types
-//! let model = observe(addr!("coin_result"), Bernoulli::new(0.6).unwrap(), true)      // bool
-//!     .bind(|_| observe(addr!("count"), Poisson::new(4.0).unwrap(), 7u64))      // u64
-//!     .bind(|_| observe(addr!("choice"), Categorical::new(
-//!         vec![0.3, 0.5, 0.2]
-//!     ).unwrap(), 1usize))  // usize
-//!     .bind(|_| observe(addr!("temp"), Normal::new(20.0, 2.0).unwrap(), 18.5)); // f64
-//! ```
+#![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/api/core/distribution.md"))]
 use rand::{Rng, RngCore};
 use rand_distr::{
     Beta as RDBeta, Binomial as RDBinomial, Distribution as RandDistr, Exp as RDExp,
@@ -100,131 +11,114 @@ use rand_distr::{
 pub type LogF64 = f64;
 
 /// Generic interface for type-safe probability distributions.
-///
-/// This trait provides the essential operations needed for probabilistic programming
-/// with **full type safety**. Unlike traditional PPLs that force all distributions to return `f64`,
-/// Fugue's `Distribution<T>` trait is generic over the sample type `T`, enabling:
-///
-/// - **Natural return types**: Each distribution returns its mathematically appropriate type
-/// - **Compile-time safety**: Type errors are caught by the compiler, not at runtime
-/// - **Zero overhead**: No unnecessary type conversions or boxing
-/// - **Intuitive code**: Write code that matches statistical intuition
-///
-/// ## Type Safety Benefits
-///
-/// | Distribution | Traditional PPL | Fugue Type-Safe |
-/// |--------------|-----------------|-----------------|
-/// | Bernoulli | `f64` (0.0/1.0) | **`bool`** (true/false) |
-/// | Poisson | `f64` (needs casting) | **`u64`** (natural counts) |
-/// | Categorical | `f64` (risky indexing) | **`usize`** (safe indexing) |
-/// | Binomial | `f64` (needs casting) | **`u64`** (natural counts) |
-/// | Normal | `f64` ✓ | **`f64`** ✓ |
-///
-/// # Required Methods
-///
-/// - [`sample`](Self::sample): Generate a random sample of type `T`
-/// - [`log_prob`](Self::log_prob): Compute log-probability of a value of type `T`
-/// - [`clone_box`](Self::clone_box): Clone into a boxed trait object
-///
-/// # Examples
+/// All distributions implement `Distribution<T>` where `T` is the natural return type.
+/// Example:
 ///
 /// ```rust
-/// use fugue::*;
-/// use rand::rngs::StdRng;
-/// use rand::SeedableRng;
+/// # use fugue::*;
+/// # use rand::thread_rng;
 ///
-/// let mut rng = StdRng::seed_from_u64(42);
+/// let mut rng = thread_rng();
 ///
-/// // Continuous distribution returns f64
-/// let normal = Normal::new(0.0, 1.0).unwrap();
-/// let value: f64 = normal.sample(&mut rng);
-/// let log_prob = normal.log_prob(&value);
-///
-/// // Discrete distributions return natural types!
+/// // Type-safe sampling
 /// let coin = Bernoulli::new(0.5).unwrap();
-/// let flip: bool = coin.sample(&mut rng);  // bool, not f64!
-/// let coin_prob = coin.log_prob(&flip);
+/// let flip: bool = coin.sample(&mut rng);  // Natural boolean
+/// let prob = coin.log_prob(&flip);
 ///
-/// let counter = Poisson::new(3.0).unwrap();
-/// let count: u64 = counter.sample(&mut rng);  // u64, not f64!
-/// let count_prob = counter.log_prob(&count);
-///
-/// let choice = Categorical::new(vec![0.3, 0.5, 0.2]).unwrap();
-/// let idx: usize = choice.sample(&mut rng);  // usize for safe indexing!
+/// // Safe indexing
+/// let choice = Categorical::uniform(3).unwrap();
+/// let idx: usize = choice.sample(&mut rng);  // Safe for arrays
 /// let choice_prob = choice.log_prob(&idx);
+///
+/// // Natural counting
+/// let events = Poisson::new(3.0).unwrap();
+/// let count: u64 = events.sample(&mut rng);  // Natural count type
+/// let count_prob = events.log_prob(&count);
 /// ```
 pub trait Distribution<T>: Send + Sync {
-    /// Generate a random sample from this distribution.
+    /// Generate a random sample (with its natural type), `T`, from the distribution, using the provided random number generator, `rng`.
     ///
-    /// Returns a value of type `T` drawn from this distribution. The return type
-    /// is naturally suited to the distribution:
-    /// - `f64` for continuous distributions (Normal, Beta, etc.)
-    /// - `bool` for Bernoulli (true/false outcomes)
-    /// - `u64` for count distributions (Poisson, Binomial)
-    /// - `usize` for categorical indices (safe array indexing)
+    /// Example:
+    /// ```rust
+    /// # use fugue::*;
+    /// # use rand::thread_rng;
     ///
-    /// # Arguments
+    /// let mut rng = thread_rng();
     ///
-    /// * `rng` - Random number generator to use for sampling
-    ///
-    /// # Returns
-    ///
-    /// A sample from the distribution of type `T`.
+    /// // Sample different distribution types
+    /// let normal_sample: f64 = Normal::new(0.0, 1.0).unwrap().sample(&mut rng);
+    /// let coin_flip: bool = Bernoulli::new(0.5).unwrap().sample(&mut rng);
+    /// let event_count: u64 = Poisson::new(3.0).unwrap().sample(&mut rng);
+    /// let category_idx: usize = Categorical::uniform(5).unwrap().sample(&mut rng);
+    /// ```
     fn sample(&self, rng: &mut dyn RngCore) -> T;
 
-    /// Compute the log-probability density/mass of a value under this distribution.
+    /// Compute the log-probability density (continuous) or mass (discrete) of a value, `x`, from the distribution.
     ///
-    /// Accepts a reference to a value of type `T` to avoid unnecessary copying
-    /// and to maintain consistency across all distribution types.
+    /// Example:
+    /// ```rust
+    /// # use fugue::*;
     ///
-    /// # Arguments
+    /// // Continuous distribution (probability density)
+    /// let normal = Normal::new(0.0, 1.0).unwrap();
+    /// let density = normal.log_prob(&0.0);  // Peak of standard normal
     ///
-    /// * `x` - Reference to the value to compute log-probability for
+    /// // Discrete distribution (probability mass)
+    /// let coin = Bernoulli::new(0.7).unwrap();
+    /// let prob_true = coin.log_prob(&true);   // ln(0.7)
+    /// let prob_false = coin.log_prob(&false); // ln(0.3)
     ///
-    /// # Returns
-    ///
-    /// The natural logarithm of the probability density/mass at `x`.
-    /// Returns negative infinity for values outside the distribution's support.
+    /// // Outside support returns -∞
+    /// let poisson = Poisson::new(3.0).unwrap();
+    /// let invalid = poisson.log_prob(&u64::MAX); // Very unlikely, returns -∞
+    /// ```
     fn log_prob(&self, x: &T) -> LogF64;
 
-    /// Clone this distribution into a boxed trait object.
+    /// Clone the distribution into a boxed trait object, `Box<dyn Distribution<T>>`.
     ///
-    /// This method is required for the trait to be object-safe, allowing
-    /// distributions to be stored as `Box<dyn Distribution<T>>`.
+    /// Example:
+    /// ```rust
+    /// # use fugue::*;
+    ///
+    /// // Clone a distribution into a box
+    /// let original = Normal::new(0.0, 1.0).unwrap();
+    /// let boxed: Box<dyn Distribution<f64>> = original.clone_box();
+    ///
+    /// // Useful for storing different distribution types
+    /// let mut distributions: Vec<Box<dyn Distribution<f64>>> = vec![];
+    /// distributions.push(Normal::new(0.0, 1.0).unwrap().clone_box());
+    /// distributions.push(Uniform::new(-1.0, 1.0).unwrap().clone_box());
+    /// ```
     fn clone_box(&self) -> Box<dyn Distribution<T>>;
 }
 
-/// Normal (Gaussian) distribution.
+/// A continuous distribution characterized by its mean, `mu`, and standard deviation, `sigma`.
 ///
-/// The normal distribution is a continuous probability distribution characterized by
-/// its mean (μ) and standard deviation (σ). It's one of the most important distributions
-/// in statistics and is commonly used as a prior or likelihood in Bayesian models.
+/// Mathematical Properties:
+/// - **Support**: (-∞, +∞)
+/// - **PDF**: f(x) = (1/(σ√(2π))) × exp(-0.5 × ((x-μ)/σ)²)
+/// - **Mean**: μ
+/// - **Variance**: σ²
+/// - **68-95-99.7 rule**: ~68% within 1σ, ~95% within 2σ, ~99.7% within 3σ
 ///
-/// **Probability density function:**
-/// ```text
-/// f(x) = (1 / (σ√(2π))) * exp(-0.5 * ((x - μ) / σ)²)
-/// ```
-///
-/// **Support:** All real numbers (-∞, +∞)
-///
-/// # Fields
-///
-/// * `mu` - Mean of the distribution
-/// * `sigma` - Standard deviation (must be positive)
-///
-/// # Examples
-///
+/// Example:
 /// ```rust
-/// use fugue::*;
+/// # use fugue::*;
 ///
-/// // Standard normal distribution
-/// let std_normal = Normal::new(0.0, 1.0).unwrap();
+/// // Standard normal (mean=0, std=1)
+/// let standard = sample(addr!("z"), Normal::new(0.0, 1.0).unwrap());
 ///
-/// // Normal prior for a parameter
-/// let model = sample(addr!("theta"), Normal::new(0.0, 2.0).unwrap());
+/// // Parameter with prior
+/// let theta = sample(addr!("theta"), Normal::new(0.0, 2.0).unwrap());
 ///
-/// // Normal likelihood for observations
-/// let model = observe(addr!("y"), Normal::new(1.5, 0.5).unwrap(), 2.0);
+/// // Likelihood with observation
+/// let likelihood = observe(addr!("y"), Normal::new(1.5, 0.5).unwrap(), 2.0);
+///
+/// // Measurement error model
+/// let true_value = sample(addr!("true_val"), Normal::new(100.0, 10.0).unwrap());
+/// let measurement = true_value.bind(|val| {
+///     observe(addr!("measured"), Normal::new(val, 2.0).unwrap(), 98.5)
+/// });
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Normal {
@@ -233,50 +127,25 @@ pub struct Normal {
     /// Standard deviation of the normal distribution (must be positive).
     sigma: f64,
 }
-
 impl Normal {
     /// Create a new Normal distribution with validated parameters.
-    ///
-    /// This is the only way to construct a Normal distribution, ensuring
-    /// parameter validity at construction time.
-    ///
-    /// # Arguments
-    ///
-    /// * `mu` - Mean of the distribution (must be finite)
-    /// * `sigma` - Standard deviation (must be positive and finite)
-    ///
-    /// # Errors
-    ///
-    /// Returns `FugueError::InvalidParameters` if parameters are invalid.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use fugue::*;
-    ///
-    /// // Valid construction
-    /// let normal = Normal::new(0.0, 1.0)?;
-    ///
-    /// // Invalid parameters will fail
-    /// let bad_normal = Normal::new(0.0, -1.0); // Error: negative sigma
-    /// assert!(bad_normal.is_err());
-    /// # Ok::<(), FugueError>(())
-    /// ```
     pub fn new(mu: f64, sigma: f64) -> crate::error::FugueResult<Self> {
         if !mu.is_finite() {
             return Err(crate::error::FugueError::invalid_parameters(
-                "Normal", 
-                "Mean (mu) must be finite", 
-                crate::error::ErrorCode::InvalidMean
-            ).with_context("mu", format!("{}", mu)));
+                "Normal",
+                "Mean (mu) must be finite",
+                crate::error::ErrorCode::InvalidMean,
+            )
+            .with_context("mu", format!("{}", mu)));
         }
         if sigma <= 0.0 || !sigma.is_finite() {
             return Err(crate::error::FugueError::invalid_parameters(
-                "Normal", 
-                "Standard deviation (sigma) must be positive and finite", 
-                crate::error::ErrorCode::InvalidVariance
-            ).with_context("sigma", format!("{}", sigma))
-             .with_context("expected", "> 0.0 and finite"));
+                "Normal",
+                "Standard deviation (sigma) must be positive and finite",
+                crate::error::ErrorCode::InvalidVariance,
+            )
+            .with_context("sigma", format!("{}", sigma))
+            .with_context("expected", "> 0.0 and finite"));
         }
         Ok(Normal { mu, sigma })
     }
@@ -321,37 +190,32 @@ impl Distribution<f64> for Normal {
     }
 }
 
-/// Uniform distribution over a continuous interval.
+/// A continuous distribution that assigns equal probability density to all values within a specified interval, from `low` to `high`.
 ///
-/// The uniform distribution assigns equal probability density to all values
-/// within a specified interval [low, high) and zero probability outside.
+/// Commonly used as an uninformative prior when you want to express complete uncertainty over a bounded range.
 ///
-/// **Probability density function:**
-/// ```text
-/// f(x) = 1 / (high - low)  for low ≤ x < high
-/// f(x) = 0                 otherwise
-/// ```
+/// Mathematical Properties:
+/// - **Support**: [low, high)
+/// - **PDF**: f(x) = 1/(high-low) for low ≤ x < high, 0 otherwise
+/// - **Mean**: (low + high) / 2
+/// - **Variance**: (high - low)² / 12
 ///
-/// **Support:** [low, high)
-///
-/// # Fields
-///
-/// * `low` - Lower bound of the distribution (inclusive)
-/// * `high` - Upper bound of the distribution (exclusive)
-///
-/// # Examples
+/// Example:
 ///
 /// ```rust
-/// use fugue::*;
+/// # use fugue::*;
 ///
-/// // Unit interval
-/// let unit_uniform = Uniform::new(0.0, 1.0).unwrap();
+/// // Unit interval [0, 1)
+/// let unit = sample(addr!("p"), Uniform::new(0.0, 1.0).unwrap());
 ///
-/// // Symmetric interval around zero
-/// let symmetric = Uniform::new(-5.0, 5.0).unwrap();
+/// // Symmetric around zero
+/// let symmetric = sample(addr!("x"), Uniform::new(-5.0, 5.0).unwrap());
 ///
-/// // Use as uninformative prior
-/// let model = sample(addr!("weight"), Uniform::new(0.0, 100.0).unwrap());
+/// // Uninformative prior for weight
+/// let weight = sample(addr!("weight"), Uniform::new(0.0, 100.0).unwrap());
+///
+/// // Random angle in radians
+/// let angle = sample(addr!("angle"), Uniform::new(0.0, 2.0 * std::f64::consts::PI).unwrap());
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Uniform {
@@ -360,25 +224,26 @@ pub struct Uniform {
     /// Upper bound of the uniform distribution (exclusive).
     high: f64,
 }
-
 impl Uniform {
     /// Create a new Uniform distribution with validated parameters.
     pub fn new(low: f64, high: f64) -> crate::error::FugueResult<Self> {
         if !low.is_finite() || !high.is_finite() {
             return Err(crate::error::FugueError::invalid_parameters(
-                "Uniform", 
-                "Bounds must be finite", 
-                crate::error::ErrorCode::InvalidRange
-            ).with_context("low", format!("{}", low))
-             .with_context("high", format!("{}", high)));
+                "Uniform",
+                "Bounds must be finite",
+                crate::error::ErrorCode::InvalidRange,
+            )
+            .with_context("low", format!("{}", low))
+            .with_context("high", format!("{}", high)));
         }
         if low >= high {
             return Err(crate::error::FugueError::invalid_parameters(
-                "Uniform", 
-                "Lower bound must be less than upper bound", 
-                crate::error::ErrorCode::InvalidRange
-            ).with_context("low", format!("{}", low))
-             .with_context("high", format!("{}", high)));
+                "Uniform",
+                "Lower bound must be less than upper bound",
+                crate::error::ErrorCode::InvalidRange,
+            )
+            .with_context("low", format!("{}", low))
+            .with_context("high", format!("{}", high)));
         }
         Ok(Uniform { low, high })
     }
@@ -428,40 +293,35 @@ impl Distribution<f64> for Uniform {
     }
 }
 
-/// Log-normal distribution.
+/// A continuous distribution where the logarithm follows a normal distribution.
 ///
-/// A continuous distribution where the logarithm of the random variable follows
-/// a normal distribution. This distribution is useful for modeling positive-valued
-/// quantities that are naturally multiplicative or skewed.
+/// Useful for modeling positive-valued quantities that are naturally multiplicative or skewed.
 ///
-/// **Relationship to Normal:** If X ~ LogNormal(μ, σ), then ln(X) ~ Normal(μ, σ)
+/// Mathematical Properties:
+/// - **Support**: (0, +∞)
+/// - **PDF**: f(x) = (1/(xσ√(2π))) × exp(-0.5 × ((ln(x)-μ)/σ)²)
+/// - **Mean**: exp(μ + σ²/2)
+/// - **Variance**: (exp(σ²) - 1) × exp(2μ + σ²)
+/// - **Relationship**: If X ~ LogNormal(μ, σ), then ln(X) ~ Normal(μ, σ)
 ///
-/// **Probability density function:**
-/// ```text
-/// f(x) = (1 / (x * σ√(2π))) * exp(-0.5 * ((ln(x) - μ) / σ)²)  for x > 0
-/// f(x) = 0                                                      for x ≤ 0
-/// ```
-///
-/// **Support:** (0, +∞)
-///
-/// # Fields
-///
-/// * `mu` - Mean of the underlying normal distribution
-/// * `sigma` - Standard deviation of the underlying normal distribution (must be positive)
-///
-/// # Examples
-///
+/// Example:
 /// ```rust
-/// use fugue::*;
+/// # use fugue::*;
 ///
-/// // Standard log-normal
-/// let log_normal = LogNormal::new(0.0, 1.0).unwrap();
+/// // Standard log-normal (median = 1)
+/// let standard = sample(addr!("x"), LogNormal::new(0.0, 1.0).unwrap());
 ///
-/// // Model for positive scale parameters
-/// let model = sample(addr!("scale"), LogNormal::new(0.0, 0.5).unwrap());
+/// // Positive scale parameter
+/// let scale = sample(addr!("scale"), LogNormal::new(0.0, 0.5).unwrap());
 ///
-/// // Income distribution (often log-normal)
-/// let income_model = sample(addr!("income"), LogNormal::new(10.0, 0.8).unwrap());
+/// // Income distribution
+/// let income = sample(addr!("income"), LogNormal::new(10.0, 0.8).unwrap())
+///     .map(|x| x.round() as u64); // Convert to dollars
+///
+/// // Multiplicative error model
+/// let true_value = 100.0;
+/// let measured = sample(addr!("error"), LogNormal::new(0.0, 0.1).unwrap())
+///     .map(move |error| true_value * error);
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub struct LogNormal {
@@ -470,24 +330,25 @@ pub struct LogNormal {
     /// Standard deviation of the underlying normal distribution (must be positive).
     sigma: f64,
 }
-
 impl LogNormal {
     /// Create a new LogNormal distribution with validated parameters.
     pub fn new(mu: f64, sigma: f64) -> crate::error::FugueResult<Self> {
         if !mu.is_finite() {
             return Err(crate::error::FugueError::invalid_parameters(
-                "LogNormal", 
-                "Mean (mu) must be finite", 
-                crate::error::ErrorCode::InvalidMean
-            ).with_context("mu", format!("{}", mu)));
+                "LogNormal",
+                "Mean (mu) must be finite",
+                crate::error::ErrorCode::InvalidMean,
+            )
+            .with_context("mu", format!("{}", mu)));
         }
         if sigma <= 0.0 || !sigma.is_finite() {
             return Err(crate::error::FugueError::invalid_parameters(
-                "LogNormal", 
-                "Standard deviation (sigma) must be positive and finite", 
-                crate::error::ErrorCode::InvalidVariance
-            ).with_context("sigma", format!("{}", sigma))
-             .with_context("expected", "> 0.0 and finite"));
+                "LogNormal",
+                "Standard deviation (sigma) must be positive and finite",
+                crate::error::ErrorCode::InvalidVariance,
+            )
+            .with_context("sigma", format!("{}", sigma))
+            .with_context("expected", "> 0.0 and finite"));
         }
         Ok(LogNormal { mu, sigma })
     }
@@ -536,54 +397,53 @@ impl Distribution<f64> for LogNormal {
     }
 }
 
-/// Exponential distribution.
+/// A continuous distribution often used to model waiting times between events.
 ///
-/// A continuous probability distribution often used to model waiting times
-/// between events in a Poisson process. It has a single parameter (rate) and
-/// is characterized by the memoryless property.
+/// Characterized by the memoryless property.
 ///
-/// **Probability density function:**
-/// ```text
-/// f(x) = λ * exp(-λx)  for x ≥ 0
-/// f(x) = 0             for x < 0
-/// ```
+/// Mathematical Properties:
+/// - **Support**: [0, +∞)
+/// - **PDF**: f(x) = λ × exp(-λx) for x ≥ 0
+/// - **Mean**: 1 / λ
+/// - **Variance**: 1 / λ²
+/// - **Memoryless**: P(X > s + t | X > s) = P(X > t)
 ///
-/// **Support:** [0, +∞)
-///
-/// # Fields
-///
-/// * `rate` - Rate parameter λ (must be positive). Higher values = shorter waiting times.
-///
-/// # Examples
-///
+/// Example:
 /// ```rust
-/// use fugue::*;
+/// # use fugue::*;
 ///
-/// // Model time between events (rate = 2 events per unit time)
-/// let waiting_time = Exponential::new(2.0).unwrap();
+/// // Average wait time of 2 minutes (rate = 0.5 per minute)
+/// let wait_time = sample(addr!("wait"), Exponential::new(0.5).unwrap());
 ///
-/// // Survival analysis / hazard modeling
-/// let model = sample(addr!("survival_time"), Exponential::new(0.1).unwrap());
+/// // Service time model
+/// let service = sample(addr!("service_time"), Exponential::new(1.5).unwrap())
+///     .bind(|time| {
+///         if time > 5.0 {
+///             pure("slow")
+///         } else {
+///             pure("fast")
+///         }
+///     });
 ///
-/// // Prior for precision parameters (inverse of variance)
-/// let precision_prior = sample(addr!("precision"), Exponential::new(1.0).unwrap());
+/// // Observe actual waiting time
+/// let observed = observe(addr!("actual_wait"), Exponential::new(0.3).unwrap(), 4.2);
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Exponential {
     /// Rate parameter λ of the exponential distribution (must be positive).
     rate: f64,
 }
-
 impl Exponential {
     /// Create a new Exponential distribution with validated parameters.
     pub fn new(rate: f64) -> crate::error::FugueResult<Self> {
         if rate <= 0.0 || !rate.is_finite() {
             return Err(crate::error::FugueError::invalid_parameters(
-                "Exponential", 
-                "Rate parameter must be positive and finite", 
-                crate::error::ErrorCode::InvalidRate
-            ).with_context("rate", format!("{}", rate))
-             .with_context("expected", "> 0.0 and finite"));
+                "Exponential",
+                "Rate parameter must be positive and finite",
+                crate::error::ErrorCode::InvalidRate,
+            )
+            .with_context("rate", format!("{}", rate))
+            .with_context("expected", "> 0.0 and finite"));
         }
         Ok(Exponential { rate })
     }
@@ -621,74 +481,49 @@ impl Distribution<f64> for Exponential {
     }
 }
 
-/// **Type-safe Bernoulli distribution** → returns `bool`
+/// A discrete distribution for binary outcomes (true/false, success/failure).
 ///
-/// A discrete distribution representing a single trial with two possible outcomes:
-/// success (true) with probability p, or failure (false) with probability 1-p.
-/// This is the building block for binomial distributions and binary classification.
+/// Returns `bool` directly for type-safe boolean logic.
 ///
-/// ## 🎯 Type Safety Innovation
+/// Mathematical Properties:
+/// - **Support**: {false, true}
+/// - **PMF**: P(X = true) = p, P(X = false) = 1 - p
+/// - **Mean**: p
+/// - **Variance**: p(1 - p)
 ///
-/// **Unlike traditional PPLs**, Fugue's Bernoulli distribution returns **`bool` directly**,
-/// eliminating error-prone floating-point comparisons like `if sample == 1.0`.
-///
-/// **Probability mass function:**
-/// ```text
-/// P(X = true) = p
-/// P(X = false) = 1 - p
-/// ```
-///
-/// **Support:** {false, true} (natural boolean values!)
-///
-/// # Fields
-///
-/// * `p` - Probability of success (must be in [0, 1])
-///
-/// # Examples
-///
+/// Example:
 /// ```rust
-/// use fugue::*;
+/// # use fugue::*;
 ///
-/// // Type-safe boolean sampling - no more f64 comparisons!
-/// let coin_model: Model<bool> = sample(addr!("coin"), Bernoulli::new(0.5).unwrap());
-/// let decision = coin_model.bind(|heads| {
-///     if heads {  // ✅ Natural boolean usage!
-///         pure("Heads - take action!".to_string())
+/// // Fair coin flip
+/// let coin = sample(addr!("coin"), Bernoulli::new(0.5).unwrap());
+/// let result = coin.bind(|heads| {
+///     if heads {
+///         pure("Heads!")
 ///     } else {
-///         pure("Tails - wait...".to_string())
+///         pure("Tails!")
 ///     }
 /// });
 ///
-/// // Mixture component selection with natural boolean logic
-/// let component_model = sample(addr!("component"), Bernoulli::new(0.3).unwrap())
-///     .bind(|is_component_2| {
-///         let component_name = if is_component_2 {
-///             "Component 2"
-///         } else {
-///             "Component 1"  
-///         };
-///         pure(component_name.to_string())
-///     });
-///
-/// // Type-safe observation of boolean outcomes
-/// let obs_model = observe(addr!("success"), Bernoulli::new(0.8).unwrap(), true);
+/// // Biased coin with observation
+/// let biased = observe(addr!("biased_coin"), Bernoulli::new(0.7).unwrap(), true);
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Bernoulli {
     /// Probability of success (must be in [0, 1]).
     p: f64,
 }
-
 impl Bernoulli {
     /// Create a new Bernoulli distribution with validated parameters.
     pub fn new(p: f64) -> crate::error::FugueResult<Self> {
         if !p.is_finite() || !(0.0..=1.0).contains(&p) {
             return Err(crate::error::FugueError::invalid_parameters(
-                "Bernoulli", 
-                "Probability must be in [0, 1]", 
-                crate::error::ErrorCode::InvalidProbability
-            ).with_context("p", format!("{}", p))
-             .with_context("expected", "[0.0, 1.0]"));
+                "Bernoulli",
+                "Probability must be in [0, 1]",
+                crate::error::ErrorCode::InvalidProbability,
+            )
+            .with_context("p", format!("{}", p))
+            .with_context("expected", "[0.0, 1.0]"));
         }
         Ok(Bernoulli { p })
     }
@@ -733,93 +568,74 @@ impl Distribution<bool> for Bernoulli {
     }
 }
 
-/// **Type-safe Categorical distribution** → returns `usize`
+/// A discrete distribution for choosing among multiple categories with specified probabilities.
 ///
-/// A discrete distribution that represents choosing among k different categories
-/// with specified probabilities. The outcome is the index of the chosen category
-/// as a `usize`, making it **naturally suitable for safe array indexing**.
+/// Returns `usize` for safe array indexing.
 ///
-/// ## 🎯 Type Safety Innovation
+/// Mathematical Properties:
+/// - **Support**: {0, 1, ..., k-1} where k = number of categories
+/// - **PMF**: P(X = i) = probs[i]
+/// - **Mean**: Σ(i × probs[i])
+/// - **Variance**: Σ(i² × probs[i]) - mean²
 ///
-/// **Unlike traditional PPLs**, Fugue's Categorical distribution returns **`usize` directly**,
-/// enabling safe array indexing without error-prone casting from `f64`.
-///
-/// **Probability mass function:**
-/// ```text
-/// P(X = i) = probs[i]  for i ∈ {0, 1, ..., k-1}
-/// ```
-///
-/// **Support:** {0, 1, ..., k-1} where k = probs.len() (natural array indices!)
-///
-/// # Fields
-///
-/// * `probs` - Vector of probabilities for each category (should sum to 1.0)
-///
-/// # Examples
-///
+/// Example:
 /// ```rust
-/// use fugue::*;
+/// # use fugue::*;
 ///
-/// // Type-safe categorical choice - returns usize directly!
+/// // Custom probabilities
+/// let weighted = Categorical::new(vec![0.1, 0.2, 0.3, 0.4]).unwrap();
+///
+/// // Uniform distribution over k categories
+/// let uniform = Categorical::uniform(4).unwrap();
+///
+/// // Choose from three options
 /// let options = vec!["red", "green", "blue"];
-/// let color_model: Model<usize> = sample(addr!("color"),
-///     Categorical::new(vec![0.5, 0.3, 0.2]).unwrap());
-/// let result = color_model.bind(move |color_idx| {
-///     // color_idx is naturally usize - safe for direct array indexing!
-///     let chosen_color = options[color_idx]; // No casting, no bounds checking needed!
-///     pure(chosen_color.to_string())
-/// });
+/// let choice = sample(addr!("color"), Categorical::new(vec![0.5, 0.3, 0.2]).unwrap())
+///     .map(move |idx| options[idx].to_string());
 ///
-/// // Multi-armed bandit with type-safe action selection
-/// let action_model = sample(addr!("action"),
-///     Categorical::new(vec![0.4, 0.3, 0.2, 0.1]).unwrap()  // 4 possible actions
-/// ).bind(|action_idx| {
-///     let action_rewards = vec![10.0, 15.0, 5.0, 20.0];
-///     let reward = action_rewards[action_idx]; // Direct, safe indexing!
-///     pure(reward)
-/// });
-///
-/// // Type-safe observation of categorical outcomes
-/// let obs_model = observe(addr!("user_choice"),
-///     Categorical::new(vec![0.2, 0.3, 0.3, 0.2]).unwrap(), 2usize);  // Observed choice was index 2
+/// // Observe a specific choice
+/// let observed = observe(addr!("user_choice"),
+///     Categorical::uniform(3).unwrap(), 1usize);
 /// ```
 #[derive(Clone, Debug)]
 pub struct Categorical {
     /// Probabilities for each category (should sum to 1.0).
     probs: Vec<f64>,
 }
-
 impl Categorical {
     /// Create a new Categorical distribution with validated parameters.
     pub fn new(probs: Vec<f64>) -> crate::error::FugueResult<Self> {
         if probs.is_empty() {
             return Err(crate::error::FugueError::invalid_parameters(
-                "Categorical", 
-                "Probability vector cannot be empty", 
-                crate::error::ErrorCode::InvalidProbability
-            ).with_context("length", "0"));
+                "Categorical",
+                "Probability vector cannot be empty",
+                crate::error::ErrorCode::InvalidProbability,
+            )
+            .with_context("length", "0"));
         }
 
         let sum: f64 = probs.iter().sum();
         if (sum - 1.0).abs() > 1e-6 {
             return Err(crate::error::FugueError::invalid_parameters(
-                "Categorical", 
-                "Probabilities must sum to 1.0", 
-                crate::error::ErrorCode::InvalidProbability
-            ).with_context("sum", format!("{:.6}", sum))
-             .with_context("expected", "1.0")
-             .with_context("tolerance", "1e-6"));
+                "Categorical",
+                "Probabilities must sum to 1.0",
+                crate::error::ErrorCode::InvalidProbability,
+            )
+            .with_context("sum", format!("{:.6}", sum))
+            .with_context("expected", "1.0")
+            .with_context("tolerance", "1e-6"));
         }
 
         for (i, &p) in probs.iter().enumerate() {
             if !p.is_finite() || p < 0.0 {
                 return Err(crate::error::FugueError::invalid_parameters(
-                    "Categorical", 
-                    "All probabilities must be non-negative and finite", 
-                    crate::error::ErrorCode::InvalidProbability
-                ).with_context("index", format!("{}", i))
-                 .with_context("value", format!("{}", p))
-                 .with_context("expected", ">= 0.0 and finite"));
+                    "Categorical",
+                    "All probabilities must be non-negative and finite",
+                    crate::error::ErrorCode::InvalidProbability,
+                )
+                .with_context("index", format!("{}", i))
+                .with_context("value", format!("{}", p))
+                .with_context("expected", ">= 0.0 and finite"));
             }
         }
 
@@ -830,10 +646,11 @@ impl Categorical {
     pub fn uniform(k: usize) -> crate::error::FugueResult<Self> {
         if k == 0 {
             return Err(crate::error::FugueError::invalid_parameters(
-                "Categorical", 
-                "Number of categories must be positive", 
-                crate::error::ErrorCode::InvalidCount
-            ).with_context("k", "0"));
+                "Categorical",
+                "Number of categories must be positive",
+                crate::error::ErrorCode::InvalidCount,
+            )
+            .with_context("k", "0"));
         }
 
         let prob = 1.0 / k as f64;
@@ -901,40 +718,32 @@ impl Distribution<usize> for Categorical {
     }
 }
 
-/// Beta distribution on the interval [0, 1].
+/// A continuous distribution on the interval (0, 1), commonly used for modeling probabilities and proportions.
 ///
-/// A continuous distribution over the unit interval, commonly used for modeling
-/// probabilities, proportions, and as a conjugate prior for Bernoulli/Binomial
-/// distributions. The shape is controlled by two positive parameters α and β.
+/// Conjugate prior for Bernoulli/Binomial distributions.
 ///
-/// **Probability density function:**
-/// ```text
-/// f(x) = (x^(α-1) * (1-x)^(β-1)) / B(α,β)  for 0 < x < 1
-/// f(x) = 0                                  otherwise
-/// ```
-/// where B(α,β) is the beta function.
+/// Mathematical Properties:
+/// - **Support**: (0, 1)
+/// - **PDF**: f(x) = (x^(α-1) × (1-x)^(β-1)) / B(α,β)
+/// - **Mean**: α / (α + β)
+/// - **Variance**: (αβ) / ((α+β)²(α+β+1))
 ///
-/// **Support:** (0, 1)
-///
-/// # Fields
-///
-/// * `alpha` - First shape parameter α (must be positive)
-/// * `beta` - Second shape parameter β (must be positive)
-///
-/// # Examples
-///
+/// Example:
 /// ```rust
-/// use fugue::*;
+/// # use fugue::*;
 ///
-/// // Uniform on [0,1] (alpha=1, beta=1)
-/// let uniform_beta = Beta::new(1.0, 1.0).unwrap();
+/// // Uniform on [0,1]
+/// let uniform = sample(addr!("p"), Beta::new(1.0, 1.0).unwrap());
 ///
-/// // Prior for a probability parameter
-/// let prob_prior = sample(addr!("p"), Beta::new(2.0, 5.0).unwrap());
+/// // Prior for success probability
+/// let prob_prior = sample(addr!("success_rate"), Beta::new(2.0, 5.0).unwrap());
 ///
-/// // Conjugate prior for Bernoulli likelihood
-/// let model = sample(addr!("success_rate"), Beta::new(3.0, 7.0).unwrap())
+/// // Conjugate prior-likelihood pair
+/// let model = sample(addr!("p"), Beta::new(3.0, 7.0).unwrap())
 ///     .bind(|p| observe(addr!("trial"), Bernoulli::new(p).unwrap(), true));
+///
+/// // Skewed towards 0 (beta > alpha)
+/// let skewed = sample(addr!("proportion"), Beta::new(2.0, 8.0).unwrap());
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Beta {
@@ -943,25 +752,26 @@ pub struct Beta {
     /// Second shape parameter β (must be positive).
     beta: f64,
 }
-
 impl Beta {
     /// Create a new Beta distribution with validated parameters.
     pub fn new(alpha: f64, beta: f64) -> crate::error::FugueResult<Self> {
         if alpha <= 0.0 || !alpha.is_finite() {
             return Err(crate::error::FugueError::invalid_parameters(
-                "Beta", 
-                "Alpha parameter must be positive and finite", 
-                crate::error::ErrorCode::InvalidShape
-            ).with_context("alpha", format!("{}", alpha))
-             .with_context("expected", "> 0.0 and finite"));
+                "Beta",
+                "Alpha parameter must be positive and finite",
+                crate::error::ErrorCode::InvalidShape,
+            )
+            .with_context("alpha", format!("{}", alpha))
+            .with_context("expected", "> 0.0 and finite"));
         }
         if beta <= 0.0 || !beta.is_finite() {
             return Err(crate::error::FugueError::invalid_parameters(
-                "Beta", 
-                "Beta parameter must be positive and finite", 
-                crate::error::ErrorCode::InvalidShape
-            ).with_context("beta", format!("{}", beta))
-             .with_context("expected", "> 0.0 and finite"));
+                "Beta",
+                "Beta parameter must be positive and finite",
+                crate::error::ErrorCode::InvalidShape,
+            )
+            .with_context("beta", format!("{}", beta))
+            .with_context("expected", "> 0.0 and finite"));
         }
         Ok(Beta { alpha, beta })
     }
@@ -1024,40 +834,32 @@ impl Distribution<f64> for Beta {
     }
 }
 
-/// Gamma distribution.
+/// A continuous distribution over positive real numbers, parameterized by shape and rate.
 ///
-/// A continuous probability distribution over positive real numbers, parameterized
-/// by shape (k) and rate (λ). The Gamma distribution is commonly used for modeling
-/// waiting times, scale parameters, and as a conjugate prior for Poisson distributions.
+/// Commonly used for modeling waiting times and as a conjugate prior for Poisson distributions.
 ///
-/// **Probability density function:**
-/// ```text
-/// f(x) = (λ^k / Γ(k)) * x^(k-1) * exp(-λx)  for x > 0
-/// f(x) = 0                                   for x ≤ 0
-/// ```
-/// where Γ(k) is the gamma function.
+/// Mathematical Properties:
+/// - **Support**: (0, +∞)
+/// - **PDF**: f(x) = (λ^k / Γ(k)) × x^(k-1) × exp(-λx)
+/// - **Mean**: k / λ
+/// - **Variance**: k / λ²
 ///
-/// **Support:** (0, +∞)
-///
-/// # Fields
-///
-/// * `shape` - Shape parameter k (must be positive)
-/// * `rate` - Rate parameter λ (must be positive). Note: rate = 1/scale
-///
-/// # Examples
-///
+/// Example:
 /// ```rust
-/// use fugue::*;
+/// # use fugue::*;
 ///
-/// // Exponential is Gamma(1, rate)
-/// let exponential_like = Gamma::new(1.0, 2.0).unwrap();
+/// // Shape=1 gives Exponential distribution
+/// let exponential_like = sample(addr!("wait_time"), Gamma::new(1.0, 2.0).unwrap());
 ///
-/// // Prior for precision (inverse variance)
+/// // Prior for precision parameter
 /// let precision = sample(addr!("precision"), Gamma::new(2.0, 1.0).unwrap());
 ///
 /// // Conjugate prior for Poisson rate
 /// let model = sample(addr!("rate"), Gamma::new(3.0, 2.0).unwrap())
 ///     .bind(|lambda| observe(addr!("count"), Poisson::new(lambda).unwrap(), 5u64));
+///
+/// // Scale parameter (rate = 1/scale)
+/// let scale_param = sample(addr!("scale"), Gamma::new(2.0, 0.5).unwrap()); // mean = 4
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Gamma {
@@ -1066,25 +868,26 @@ pub struct Gamma {
     /// Rate parameter λ (must be positive).
     rate: f64,
 }
-
 impl Gamma {
     /// Create a new Gamma distribution with validated parameters.
     pub fn new(shape: f64, rate: f64) -> crate::error::FugueResult<Self> {
         if shape <= 0.0 || !shape.is_finite() {
             return Err(crate::error::FugueError::invalid_parameters(
-                "Gamma", 
-                "Shape parameter must be positive and finite", 
-                crate::error::ErrorCode::InvalidShape
-            ).with_context("shape", format!("{}", shape))
-             .with_context("expected", "> 0.0 and finite"));
+                "Gamma",
+                "Shape parameter must be positive and finite",
+                crate::error::ErrorCode::InvalidShape,
+            )
+            .with_context("shape", format!("{}", shape))
+            .with_context("expected", "> 0.0 and finite"));
         }
         if rate <= 0.0 || !rate.is_finite() {
             return Err(crate::error::FugueError::invalid_parameters(
-                "Gamma", 
-                "Rate parameter must be positive and finite", 
-                crate::error::ErrorCode::InvalidRate
-            ).with_context("rate", format!("{}", rate))
-             .with_context("expected", "> 0.0 and finite"));
+                "Gamma",
+                "Rate parameter must be positive and finite",
+                crate::error::ErrorCode::InvalidRate,
+            )
+            .with_context("rate", format!("{}", rate))
+            .with_context("expected", "> 0.0 and finite"));
         }
         Ok(Gamma { shape, rate })
     }
@@ -1141,63 +944,33 @@ impl Distribution<f64> for Gamma {
     }
 }
 
-/// **Type-safe Binomial distribution** → returns `u64`
+/// A discrete distribution representing the number of successes in n independent trials, with probability of success p.
 ///
-/// A discrete distribution representing the number of successes in n independent
-/// Bernoulli trials, each with success probability p. This distribution models
-/// counting processes and is widely used in statistics.
+/// Returns `u64` for natural success counting.
 ///
-/// ## 🎯 Type Safety Innovation
+/// Mathematical Properties:
+/// - **Support**: {0, 1, ..., n}
+/// - **PMF**: P(X = k) = C(n,k) × p^k × (1-p)^(n-k)
+/// - **Mean**: n × p
+/// - **Variance**: n × p × (1-p)
 ///
-/// **Unlike traditional PPLs**, Fugue's Binomial distribution returns **`u64` directly**,
-/// providing natural counting semantics for the number of successes without casting.
-///
-/// **Probability mass function:**
-/// ```text
-/// P(X = k) = C(n,k) * p^k * (1-p)^(n-k)  for k ∈ {0, 1, ..., n}
-/// ```
-/// where C(n,k) is the binomial coefficient "n choose k".
-///
-/// **Support:** {0, 1, ..., n} (natural success counts!)
-///
-/// # Fields
-///
-/// * `n` - Number of trials (must be non-negative)
-/// * `p` - Probability of success on each trial (must be in [0, 1])
-///
-/// # Examples
-///
+/// Example:
 /// ```rust
-/// use fugue::*;
+/// # use fugue::*;
 ///
-/// // Type-safe success counting - returns u64 directly!
-/// let trial_model: Model<u64> = sample(addr!("successes"), Binomial::new(10, 0.5).unwrap());
-/// let analysis = trial_model.bind(|success_count| {
-///     // success_count is naturally u64 - can be used in arithmetic directly
-///     let success_rate = success_count as f64 / 10.0;
-///     let verdict = if success_rate > 0.7 {
-///         "High success rate!"
-///     } else if success_rate < 0.3 {
-///         "Low success rate"
-///     } else {
-///         "Moderate success rate"
-///     };
-///     pure(verdict.to_string())
-/// });
-///
-/// // Clinical trial with type-safe counting
-/// let clinical_trial = sample(addr!("success_rate"), Beta::new(1.0, 1.0).unwrap())
-///     .bind(|p| {
-///         sample(addr!("successes"), Binomial::new(100, p).unwrap())
-///             .bind(|successes| {
-///                 // successes is naturally u64 - no casting needed!
-///                 let efficacy = successes as f64 / 100.0;
-///                 pure(efficacy)
-///             })
+/// // 10 coin flips
+/// let successes = sample(addr!("heads"), Binomial::new(10, 0.5).unwrap())
+///     .bind(|count| {
+///         let rate = count as f64 / 10.0;
+///         pure(format!("Success rate: {:.1}%", rate * 100.0))
 ///     });
 ///
-/// // Type-safe observation of trial results
-/// let obs_model = observe(addr!("trial_successes"), Binomial::new(20, 0.3).unwrap(), 7u64);
+/// // Clinical trial
+/// let trial = sample(addr!("success_rate"), Beta::new(1.0, 1.0).unwrap())
+///     .bind(|p| sample(addr!("successes"), Binomial::new(100, p).unwrap()));
+///
+/// // Observe trial results
+/// let observed = observe(addr!("trial_successes"), Binomial::new(20, 0.3).unwrap(), 7u64);
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Binomial {
@@ -1206,17 +979,17 @@ pub struct Binomial {
     /// Probability of success on each trial (must be in [0, 1]).
     p: f64,
 }
-
 impl Binomial {
     /// Create a new Binomial distribution with validated parameters.
     pub fn new(n: u64, p: f64) -> crate::error::FugueResult<Self> {
         if !p.is_finite() || !(0.0..=1.0).contains(&p) {
             return Err(crate::error::FugueError::invalid_parameters(
-                "Binomial", 
-                "Probability must be in [0, 1]", 
-                crate::error::ErrorCode::InvalidProbability
-            ).with_context("p", format!("{}", p))
-             .with_context("expected", "[0.0, 1.0]"));
+                "Binomial",
+                "Probability must be in [0, 1]",
+                crate::error::ErrorCode::InvalidProbability,
+            )
+            .with_context("p", format!("{}", p))
+            .with_context("expected", "[0.0, 1.0]"));
         }
         Ok(Binomial { n, p })
     }
@@ -1251,76 +1024,56 @@ impl Distribution<u64> for Binomial {
     }
 }
 
-/// **Type-safe Poisson distribution** → returns `u64`
+/// A discrete distribution for modeling the number of events occurring in a fixed interval.
 ///
-/// A discrete probability distribution expressing the probability of a given number
-/// of events occurring in a fixed interval of time or space, given that these events
-/// occur with a known constant mean rate and independently of each other.
+/// Returns `u64` for natural counting arithmetic.
 ///
-/// ## 🎯 Type Safety Innovation
+/// Mathematical Properties:
+/// - **Support**: {0, 1, 2, 3, ...}
+/// - **PMF**: P(X = k) = (λ^k × e^(-λ)) / k!
+/// - **Mean**: λ
+/// - **Variance**: λ
+/// - **Memoryless**: Past events don't affect future rates
 ///
-/// **Unlike traditional PPLs**, Fugue's Poisson distribution returns **`u64` directly**,
-/// providing natural counting semantics without error-prone casting from `f64`.
-///
-/// **Probability mass function:**
-/// ```text
-/// P(X = k) = (λ^k * exp(-λ)) / k!  for k ∈ {0, 1, 2, ...}
-/// ```
-///
-/// **Support:** {0, 1, 2, ...} (natural non-negative integers!)
-///
-/// # Fields
-///
-/// * `lambda` - Rate parameter λ (must be positive). This is both the mean and variance.
-///
-/// # Examples
-///
+/// Example:
 /// ```rust
-/// use fugue::*;
+/// # use fugue::*;
 ///
-/// // Type-safe count modeling - returns u64 directly!
-/// let count_model: Model<u64> = sample(addr!("events"), Poisson::new(3.5).unwrap());
-/// let analysis = count_model.bind(|count| {
-///     // count is naturally u64 - can be used directly in match patterns
-///     let status = match count {
-///         0 => "No events occurred",
-///         1 => "Single event occurred",
-///         n if n > 10 => "High activity period!",
-///         n => &format!("{} events occurred", n),
-///     };
-///     pure(status.to_string())
-/// });
-///
-/// // Hierarchical count modeling with type safety
-/// let hierarchical = sample(addr!("rate"), Gamma::new(2.0, 1.0).unwrap())
-///     .bind(|lambda| {
-///         sample(addr!("count"), Poisson::new(lambda).unwrap())
-///             .bind(|count| {
-///                 // count is naturally u64 - no casting needed!
-///                 let bonus = if count > 5 { count * 2 } else { count };
-///                 pure(bonus)
-///             })
+/// // Model event counts
+/// let events = sample(addr!("events"), Poisson::new(3.0).unwrap())
+///     .bind(|count| {
+///         let status = match count {
+///             0 => "No events",
+///             1 => "Single event",
+///             n if n > 10 => "High activity",
+///             _ => "Normal activity"
+///         };
+///         pure(status.to_string())
 ///     });
 ///
-/// // Type-safe observation of count data
-/// let obs_model = observe(addr!("observed_count"), Poisson::new(4.0).unwrap(), 7u64);
+/// // Hierarchical model with Gamma prior
+/// let hierarchical = sample(addr!("rate"), Gamma::new(2.0, 1.0).unwrap())
+///     .bind(|lambda| sample(addr!("count"), Poisson::new(lambda).unwrap()));
+///
+/// // Observe count data
+/// let observed = observe(addr!("observed_count"), Poisson::new(4.0).unwrap(), 7u64);
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Poisson {
     /// Rate parameter λ (must be positive). Mean and variance of the distribution.
     lambda: f64,
 }
-
 impl Poisson {
     /// Create a new Poisson distribution with validated parameters.
     pub fn new(lambda: f64) -> crate::error::FugueResult<Self> {
         if lambda <= 0.0 || !lambda.is_finite() {
             return Err(crate::error::FugueError::invalid_parameters(
-                "Poisson", 
-                "Rate parameter lambda must be positive and finite", 
-                crate::error::ErrorCode::InvalidRate
-            ).with_context("lambda", format!("{}", lambda))
-             .with_context("expected", "> 0.0 and finite"));
+                "Poisson",
+                "Rate parameter lambda must be positive and finite",
+                crate::error::ErrorCode::InvalidRate,
+            )
+            .with_context("lambda", format!("{}", lambda))
+            .with_context("expected", "> 0.0 and finite"));
         }
         Ok(Poisson { lambda })
     }
@@ -1360,5 +1113,136 @@ impl Distribution<u64> for Poisson {
     }
     fn clone_box(&self) -> Box<dyn Distribution<u64>> {
         Box::new(*self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
+    #[test]
+    fn normal_constructor_and_log_prob() {
+        assert!(Normal::new(0.0, 1.0).is_ok());
+        assert!(Normal::new(f64::NAN, 1.0).is_err());
+        assert!(Normal::new(0.0, 0.0).is_err());
+
+        let n = Normal::new(0.0, 1.0).unwrap();
+        assert!(n.log_prob(&0.0).is_finite());
+        assert_eq!(n.log_prob(&f64::INFINITY), f64::NEG_INFINITY);
+    }
+
+    #[test]
+    fn uniform_support_and_log_prob() {
+        assert!(Uniform::new(0.0, 1.0).is_ok());
+        assert!(Uniform::new(1.0, 0.0).is_err());
+        let u = Uniform::new(-2.0, 2.0).unwrap();
+        // Inside support
+        let lp0 = u.log_prob(&0.0);
+        assert!(lp0.is_finite());
+        // Outside support
+        assert_eq!(u.log_prob(&2.0), f64::NEG_INFINITY);
+        assert_eq!(u.log_prob(&-2.1), f64::NEG_INFINITY);
+    }
+
+    #[test]
+    fn lognormal_validation() {
+        assert!(LogNormal::new(0.0, 1.0).is_ok());
+        assert!(LogNormal::new(0.0, 0.0).is_err());
+        let ln = LogNormal::new(0.0, 1.0).unwrap();
+        assert_eq!(ln.log_prob(&0.0), f64::NEG_INFINITY);
+        assert!(ln.log_prob(&1.0).is_finite());
+    }
+
+    #[test]
+    fn exponential_validation() {
+        assert!(Exponential::new(1.0).is_ok());
+        assert!(Exponential::new(0.0).is_err());
+        let e = Exponential::new(2.0).unwrap();
+        assert_eq!(e.log_prob(&-1.0), f64::NEG_INFINITY);
+        assert!((e.log_prob(&0.0) - (2.0f64).ln()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn bernoulli_validation() {
+        assert!(Bernoulli::new(0.5).is_ok());
+        assert!(Bernoulli::new(-0.1).is_err());
+        let b = Bernoulli::new(0.25).unwrap();
+        assert!((b.log_prob(&true) - (0.25f64).ln()).abs() < 1e-12);
+        assert!((b.log_prob(&false) - (0.75f64).ln()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn categorical_validation_and_log_prob() {
+        assert!(Categorical::new(vec![0.5, 0.5]).is_ok());
+        assert!(Categorical::new(vec![]).is_err());
+        assert!(Categorical::new(vec![0.6, 0.5]).is_err());
+
+        let c = Categorical::new(vec![0.2, 0.8]).unwrap();
+        assert!((c.log_prob(&1) - (0.8f64).ln()).abs() < 1e-12);
+        assert_eq!(c.log_prob(&2), f64::NEG_INFINITY);
+    }
+
+    #[test]
+    fn beta_validation_and_support() {
+        assert!(Beta::new(2.0, 3.0).is_ok());
+        assert!(Beta::new(0.0, 1.0).is_err());
+        let b = Beta::new(2.0, 5.0).unwrap();
+        assert_eq!(b.log_prob(&0.0), f64::NEG_INFINITY);
+        assert_eq!(b.log_prob(&1.0), f64::NEG_INFINITY);
+        assert!(b.log_prob(&0.5).is_finite());
+    }
+
+    #[test]
+    fn gamma_validation_and_support() {
+        assert!(Gamma::new(1.5, 2.0).is_ok());
+        assert!(Gamma::new(0.0, 2.0).is_err());
+        assert!(Gamma::new(1.0, 0.0).is_err());
+        let g = Gamma::new(2.0, 1.0).unwrap();
+        assert_eq!(g.log_prob(&-1.0), f64::NEG_INFINITY);
+        assert!(g.log_prob(&1.0).is_finite());
+    }
+
+    #[test]
+    fn binomial_validation_and_log_prob() {
+        assert!(Binomial::new(10, 0.5).is_ok());
+        assert!(Binomial::new(10, 1.5).is_err());
+        let bi = Binomial::new(5, 0.3).unwrap();
+        assert_eq!(bi.log_prob(&6), f64::NEG_INFINITY); // k > n
+        assert!(bi.log_prob(&3).is_finite());
+    }
+
+    #[test]
+    fn poisson_validation_and_log_prob() {
+        assert!(Poisson::new(1.0).is_ok());
+        assert!(Poisson::new(0.0).is_err());
+        let p = Poisson::new(3.0).unwrap();
+        assert!(p.log_prob(&0).is_finite());
+        assert!(p.log_prob(&5).is_finite());
+    }
+
+    #[test]
+    fn sampling_basic_sanity() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let n = Normal::new(0.0, 1.0).unwrap();
+        let x = n.sample(&mut rng);
+        assert!(x.is_finite());
+
+        let u = Uniform::new(-1.0, 2.0).unwrap();
+        let y = u.sample(&mut rng);
+        assert!(y >= -1.0 && y < 2.0);
+
+        let b = Bernoulli::new(0.7).unwrap();
+        let _z = b.sample(&mut rng);
+    }
+
+    #[test]
+    fn categorical_uniform_constructor() {
+        let cu = Categorical::uniform(4).unwrap();
+        assert_eq!(cu.len(), 4);
+        for &p in cu.probs() {
+            assert!((p - 0.25).abs() < 1e-12);
+        }
     }
 }

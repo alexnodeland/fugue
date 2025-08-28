@@ -1,7 +1,4 @@
-//! Memory management optimizations for probabilistic programming.
-//!
-//! This module provides efficient memory management strategies to reduce
-//! allocation overhead and improve cache locality in probabilistic computation.
+#![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/api/runtime/memory.md"))]
 
 use crate::core::address::Address;
 use crate::core::distribution::Distribution;
@@ -9,10 +6,37 @@ use crate::runtime::trace::{Choice, ChoiceValue, Trace};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-/// Copy-on-write trace for efficient MCMC operations.
+/// Copy-on-write trace for efficient memory sharing in MCMC operations.
 ///
-/// Most MCMC operations only modify a small number of choices,
-/// so we can share the majority of the trace data between states.
+/// Most MCMC operations modify only a small number of choices, so CowTrace
+/// shares the majority of trace data between states using `Arc<BTreeMap>`.
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// # use fugue::runtime::memory::CowTrace;
+///
+/// // Convert from regular trace
+/// # let mut rng = rand::thread_rng();
+/// # let (_, trace) = runtime::handler::run(
+/// #     PriorHandler { rng: &mut rng, trace: Trace::default() },
+/// #     sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+/// # );
+/// let cow_trace = CowTrace::from_trace(trace);
+///
+/// // Clone is very efficient (shares memory)
+/// let clone1 = cow_trace.clone();
+/// let clone2 = cow_trace.clone();
+///
+/// // Modification triggers copy-on-write only when needed
+/// let mut modified = clone1.clone();
+/// modified.insert_choice(addr!("new"), Choice {
+///     addr: addr!("new"),
+///     value: ChoiceValue::F64(42.0),
+///     logp: -1.0,
+/// });
+/// // Now `modified` has its own copy, others still share
+/// ```
 #[derive(Clone, Debug)]
 pub struct CowTrace {
     choices: Arc<BTreeMap<Address, Choice>>,
@@ -83,7 +107,31 @@ impl CowTrace {
     }
 }
 
-/// Efficient trace builder that minimizes allocations.
+/// Efficient trace builder that minimizes allocations during construction.
+///
+/// TraceBuilder uses pre-allocated collections and provides type-specific
+/// methods to build traces efficiently with minimal memory overhead.
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// # use fugue::runtime::memory::TraceBuilder;
+///
+/// let mut builder = TraceBuilder::new();
+///
+/// // Add different types of samples efficiently
+/// builder.add_sample(addr!("x"), 1.5, -0.5);
+/// builder.add_sample_bool(addr!("flag"), true, -0.693);
+/// builder.add_sample_u64(addr!("count"), 42, -1.0);
+///
+/// // Add observations and factors
+/// builder.add_observation(-2.3); // Likelihood contribution
+/// builder.add_factor(-0.1);      // Soft constraint
+///
+/// // Build final trace
+/// let trace = builder.build();
+/// assert_eq!(trace.choices.len(), 3);
+/// ```
 pub struct TraceBuilder {
     choices: BTreeMap<Address, Choice>,
     log_prior: f64,
@@ -170,10 +218,33 @@ impl TraceBuilder {
     }
 }
 
-/// Memory pool for reusing trace allocations.
+/// Memory pool for reusing trace allocations to reduce overhead.
 ///
-/// This pool maintains a collection of cleared Trace objects that can be reused
-/// to reduce allocation overhead in MCMC and other inference algorithms.
+/// TracePool maintains a collection of cleared Trace objects that can be
+/// reused to reduce allocation overhead in MCMC and other inference algorithms.
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// # use fugue::runtime::memory::TracePool;
+///
+/// let mut pool = TracePool::new(10); // Pool up to 10 traces
+///
+/// // Get traces from pool (creates new ones initially)
+/// let trace1 = pool.get();
+/// let trace2 = pool.get();
+/// assert_eq!(pool.stats().misses, 2); // Both were cache misses
+///
+/// // Return traces to pool for reuse
+/// pool.return_trace(trace1);
+/// pool.return_trace(trace2);
+/// assert_eq!(pool.stats().returns, 2);
+///
+/// // Next gets will reuse pooled traces (cache hits)
+/// let trace3 = pool.get();
+/// assert_eq!(pool.stats().hits, 1);
+/// assert_eq!(trace3.choices.len(), 0); // Trace was cleared
+/// ```
 pub struct TracePool {
     available: Vec<Trace>,
     max_size: usize,
@@ -182,6 +253,29 @@ pub struct TracePool {
 }
 
 /// Statistics for monitoring TracePool usage and efficiency.
+///
+/// PoolStats tracks cache hits/misses and provides metrics to optimize
+/// memory pool performance in inference algorithms.
+///
+/// Example:
+/// ```rust
+/// # use fugue::runtime::memory::*;
+///
+/// let mut pool = TracePool::new(5);
+///
+/// // Generate some cache activity
+/// let trace1 = pool.get(); // miss
+/// let trace2 = pool.get(); // miss
+/// pool.return_trace(trace1);
+/// let trace3 = pool.get(); // hit (reuses trace1)
+///
+/// // Check performance metrics
+/// let stats = pool.stats();
+/// println!("Hit ratio: {:.1}%", stats.hit_ratio());
+/// println!("Total operations: {}", stats.total_gets());
+/// assert_eq!(stats.hits, 1);
+/// assert_eq!(stats.misses, 2);
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct PoolStats {
     /// Number of successful gets from the pool (cache hits).
@@ -323,7 +417,37 @@ impl TracePool {
     }
 }
 
-/// Optimized handler that uses memory pooling.
+/// Optimized handler that uses memory pooling for zero-allocation inference.
+///
+/// PooledPriorHandler combines TraceBuilder efficiency with TracePool reuse
+/// to achieve zero-allocation execution after pool warm-up.
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// # use fugue::runtime::memory::*;
+/// # use rand::rngs::StdRng;
+/// # use rand::SeedableRng;
+///
+/// let mut pool = TracePool::new(10);
+/// let mut rng = StdRng::seed_from_u64(42);
+///
+/// // Run model with pooled handler
+/// let (result, trace) = runtime::handler::run(
+///     PooledPriorHandler {
+///         rng: &mut rng,
+///         trace_builder: TraceBuilder::new(),
+///         pool: &mut pool,
+///     },
+///     sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+/// );
+///
+/// // Return trace to pool for reuse
+/// pool.return_trace(trace);
+///
+/// // Subsequent runs will reuse pooled traces (zero allocations)
+/// assert!(result.is_finite());
+/// ```
 pub struct PooledPriorHandler<'a, R: rand::RngCore> {
     pub rng: &'a mut R,
     pub trace_builder: TraceBuilder,
@@ -621,5 +745,38 @@ mod memory_tests {
         assert_eq!(stats.drops, 0);
         assert_eq!(stats.total_gets(), 20);
         assert!((stats.hit_ratio() - 25.0).abs() < 1e-10);
+    }
+}
+
+#[cfg(test)]
+mod pooled_tests {
+    use super::*;
+    use crate::addr;
+    use crate::core::distribution::*;
+    use crate::core::model::{observe, sample, ModelExt};
+    use crate::runtime::handler::run;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
+    #[test]
+    fn pooled_prior_handler_builds_trace_and_updates_pool() {
+        let mut pool = TracePool::new(4);
+        let mut rng = StdRng::seed_from_u64(40);
+        let (_val, trace) = run(
+            PooledPriorHandler {
+                rng: &mut rng,
+                trace_builder: TraceBuilder::new(),
+                pool: &mut pool,
+            },
+            sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+                .and_then(|x| observe(addr!("y"), Normal::new(x, 1.0).unwrap(), 0.3)),
+        );
+        assert!(trace.choices.contains_key(&addr!("x")));
+        assert!(trace.log_likelihood.is_finite());
+
+        // Return a trace and check stats update when pool accepts
+        let before_returns = pool.stats().returns;
+        pool.return_trace(trace);
+        assert_eq!(pool.stats().returns, before_returns + 1);
     }
 }

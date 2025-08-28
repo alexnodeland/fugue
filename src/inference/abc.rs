@@ -541,3 +541,78 @@ pub fn abc_scalar_summary<A, R: Rng>(
         max_samples,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::addr;
+    use crate::core::distribution::*;
+    use crate::core::model::sample;
+
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
+    #[test]
+    fn distance_functions_work() {
+        let eu = EuclideanDistance;
+        let man = ManhattanDistance;
+        let a = vec![1.0, 2.0, 3.0];
+        let b = vec![1.1, 2.1, 2.9];
+        let d_eu = eu.distance(&a, &b);
+        let d_man = man.distance(&a, &b);
+        assert!(d_eu > 0.0);
+        assert!(d_man > 0.0);
+        // Euclidean should be <= Manhattan for same vectors
+        assert!(d_eu <= d_man + 1e-12);
+    }
+
+    #[test]
+    fn abc_scalar_summary_accepts_with_large_tolerance() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let samples = abc_scalar_summary(
+            &mut rng,
+            || sample(addr!("mu"), Normal::new(0.0, 2.0).unwrap()),
+            |trace| trace.get_f64(&addr!("mu")).unwrap_or(0.0),
+            0.0,  // observed summary
+            10.0, // large tolerance to ensure acceptance
+            3,
+        );
+        assert!(!samples.is_empty());
+    }
+
+    #[test]
+    fn abc_rejection_can_return_empty_with_tight_tolerance() {
+        let mut rng = StdRng::seed_from_u64(43);
+        let observed = vec![1000.0]; // far from prior mean 0
+        let res = abc_rejection(
+            &mut rng,
+            || sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap()),
+            |trace| vec![trace.get_f64(&addr!("mu")).unwrap_or(0.0)],
+            &observed,
+            &EuclideanDistance,
+            1e-6, // extremely tight
+            3,
+        );
+        assert!(res.is_empty());
+    }
+
+    #[test]
+    fn abc_smc_respects_tolerance_schedule() {
+        let mut rng = StdRng::seed_from_u64(44);
+        let observed = vec![0.0];
+        let config = ABCSMCConfig {
+            initial_tolerance: 2.0,
+            tolerance_schedule: vec![1.0, 0.5],
+            particles_per_round: 4,
+        };
+        let res = abc_smc(
+            &mut rng,
+            || sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap()),
+            |trace| vec![trace.get_f64(&addr!("mu")).unwrap_or(0.0)],
+            &observed,
+            &EuclideanDistance,
+            config,
+        );
+        assert_eq!(res.len(), 4);
+    }
+}

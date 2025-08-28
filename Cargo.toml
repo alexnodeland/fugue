@@ -2,7 +2,7 @@
 name = "fugue"
 version = "0.3.0"
 edition = "2021"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 description = "Production-ready monadic PPL with numerically stable inference, comprehensive diagnostics, and memory optimization."
 readme = "README.md"
 keywords = ["probabilistic-programming", "ppl", "monad", "effects", "traces"]
@@ -28,8 +28,16 @@ libm = "0.2"
 clap = { version = "4", features = ["derive"] }
 # Testing dependencies  
 proptest = "1.0"
+cargo-llvm-cov = "0.6.18"
 # Benchmarking dependencies
 criterion = { version = "0.5", features = ["html_reports"] }
+# Documentation Dependencies
+mdbook = "0.4.52"
+mdbook-mermaid = "0.15.0"
+mdbook-katex = "0.9.4"
+mdbook-admonish = "1.20.0"
+mdbook-linkcheck = "0.7.7"
+mdbook-toc = "0.14.2"
 
 [[bench]]
 name = "memory_benchmarks"

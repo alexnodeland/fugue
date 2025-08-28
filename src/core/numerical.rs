@@ -1,31 +1,16 @@
-//! Numerical utilities for stable probabilistic computation.
+//!Numerical utilities for stable probabilistic computation.
 //!
-//! This module provides numerically stable implementations of common operations
-//! in probabilistic programming. Proper numerical stability is crucial for
-//! reliable inference, especially when dealing with extreme probabilities.
+//! This module provides numerically stable implementations of common operations in probabilistic programming.
+//! Proper numerical stability is crucial for reliable inference, especially when dealing with extreme probabilities.
 
-/// Compute log(sum(exp(x_i))) in a numerically stable way.
+/// Compute log(sum(exp(x_i))) stably by factoring out the max; returns -∞ if all inputs are -∞.
 ///
-/// This is essential for normalizing log-probabilities without underflow.
-/// The standard trick is to factor out the maximum value to prevent overflow.
-///
-/// # Arguments
-///
-/// * `log_values` - Slice of log-values to sum
-///
-/// # Returns
-///
-/// log(Σᵢ exp(xᵢ)) computed stably, or -∞ if all inputs are -∞
-///
-/// # Examples
-///
+/// Example:
 /// ```rust
-/// use fugue::core::numerical::log_sum_exp;
-///
-/// let log_vals = vec![-1.0, -2.0, -3.0];
-/// let result = log_sum_exp(&log_vals);
-/// // log_sum_exp([-1, -2, -3]) ≈ log(e^(-1) + e^(-2) + e^(-3)) ≈ -0.591
-/// assert!((result - (-0.5914)).abs() < 0.01);
+/// # use fugue::core::numerical::log_sum_exp;
+/// let xs = [-1.0, -2.0, -3.0];
+/// let y = log_sum_exp(&xs);
+/// assert!((y - (-0.5914)).abs() < 1e-2);
 /// ```
 pub fn log_sum_exp(log_values: &[f64]) -> f64 {
     if log_values.is_empty() {
@@ -54,17 +39,15 @@ pub fn log_sum_exp(log_values: &[f64]) -> f64 {
 
 /// Compute log(sum(w_i * exp(x_i))) stably for weighted log-sum-exp.
 ///
-/// This generalizes log_sum_exp to handle weighted sums, commonly needed
-/// in importance sampling and particle filtering.
+/// This generalizes log_sum_exp to handle weighted sums, commonly needed in importance sampling and particle filtering.
 ///
-/// # Arguments
-///
-/// * `log_values` - Log-values to sum
-/// * `weights` - Linear weights (not log-weights)
-///
-/// # Returns
-///
-/// log(Σᵢ wᵢ exp(xᵢ)) computed stably
+/// Example:
+/// ```rust
+/// # use fugue::core::numerical::weighted_log_sum_exp;
+/// let log_values = vec![-1.0, -2.0, -3.0];
+/// let weights = vec![0.5, 0.3, 0.2];
+/// let result = weighted_log_sum_exp(&log_values, &weights);
+/// ```
 pub fn weighted_log_sum_exp(log_values: &[f64], weights: &[f64]) -> f64 {
     assert_eq!(log_values.len(), weights.len());
 
@@ -95,16 +78,12 @@ pub fn weighted_log_sum_exp(log_values: &[f64], weights: &[f64]) -> f64 {
 
 /// Normalize log-probabilities to linear probabilities stably.
 ///
-/// Converts a vector of log-probabilities to normalized linear probabilities
-/// without underflow or overflow issues.
-///
-/// # Arguments
-///
-/// * `log_probs` - Log-probabilities to normalize
-///
-/// # Returns
-///
-/// Vector of normalized linear probabilities that sum to 1.0
+/// Example:
+/// ```rust
+/// # use fugue::core::numerical::normalize_log_probs;
+/// let log_probs = vec![-1.0, -2.0, -3.0];
+/// let normalized = normalize_log_probs(&log_probs);
+/// ```
 pub fn normalize_log_probs(log_probs: &[f64]) -> Vec<f64> {
     let log_sum = log_sum_exp(log_probs);
     log_probs.iter().map(|&lp| (lp - log_sum).exp()).collect()
@@ -112,8 +91,13 @@ pub fn normalize_log_probs(log_probs: &[f64]) -> Vec<f64> {
 
 /// Compute log(1 + exp(x)) stably to avoid overflow.
 ///
-/// This function is crucial for logistic regression and other applications
-/// where we need to compute log of sigmoid-like functions.
+/// Example:
+/// ```rust
+/// # use fugue::core::numerical::log1p_exp;
+/// let x = -100.0;
+/// let y = log1p_exp(x);
+/// assert!(y.abs() < 1e-40);
+/// ```
 pub fn log1p_exp(x: f64) -> f64 {
     if x > 33.3 {
         // For large x, 1 + exp(x) ≈ exp(x), so log(1 + exp(x)) ≈ x
@@ -127,9 +111,15 @@ pub fn log1p_exp(x: f64) -> f64 {
     }
 }
 
-/// Safe logarithm that handles edge cases gracefully.
+/// Safe logarithm that handles edge cases gracefully, returns -∞ for non-positive inputs instead of NaN or panicking.
 ///
-/// Returns -∞ for non-positive inputs instead of NaN or panicking.
+/// Example:
+/// ```rust
+/// # use fugue::core::numerical::safe_ln;
+/// let x = 1.0;
+/// let y = safe_ln(x);
+/// assert_eq!(y, 0.0);
+/// ```
 pub fn safe_ln(x: f64) -> f64 {
     if x <= 0.0 || !x.is_finite() {
         f64::NEG_INFINITY
@@ -140,7 +130,13 @@ pub fn safe_ln(x: f64) -> f64 {
 
 /// Numerically stable computation of log(Γ(x)) for gamma function.
 ///
-/// Wrapper around libm::lgamma with better error handling.
+/// Example:
+/// ```rust
+/// # use fugue::core::numerical::log_gamma;
+/// let x = 1.0;
+/// let y = log_gamma(x);
+/// assert!((y - 0.0).abs() < 1e-10);
+/// ```
 pub fn log_gamma(x: f64) -> f64 {
     if x <= 0.0 || !x.is_finite() {
         f64::NAN
@@ -194,5 +190,25 @@ mod tests {
         assert!((log1p_exp(50.0) - 50.0).abs() < 1e-10);
         assert!(log1p_exp(-50.0) < 1e-10);
         assert!(log1p_exp(0.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_weighted_log_sum_exp_more_edges() {
+        // Mixed signs and zeros
+        let logs = vec![-1000.0, 0.0, -10.0];
+        let weights = vec![0.0, 1.0, 0.0];
+        let res = weighted_log_sum_exp(&logs, &weights);
+        assert!((res - 0.0).abs() < 1e-12);
+
+        let weights2 = vec![0.5, 0.5, 0.0];
+        let res2 = weighted_log_sum_exp(&logs, &weights2);
+        assert!(res2.is_finite());
+    }
+
+    #[test]
+    fn test_safe_ln_edges() {
+        assert_eq!(safe_ln(-1.0), f64::NEG_INFINITY);
+        assert_eq!(safe_ln(f64::INFINITY), f64::NEG_INFINITY);
+        assert_eq!(safe_ln(1.0), 0.0);
     }
 }

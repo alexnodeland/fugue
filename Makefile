@@ -1,4 +1,4 @@
-.PHONY: help test coverage coverage-html clean lint fmt check all
+.PHONY: help test coverage clean lint fmt check all
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -9,16 +9,11 @@ help: ## Show this help message
 test: ## Run all tests
 	cargo test --all-features --workspace
 
-coverage: ## Generate coverage report (requires cargo-tarpaulin)
-	cargo tarpaulin --verbose --all-features --workspace --timeout 120 --out Xml --out Html --output-dir coverage
-
-coverage-html: coverage ## Generate and open HTML coverage report
-	open coverage/tarpaulin-report.html || xdg-open coverage/tarpaulin-report.html
+coverage: ## Generate coverage report (requires cargo-llvm-cov)
+	cargo llvm-cov --all-features --fail-under-lines 80 --html --open
 
 clean: ## Clean build artifacts and coverage reports
 	cargo clean
-	rm -rf coverage/
-	rm -f cobertura.xml tarpaulin-report.html
 
 lint: ## Run clippy linter
 	cargo clippy --all-targets --all-features -- -D warnings
@@ -35,8 +30,11 @@ bench: ## Run benchmarks
 doc: ## Generate and open documentation
 	cargo doc --all-features --no-deps --open
 
+mdbook: ## Build mdbook documentation
+	mdbook build docs
+
 install-tools: ## Install development tools
-	cargo install cargo-tarpaulin
+	cargo install cargo-llvm-cov
 	cargo install cargo-watch
 	cargo install cargo-edit
 
@@ -44,3 +42,5 @@ watch: ## Watch for changes and run tests
 	cargo watch -x test
 
 all: fmt lint test coverage ## Run all checks (format, lint, test, coverage)
+
+docs-all: doc mdbook ## Build all documentation (rustdoc + mdbook)

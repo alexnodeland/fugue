@@ -1,0 +1,43 @@
+name: CI (develop)
+
+on:
+  pull_request:
+    branches: [develop]
+  push:
+    branches: [develop]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+
+      - name: Install mdBook + plugins
+        run: |
+          cargo install mdbook mdbook-linkcheck mdbook-admonish mdbook-mermaid || true
+
+      - name: Format (check)
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Unit + integration tests
+        run: cargo test --all-features
+
+      - name: Doctests (rustdoc)
+        run: cargo test --doc
+
+      - name: mdBook tests (docs/)
+        if: hashFiles('docs/**/*.md') != ''
+        run: mdbook test docs

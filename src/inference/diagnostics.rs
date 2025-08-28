@@ -443,3 +443,90 @@ pub fn print_diagnostics(chains: &[Vec<Trace>]) {
         println!("  Average R-hat: {:.3}", avg_r_hat);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::addr;
+    use crate::core::distribution::*;
+    use crate::core::model::{observe, sample, ModelExt};
+    use crate::runtime::handler::run;
+    use crate::runtime::interpreters::PriorHandler;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
+    fn generate_chain(seed: u64, n: usize) -> Vec<Trace> {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let mut traces = Vec::new();
+        for _ in 0..n {
+            let (_a, t) = run(
+                PriorHandler {
+                    rng: &mut rng,
+                    trace: Trace::default(),
+                },
+                sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
+                    .and_then(|mu| observe(addr!("y"), Normal::new(mu, 0.5).unwrap(), 0.0)),
+            );
+            traces.push(t);
+        }
+        traces
+    }
+
+    #[test]
+    fn extractors_return_expected_values() {
+        let chain = generate_chain(1, 5);
+        let vals = extract_f64_values(&chain, &addr!("mu"));
+        assert_eq!(vals.len(), 5);
+        let bools = extract_bool_values(&chain, &addr!("mu"));
+        assert!(bools.is_empty());
+    }
+
+    #[test]
+    fn r_hat_and_summary_compute() {
+        let chains = vec![generate_chain(2, 10), generate_chain(3, 10)];
+        let r = r_hat_f64(&chains, &addr!("mu"));
+        assert!(r.is_finite());
+        let summary = summarize_f64_parameter(&chains, &addr!("mu"));
+        assert!(summary.mean.is_finite());
+        assert!(summary.std.is_finite());
+    }
+
+    #[test]
+    fn diagnostics_trait_for_other_types() {
+        let chains = vec![generate_chain(4, 5), generate_chain(5, 5)];
+        // u64 r_hat via conversion
+        let r_u64 = <u64 as Diagnostics<u64>>::r_hat(&chains, &addr!("mu"));
+        // Might be None if chains empty; here should be Some or None acceptable
+        let _ = r_u64;
+
+        // usize Diagnostics returns None for r_hat
+        let r_usize = <usize as Diagnostics<usize>>::r_hat(&chains, &addr!("mu"));
+        assert!(r_usize.is_none());
+    }
+
+    #[test]
+    fn print_diagnostics_with_multiple_addresses() {
+        // Build chains with two addresses
+        let mut rng = StdRng::seed_from_u64(6);
+        let mut chain = Vec::new();
+        for _ in 0..5 {
+            let (_a, mut t) = run(
+                PriorHandler {
+                    rng: &mut rng,
+                    trace: Trace::default(),
+                },
+                sample(addr!("a1"), Normal::new(0.0, 1.0).unwrap())
+                    .and_then(|x| observe(addr!("obs"), Normal::new(x, 1.0).unwrap(), 0.0)),
+            );
+            // Insert second address manually
+            t.insert_choice(
+                addr!("a2"),
+                crate::runtime::trace::ChoiceValue::F64(1.0),
+                -0.5,
+            );
+            chain.push(t);
+        }
+        let chains = vec![chain.clone(), chain];
+        print_diagnostics(&chains);
+    }
+}
