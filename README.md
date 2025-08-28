@@ -1,4 +1,4 @@
-# Fugue
+# 🎻 Fugue
 
 [![Crates.io](https://img.shields.io/crates/v/fugue.svg)](https://crates.io/crates/fugue)
 [![Documentation](https://docs.rs/fugue/badge.svg)](https://docs.rs/fugue)
