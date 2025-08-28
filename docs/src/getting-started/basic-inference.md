@@ -27,16 +27,16 @@ $$\text{Posterior} = \frac{\text{Prior} \times \text{Likelihood}}{\text{Evidence
 ```mermaid
 graph LR
     subgraph "Before Data"
-        P[Prior Beliefs<br/>p⟨θ⟩]
+        P["Prior Beliefs<br/>p(theta)"]
     end
 
     subgraph "Observing Data"
-        L[Likelihood<br/>p⟨y|θ⟩]
-        D[Data<br/>y₁, y₂, ...]
+        L["Likelihood<br/>p(y|theta)"]
+        D["Data<br/>y₁, y₂, ..."]
     end
 
     subgraph "After Data"
-        Post[Posterior Beliefs<br/>p⟨θ|y⟩]
+        Post["Posterior Beliefs<br/>p(theta|y)"]
     end
 
     P --> Post
