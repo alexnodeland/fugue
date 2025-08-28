@@ -135,5 +135,4 @@ let model = prob! {
 
 **See Also:**
 
-- Examples: [`examples/hierarchical_models_*.rs`](../../examples/)
 - Main documentation: [API docs](https://docs.rs/fugue)

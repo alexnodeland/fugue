@@ -117,25 +117,25 @@ Theory explanation with academic rigor...
 ## Basic Implementation
 
 ```rust
-{{#include ../../examples/series_02_basic.rs:basic_model}}
+{{#include ../../examples/series.rs:basic_model}}
 ```
 
 ## Advanced Techniques
 
 ```rust
-{{#include ../../examples/series_03_advanced.rs:advanced_features}}
+{{#include ../../examples/series.rs:advanced_features}}
 ```
 
 ## Diagnostics & Validation
 
 ```rust
-{{#include ../../examples/series_04_diagnostics.rs:convergence_checks}}
+{{#include ../../examples/series.rs:convergence_checks}}
 ```
 
 ## Production Extensions
 
 ```rust
-{{#include ../../examples/series_05_production.rs:production_ready}}
+{{#include ../../examples/series.rs:production_ready}}
 ```
 
 ## Real-World Considerations

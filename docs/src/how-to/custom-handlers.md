@@ -187,7 +187,7 @@ graph TD
 graph TD
     subgraph "Handler Composition Pipeline"
         A[Raw Effect E] --> B[Statistics Handler]
-        B --> C[Logging Handler] 
+        B --> C[Logging Handler]
         C --> D[Performance Handler]
         D --> E[Base Handler]
         E --> F[Result + Trace]

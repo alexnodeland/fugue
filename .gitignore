@@ -6,3 +6,4 @@ coverage/
 tarpaulin-report.html
 cobertura.xml
 lcov.info
+.env

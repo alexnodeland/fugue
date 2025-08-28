@@ -110,6 +110,7 @@ The **potential scale reduction factor** $\hat{R}$ compares **within-chain** and
 $$\hat{R} = \sqrt{\frac{\hat{V}}{W}}$$
 
 where:
+
 - $W = \frac{1}{m}\sum_{j=1}^m s_j^2$ (within-chain variance)
 - $B = \frac{n}{m-1}\sum_{j=1}^m (\bar{\theta}_{j\cdot} - \bar{\theta}_{\cdot\cdot})^2$ (between-chain variance)
 - $\hat{V} = \frac{n-1}{n}W + \frac{1}{n}B$ (marginal posterior variance estimate)
@@ -160,6 +161,7 @@ graph TD
 ```
 
 **Structural Invariants** to validate:
+
 1. **Address Uniqueness**: $|\{a_i\}| = n$ (no collisions)
 2. **Parameter Hierarchy**: $\forall i, j: a_i \preceq a_j \implies \text{dependency}(i, j)$
 3. **Choice Count Consistency**: Expected vs. actual parameter count
@@ -219,6 +221,7 @@ graph TD
 ```
 
 **Debug Level Hierarchy**:
+
 1. **Syntactic**: Code compiles and types check
 2. **Semantic**: Model executes without runtime errors
 3. **Numerical**: Computations remain stable and finite
