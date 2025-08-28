@@ -512,18 +512,27 @@ cargo test --doc
 ### 📚 Learning Resources
 
 - **[🎓 Tutorials](docs/src/tutorials/README.md)** - Step-by-step learning:
-
-  - [Bayesian Coin Flip](docs/src/tutorials/bayesian-coin-flip.md) (Beginner)
-  - [Linear Regression](docs/src/tutorials/linear-regression.md) (Intermediate)
-  - [Mixture Models](docs/src/tutorials/mixture-models.md) (Intermediate)
-  - [Hierarchical Models](docs/src/tutorials/hierarchical-models.md) (Advanced)
+  - **Foundation Tutorials**:
+    - [Bayesian Coin Flip](docs/src/tutorials/foundation/bayesian-coin-flip.md) (Beginner)
+    - [Type Safety Features](docs/src/tutorials/foundation/type-safety-features.md) (Beginner)
+    - [Trace Manipulation](docs/src/tutorials/foundation/trace-manipulation.md) (Beginner)
+  - **Statistical Modeling**:
+    - [Linear Regression](docs/src/tutorials/statistical-modeling/linear-regression.md) (Intermediate)
+    - [Classification](docs/src/tutorials/statistical-modeling/classification.md) (Intermediate)
+    - [Mixture Models](docs/src/tutorials/statistical-modeling/mixture-models.md) (Intermediate)
+    - [Hierarchical Models](docs/src/tutorials/statistical-modeling/hierarchical-models.md) (Advanced)
+  - **Advanced Applications**:
+    - [Time Series & Forecasting](docs/src/tutorials/advanced-applications/time-series-forecasting.md) (Advanced)
+    - [Model Comparison & Selection](docs/src/tutorials/advanced-applications/model-comparison-selection.md) (Advanced)
+    - [Advanced Inference](docs/src/tutorials/advanced-applications/advanced-inference.md) (Advanced)
 
 - **[🛠️ How-To Guides](docs/src/how-to/README.md)** - Practical solutions:
   - [Working with Distributions](docs/src/how-to/working-with-distributions.md)
-  - [Using Macros](docs/src/how-to/using-macros.md) (`prob!`, `plate!`, `addr!`)
-  - [Trace Manipulation](docs/src/how-to/trace-manipulation.md)
-  - [Custom Handlers](docs/src/how-to/custom-handlers.md)
+  - [Building Complex Models](docs/src/how-to/building-complex-models.md)
+  - [Optimizing Performance](docs/src/how-to/optimizing-performance.md)
   - [Debugging Models](docs/src/how-to/debugging-models.md)
+  - [Custom Handlers](docs/src/how-to/custom-handlers.md)
+  - [Production Deployment](docs/src/how-to/production-deployment.md)
 
 ### 📖 Reference
 
