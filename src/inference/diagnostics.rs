@@ -460,9 +460,12 @@ mod tests {
         let mut traces = Vec::new();
         for _ in 0..n {
             let (_a, t) = run(
-                PriorHandler { rng: &mut rng, trace: Trace::default() },
+                PriorHandler {
+                    rng: &mut rng,
+                    trace: Trace::default(),
+                },
                 sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
-                    .and_then(|mu| observe(addr!("y"), Normal::new(mu, 0.5).unwrap(), 0.0))
+                    .and_then(|mu| observe(addr!("y"), Normal::new(mu, 0.5).unwrap(), 0.0)),
             );
             traces.push(t);
         }
@@ -508,16 +511,22 @@ mod tests {
         let mut chain = Vec::new();
         for _ in 0..5 {
             let (_a, mut t) = run(
-                PriorHandler { rng: &mut rng, trace: Trace::default() },
+                PriorHandler {
+                    rng: &mut rng,
+                    trace: Trace::default(),
+                },
                 sample(addr!("a1"), Normal::new(0.0, 1.0).unwrap())
-                    .and_then(|x| observe(addr!("obs"), Normal::new(x, 1.0).unwrap(), 0.0))
+                    .and_then(|x| observe(addr!("obs"), Normal::new(x, 1.0).unwrap(), 0.0)),
             );
             // Insert second address manually
-            t.insert_choice(addr!("a2"), crate::runtime::trace::ChoiceValue::F64(1.0), -0.5);
+            t.insert_choice(
+                addr!("a2"),
+                crate::runtime::trace::ChoiceValue::F64(1.0),
+                -0.5,
+            );
             chain.push(t);
         }
         let chains = vec![chain.clone(), chain];
         print_diagnostics(&chains);
     }
 }
-

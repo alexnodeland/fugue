@@ -109,7 +109,7 @@ impl ProposalStrategy<f64> for GaussianWalkProposal {
 }
 
 /// Log-space random walk proposal for positive-constrained continuous distributions.
-/// 
+///
 /// This proposal strategy works in log-space to maintain positivity constraints.
 /// It's appropriate for parameters that must be positive (e.g., standard deviations,
 /// rates, scales from Gamma, Exponential, LogNormal distributions).
@@ -121,15 +121,15 @@ impl ProposalStrategy<f64> for LogSpaceWalkProposal {
             // If current value is non-positive, return a small positive value
             return 1e-6;
         }
-        
+
         // Work in log-space to maintain positivity
         let log_current = current.ln();
-        
+
         // Use Box-Muller for Gaussian proposal in log-space
         let u1: f64 = rng.gen::<f64>().max(1e-10);
         let u2: f64 = rng.gen();
         let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
-        
+
         let log_proposed = log_current + scale * z;
         log_proposed.exp().max(1e-10) // Ensure minimum positive value
     }
@@ -153,15 +153,15 @@ impl ProposalStrategy<f64> for ReflectionWalkProposal {
         let u1: f64 = rng.gen::<f64>().max(1e-10);
         let u2: f64 = rng.gen();
         let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
-        
+
         let mut proposed = current + scale * z;
-        
+
         // Reflect off boundaries until within bounds
         let range = self.upper_bound - self.lower_bound;
         if range <= 0.0 {
             return current; // Invalid bounds, return current
         }
-        
+
         while proposed < self.lower_bound || proposed > self.upper_bound {
             if proposed < self.lower_bound {
                 proposed = 2.0 * self.lower_bound - proposed;
@@ -170,7 +170,7 @@ impl ProposalStrategy<f64> for ReflectionWalkProposal {
                 proposed = 2.0 * self.upper_bound - proposed;
             }
         }
-        
+
         proposed.clamp(self.lower_bound, self.upper_bound)
     }
 }
@@ -228,7 +228,7 @@ impl ProposalStrategy<usize> for UniformCategoricalProposal {
 ///
 /// This function uses the appropriate ProposalStrategy for each type,
 /// ensuring type safety and allowing for constraint-aware proposals.
-/// 
+///
 /// For f64 values, it applies heuristics to detect likely constraints:
 /// - If current value > 0 and seems like a scale/rate parameter, use log-space proposal
 /// - Otherwise use standard Gaussian proposal
@@ -238,24 +238,32 @@ fn propose_using_strategies<R: RngCore>(rng: &mut R, choice: &Choice, scale: f64
             // Heuristic: if current value is positive and the address suggests a scale/rate parameter,
             // use log-space proposal to maintain positivity
             let addr_str = choice.addr.0.to_lowercase();
-            let looks_like_scale_param = addr_str.contains("sigma") || 
-                                       addr_str.contains("scale") || 
-                                       addr_str.contains("rate") ||
-                                       addr_str.contains("lambda") ||
-                                       addr_str.contains("tau") ||
-                                       addr_str.contains("precision") ||
-                                       addr_str.contains("nu");
-            
-            let strategy: Box<dyn ProposalStrategy<f64>> = if current_val > 0.0 && looks_like_scale_param {
-                Box::new(LogSpaceWalkProposal)
-            } else if current_val >= 0.0 && current_val <= 1.0 && 
-                     (addr_str.contains("prob") || addr_str.contains("p") || addr_str.contains("beta")) {
-                // Likely a probability parameter - use reflection on [0,1]
-                Box::new(ReflectionWalkProposal { lower_bound: 0.0, upper_bound: 1.0 })
-            } else {
-                Box::new(GaussianWalkProposal)
-            };
-            
+            let looks_like_scale_param = addr_str.contains("sigma")
+                || addr_str.contains("scale")
+                || addr_str.contains("rate")
+                || addr_str.contains("lambda")
+                || addr_str.contains("tau")
+                || addr_str.contains("precision")
+                || addr_str.contains("nu");
+
+            let strategy: Box<dyn ProposalStrategy<f64>> =
+                if current_val > 0.0 && looks_like_scale_param {
+                    Box::new(LogSpaceWalkProposal)
+                } else if current_val >= 0.0
+                    && current_val <= 1.0
+                    && (addr_str.contains("prob")
+                        || addr_str.contains("p")
+                        || addr_str.contains("beta"))
+                {
+                    // Likely a probability parameter - use reflection on [0,1]
+                    Box::new(ReflectionWalkProposal {
+                        lower_bound: 0.0,
+                        upper_bound: 1.0,
+                    })
+                } else {
+                    Box::new(GaussianWalkProposal)
+                };
+
             let proposed = strategy.propose(current_val, scale, rng);
             ChoiceValue::F64(proposed)
         }
@@ -538,33 +546,56 @@ mod tests {
     fn log_space_proposal_maintains_positivity() {
         let mut rng = StdRng::seed_from_u64(42);
         let strat = LogSpaceWalkProposal;
-        
+
         // Test with various positive values
         for &current in &[0.1, 1.0, 10.0, 100.0] {
             for _ in 0..20 {
                 let proposed = strat.propose(current, 0.5, &mut rng);
-                assert!(proposed > 0.0, "LogSpaceWalk proposed negative value: {} -> {}", current, proposed);
-                assert!(proposed.is_finite(), "LogSpaceWalk proposed non-finite value: {}", proposed);
+                assert!(
+                    proposed > 0.0,
+                    "LogSpaceWalk proposed negative value: {} -> {}",
+                    current,
+                    proposed
+                );
+                assert!(
+                    proposed.is_finite(),
+                    "LogSpaceWalk proposed non-finite value: {}",
+                    proposed
+                );
             }
         }
-        
+
         // Test with edge case: non-positive input
         let proposed = strat.propose(-1.0, 0.5, &mut rng);
-        assert!(proposed > 0.0, "LogSpaceWalk should return positive value for negative input");
+        assert!(
+            proposed > 0.0,
+            "LogSpaceWalk should return positive value for negative input"
+        );
     }
 
     #[test]
     fn reflection_proposal_respects_bounds() {
         let mut rng = StdRng::seed_from_u64(43);
-        let strat = ReflectionWalkProposal { lower_bound: 0.0, upper_bound: 1.0 };
-        
+        let strat = ReflectionWalkProposal {
+            lower_bound: 0.0,
+            upper_bound: 1.0,
+        };
+
         // Test with values in [0,1] range
         for &current in &[0.1, 0.5, 0.9] {
             for _ in 0..20 {
                 let proposed = strat.propose(current, 0.3, &mut rng);
-                assert!(proposed >= 0.0 && proposed <= 1.0, 
-                       "ReflectionWalk violated bounds: {} -> {}", current, proposed);
-                assert!(proposed.is_finite(), "ReflectionWalk proposed non-finite value: {}", proposed);
+                assert!(
+                    proposed >= 0.0 && proposed <= 1.0,
+                    "ReflectionWalk violated bounds: {} -> {}",
+                    current,
+                    proposed
+                );
+                assert!(
+                    proposed.is_finite(),
+                    "ReflectionWalk proposed non-finite value: {}",
+                    proposed
+                );
             }
         }
     }
@@ -572,14 +603,14 @@ mod tests {
     #[test]
     fn constraint_aware_proposals_work() {
         let mut rng = StdRng::seed_from_u64(44);
-        
+
         // Test sigma parameter (should use log-space)
         let sigma_choice = Choice {
             addr: crate::addr!("sigma"),
             value: ChoiceValue::F64(2.0),
             logp: -1.0,
         };
-        
+
         for _ in 0..10 {
             let proposed = propose_using_strategies(&mut rng, &sigma_choice, 0.5);
             if let ChoiceValue::F64(val) = proposed {
@@ -588,14 +619,14 @@ mod tests {
                 panic!("Expected F64 value");
             }
         }
-        
+
         // Test regular parameter (should use standard Gaussian)
         let mu_choice = Choice {
             addr: crate::addr!("mu"),
             value: ChoiceValue::F64(0.0),
             logp: -0.5,
         };
-        
+
         let proposed = propose_using_strategies(&mut rng, &mu_choice, 1.0);
         if let ChoiceValue::F64(val) = proposed {
             assert!(val.is_finite(), "Mu proposal should be finite: {}", val);
@@ -619,8 +650,9 @@ mod tests {
     #[test]
     fn adaptive_chain_runs_and_returns_samples() {
         let model_fn = || {
-            sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
-                .and_then(|mu| observe(addr!("y"), Normal::new(mu, 1.0).unwrap(), 0.5).map(move |_| mu))
+            sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap()).and_then(|mu| {
+                observe(addr!("y"), Normal::new(mu, 1.0).unwrap(), 0.5).map(move |_| mu)
+            })
         };
         let mut rng = StdRng::seed_from_u64(13);
         let samples = adaptive_mcmc_chain(&mut rng, model_fn, 5, 2);

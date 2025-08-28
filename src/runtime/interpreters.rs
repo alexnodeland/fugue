@@ -8,28 +8,28 @@ use crate::runtime::trace::{Choice, ChoiceValue, Trace};
 use rand::RngCore;
 
 /// Handler for prior sampling - generates fresh random values from distributions.
-/// 
-/// This is the foundational interpreter that implements standard "forward sampling" 
+///
+/// This is the foundational interpreter that implements standard "forward sampling"
 /// from probabilistic models. It draws fresh values from distributions and accumulates
 /// log-probabilities in the trace.
-/// 
+///
 /// Example:
 /// ```rust
 /// # use fugue::*;
 /// # use fugue::runtime::interpreters::PriorHandler;
 /// # use rand::rngs::StdRng;
 /// # use rand::SeedableRng;
-/// 
+///
 /// let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
 ///     .bind(|x| observe(addr!("y"), Normal::new(x, 0.5).unwrap(), 1.2)
 ///         .map(move |_| x));
-/// 
+///
 /// let mut rng = StdRng::seed_from_u64(42);
 /// let (result, trace) = runtime::handler::run(
 ///     PriorHandler { rng: &mut rng, trace: Trace::default() },
 ///     model
 /// );
-/// 
+///
 /// assert!(result.is_finite());
 /// assert!(trace.log_likelihood.is_finite());
 /// ```
@@ -126,19 +126,19 @@ impl<'r, R: RngCore> Handler for PriorHandler<'r, R> {
 }
 
 /// Handler for replaying models with values from an existing trace.
-/// 
-/// ReplayHandler replays a model execution using stored trace values. When a sampling 
-/// site is encountered: if the address exists in the base trace, use that value; 
-/// if missing, sample fresh. Essential for MCMC where you replay most choices 
+///
+/// ReplayHandler replays a model execution using stored trace values. When a sampling
+/// site is encountered: if the address exists in the base trace, use that value;
+/// if missing, sample fresh. Essential for MCMC where you replay most choices
 /// but sample new values at specific sites.
-/// 
+///
 /// Example:
 /// ```rust
 /// # use fugue::*;
 /// # use fugue::runtime::interpreters::*;
 /// # use rand::rngs::StdRng;
 /// # use rand::SeedableRng;
-/// 
+///
 /// // Create base trace
 /// let mut rng = StdRng::seed_from_u64(42);
 /// let model_fn = || sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
@@ -146,17 +146,17 @@ impl<'r, R: RngCore> Handler for PriorHandler<'r, R> {
 ///     PriorHandler { rng: &mut rng, trace: Trace::default() },
 ///     model_fn()
 /// );
-/// 
+///
 /// // Replay using base trace values
 /// let (replayed, _) = runtime::handler::run(
-///     ReplayHandler { 
-///         rng: &mut rng, 
-///         base: base_trace, 
-///         trace: Trace::default() 
+///     ReplayHandler {
+///         rng: &mut rng,
+///         base: base_trace,
+///         trace: Trace::default()
 ///     },
 ///     model_fn()
 /// );
-/// 
+///
 /// assert_eq!(original, replayed); // Same value replayed
 /// ```
 pub struct ReplayHandler<'r, R: RngCore> {
@@ -282,35 +282,35 @@ impl<'r, R: RngCore> Handler for ReplayHandler<'r, R> {
 }
 
 /// Handler for scoring a model given a complete trace of fixed choices.
-/// 
-/// ScoreGivenTrace computes log-probability of a model execution where all random 
-/// choices are predetermined. No sampling occurs - values are looked up from the 
-/// base trace and their log-probabilities computed. Essential for MCMC acceptance 
+///
+/// ScoreGivenTrace computes log-probability of a model execution where all random
+/// choices are predetermined. No sampling occurs - values are looked up from the
+/// base trace and their log-probabilities computed. Essential for MCMC acceptance
 /// ratios, importance sampling, and model comparison.
-/// 
+///
 /// Example:
 /// ```rust
 /// # use fugue::*;
 /// # use fugue::runtime::interpreters::*;
 /// # use rand::rngs::StdRng;
 /// # use rand::SeedableRng;
-/// 
+///
 /// // Create a complete trace
 /// let mut rng = StdRng::seed_from_u64(42);
 /// let (_, complete_trace) = runtime::handler::run(
 ///     PriorHandler { rng: &mut rng, trace: Trace::default() },
 ///     sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
 /// );
-/// 
+///
 /// // Score under different model parameters  
 /// let (value, score_trace) = runtime::handler::run(
-///     ScoreGivenTrace { 
-///         base: complete_trace, 
-///         trace: Trace::default() 
+///     ScoreGivenTrace {
+///         base: complete_trace,
+///         trace: Trace::default()
 ///     },
 ///     sample(addr!("x"), Normal::new(1.0, 2.0).unwrap()) // Different parameters
 /// );
-/// 
+///
 /// assert!(score_trace.total_log_weight().is_finite());
 /// ```
 pub struct ScoreGivenTrace {
@@ -410,26 +410,26 @@ impl Handler for ScoreGivenTrace {
 }
 
 /// Safe version of ReplayHandler that gracefully handles trace inconsistencies.
-/// 
-/// SafeReplayHandler replays model execution like ReplayHandler, but handles type 
-/// mismatches and missing addresses gracefully by logging warnings and sampling 
-/// fresh values instead of panicking. Essential for production systems where 
+///
+/// SafeReplayHandler replays model execution like ReplayHandler, but handles type
+/// mismatches and missing addresses gracefully by logging warnings and sampling
+/// fresh values instead of panicking. Essential for production systems where
 /// trace consistency cannot be guaranteed.
-/// 
+///
 /// Example:
 /// ```rust
 /// # use fugue::*;
 /// # use fugue::runtime::interpreters::*;
 /// # use rand::rngs::StdRng;
 /// # use rand::SeedableRng;
-/// 
+///
 /// // Create trace with potential inconsistencies
 /// let mut rng = StdRng::seed_from_u64(42);
 /// let (_, base_trace) = runtime::handler::run(
 ///     PriorHandler { rng: &mut rng, trace: Trace::default() },
 ///     sample(addr!("x"), Normal::new(0.0, 1.0).unwrap()) // f64 value
 /// );
-/// 
+///
 /// // Safe replay handles type mismatch gracefully
 /// let (result, trace) = runtime::handler::run(
 ///     SafeReplayHandler {
@@ -440,7 +440,7 @@ impl Handler for ScoreGivenTrace {
 ///     },
 ///     sample(addr!("x"), Bernoulli::new(0.5).unwrap()) // Expects bool
 /// );
-/// 
+///
 /// assert!(trace.total_log_weight().is_finite()); // Continues execution
 /// ```
 pub struct SafeReplayHandler<'r, R: RngCore> {
@@ -596,26 +596,26 @@ impl<'r, R: RngCore> Handler for SafeReplayHandler<'r, R> {
 }
 
 /// Safe version of ScoreGivenTrace that gracefully handles incomplete traces.
-/// 
-/// SafeScoreGivenTrace computes log-probability like ScoreGivenTrace, but handles 
-/// missing addresses or type mismatches by returning negative infinity log-weight 
-/// instead of panicking. Essential for production inference where trace validity 
+///
+/// SafeScoreGivenTrace computes log-probability like ScoreGivenTrace, but handles
+/// missing addresses or type mismatches by returning negative infinity log-weight
+/// instead of panicking. Essential for production inference where trace validity
 /// cannot be guaranteed.
-/// 
+///
 /// Example:
 /// ```rust
 /// # use fugue::*;
 /// # use fugue::runtime::interpreters::*;
 /// # use rand::rngs::StdRng;
 /// # use rand::SeedableRng;
-/// 
+///
 /// // Create incomplete trace
 /// let mut rng = StdRng::seed_from_u64(42);
 /// let (_, incomplete_trace) = runtime::handler::run(
 ///     PriorHandler { rng: &mut rng, trace: Trace::default() },
 ///     sample(addr!("x"), Normal::new(0.0, 1.0).unwrap()) // Only has "x"
 /// );
-/// 
+///
 /// // Safe scoring handles missing address gracefully
 /// let (_, score_trace) = runtime::handler::run(
 ///     SafeScoreGivenTrace {
@@ -625,7 +625,7 @@ impl<'r, R: RngCore> Handler for SafeReplayHandler<'r, R> {
 ///     },
 ///     sample(addr!("missing"), Normal::new(0.0, 1.0).unwrap()) // Address not in base
 /// );
-/// 
+///
 /// assert_eq!(score_trace.total_log_weight(), f64::NEG_INFINITY); // Graceful failure
 /// ```
 pub struct SafeScoreGivenTrace {
@@ -756,9 +756,12 @@ mod tests {
     fn prior_handler_samples_and_accumulates() {
         let mut rng = StdRng::seed_from_u64(7);
         let (_val, trace) = crate::runtime::handler::run(
-            PriorHandler { rng: &mut rng, trace: Trace::default() },
+            PriorHandler {
+                rng: &mut rng,
+                trace: Trace::default(),
+            },
             sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
-                .and_then(|x| observe(addr!("y"), Normal::new(x, 1.0).unwrap(), 0.5))
+                .and_then(|x| observe(addr!("y"), Normal::new(x, 1.0).unwrap(), 0.5)),
         );
         assert!(trace.choices.contains_key(&addr!("x")));
         assert!(trace.log_prior.is_finite());
@@ -769,13 +772,20 @@ mod tests {
     fn replay_handler_reuses_values() {
         let mut rng = StdRng::seed_from_u64(8);
         let ((), base) = crate::runtime::handler::run(
-            PriorHandler { rng: &mut rng, trace: Trace::default() },
-            sample(addr!("x"), Normal::new(0.0, 1.0).unwrap()).map(|_| ())
+            PriorHandler {
+                rng: &mut rng,
+                trace: Trace::default(),
+            },
+            sample(addr!("x"), Normal::new(0.0, 1.0).unwrap()).map(|_| ()),
         );
 
         let ((), replayed) = crate::runtime::handler::run(
-            ReplayHandler { rng: &mut rng, base: base.clone(), trace: Trace::default() },
-            sample(addr!("x"), Normal::new(0.0, 1.0).unwrap()).map(|_| ())
+            ReplayHandler {
+                rng: &mut rng,
+                base: base.clone(),
+                trace: Trace::default(),
+            },
+            sample(addr!("x"), Normal::new(0.0, 1.0).unwrap()).map(|_| ()),
         );
 
         let x_base = base.get_f64(&addr!("x")).unwrap();
@@ -787,13 +797,19 @@ mod tests {
     fn score_given_trace_scores_fixed_values() {
         let mut rng = StdRng::seed_from_u64(9);
         let (_a, base) = crate::runtime::handler::run(
-            PriorHandler { rng: &mut rng, trace: Trace::default() },
-            sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+            PriorHandler {
+                rng: &mut rng,
+                trace: Trace::default(),
+            },
+            sample(addr!("x"), Normal::new(0.0, 1.0).unwrap()),
         );
 
         let (_a2, scored) = crate::runtime::handler::run(
-            ScoreGivenTrace { base: base.clone(), trace: Trace::default() },
-            sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+            ScoreGivenTrace {
+                base: base.clone(),
+                trace: Trace::default(),
+            },
+            sample(addr!("x"), Normal::new(0.0, 1.0).unwrap()),
         );
 
         // Should have same value and finite log_prior
@@ -806,21 +822,33 @@ mod tests {
         // Build base trace with x as f64, then attempt to replay as bool
         let mut rng = StdRng::seed_from_u64(10);
         let (_a, base) = crate::runtime::handler::run(
-            PriorHandler { rng: &mut rng, trace: Trace::default() },
-            sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+            PriorHandler {
+                rng: &mut rng,
+                trace: Trace::default(),
+            },
+            sample(addr!("x"), Normal::new(0.0, 1.0).unwrap()),
         );
 
         // SafeReplayHandler should sample fresh value for bool and continue
         let (_b, t1) = crate::runtime::handler::run(
-            SafeReplayHandler { rng: &mut rng, base: base.clone(), trace: Trace::default(), warn_on_mismatch: true },
-            sample(addr!("x"), Bernoulli::new(0.5).unwrap())
+            SafeReplayHandler {
+                rng: &mut rng,
+                base: base.clone(),
+                trace: Trace::default(),
+                warn_on_mismatch: true,
+            },
+            sample(addr!("x"), Bernoulli::new(0.5).unwrap()),
         );
         assert!(t1.log_prior.is_finite());
 
         // SafeScoreGivenTrace should mark as invalid by adding -inf
         let (_c, t2) = crate::runtime::handler::run(
-            SafeScoreGivenTrace { base: base.clone(), trace: Trace::default(), warn_on_error: true },
-            sample(addr!("x"), Bernoulli::new(0.5).unwrap())
+            SafeScoreGivenTrace {
+                base: base.clone(),
+                trace: Trace::default(),
+                warn_on_error: true,
+            },
+            sample(addr!("x"), Bernoulli::new(0.5).unwrap()),
         );
         assert!(t2.log_prior.is_infinite());
     }
@@ -835,10 +863,19 @@ mod tests {
             .and_then(|_| observe(addr!("f_obs"), Normal::new(0.0, 1.0).unwrap(), 0.1))
             .and_then(|_| observe(addr!("b_obs"), Bernoulli::new(0.4).unwrap(), true))
             .and_then(|_| observe(addr!("u64_obs"), Poisson::new(2.0).unwrap(), 1))
-            .and_then(|_| observe(addr!("usz_obs"), Categorical::new(vec![0.5, 0.5]).unwrap(), 1));
+            .and_then(|_| {
+                observe(
+                    addr!("usz_obs"),
+                    Categorical::new(vec![0.5, 0.5]).unwrap(),
+                    1,
+                )
+            });
 
         let (_a, t) = crate::runtime::handler::run(
-            PriorHandler { rng: &mut StdRng::seed_from_u64(100), trace: Trace::default() },
+            PriorHandler {
+                rng: &mut StdRng::seed_from_u64(100),
+                trace: Trace::default(),
+            },
             model,
         );
         assert!(t.get_f64(&addr!("f")).is_some());
@@ -850,7 +887,10 @@ mod tests {
         // Build base and score given trace for all types
         let base = t.clone();
         let (_sv, scored) = crate::runtime::handler::run(
-            ScoreGivenTrace { base: base.clone(), trace: Trace::default() },
+            ScoreGivenTrace {
+                base: base.clone(),
+                trace: Trace::default(),
+            },
             sample(addr!("f"), Normal::new(0.0, 1.0).unwrap())
                 .and_then(|_| sample(addr!("b"), Bernoulli::new(0.6).unwrap()))
                 .and_then(|_| sample(addr!("u64"), Poisson::new(3.0).unwrap()))
@@ -860,8 +900,13 @@ mod tests {
 
         // Safe replay mismatches for integer/categorical types
         let (_sv2, safe) = crate::runtime::handler::run(
-            SafeReplayHandler { rng: &mut StdRng::seed_from_u64(101), base: base.clone(), trace: Trace::default(), warn_on_mismatch: true },
-            sample(addr!("u64"), Bernoulli::new(0.5).unwrap())
+            SafeReplayHandler {
+                rng: &mut StdRng::seed_from_u64(101),
+                base: base.clone(),
+                trace: Trace::default(),
+                warn_on_mismatch: true,
+            },
+            sample(addr!("u64"), Bernoulli::new(0.5).unwrap()),
         );
         assert!(safe.log_prior.is_finite());
     }
@@ -870,20 +915,31 @@ mod tests {
     fn safe_score_given_trace_warn_flag_branches() {
         let mut rng = StdRng::seed_from_u64(102);
         let (_a, base) = crate::runtime::handler::run(
-            PriorHandler { rng: &mut rng, trace: Trace::default() },
-            sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+            PriorHandler {
+                rng: &mut rng,
+                trace: Trace::default(),
+            },
+            sample(addr!("x"), Normal::new(0.0, 1.0).unwrap()),
         );
         // warn_on_error = false
         let (_b, t_false) = crate::runtime::handler::run(
-            SafeScoreGivenTrace { base: base.clone(), trace: Trace::default(), warn_on_error: false },
-            sample(addr!("x"), Bernoulli::new(0.5).unwrap())
+            SafeScoreGivenTrace {
+                base: base.clone(),
+                trace: Trace::default(),
+                warn_on_error: false,
+            },
+            sample(addr!("x"), Bernoulli::new(0.5).unwrap()),
         );
         assert!(t_false.log_prior.is_infinite());
 
         // warn_on_error = true
         let (_c, t_true) = crate::runtime::handler::run(
-            SafeScoreGivenTrace { base: base.clone(), trace: Trace::default(), warn_on_error: true },
-            sample(addr!("x"), Bernoulli::new(0.5).unwrap())
+            SafeScoreGivenTrace {
+                base: base.clone(),
+                trace: Trace::default(),
+                warn_on_error: true,
+            },
+            sample(addr!("x"), Bernoulli::new(0.5).unwrap()),
         );
         assert!(t_true.log_prior.is_infinite());
     }
@@ -894,12 +950,19 @@ mod tests {
         // Base has f64, replay expects bool -> panic as designed
         let mut rng = StdRng::seed_from_u64(103);
         let (_a, base) = crate::runtime::handler::run(
-            PriorHandler { rng: &mut rng, trace: Trace::default() },
-            sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+            PriorHandler {
+                rng: &mut rng,
+                trace: Trace::default(),
+            },
+            sample(addr!("x"), Normal::new(0.0, 1.0).unwrap()),
         );
         let (_b, _t) = crate::runtime::handler::run(
-            ReplayHandler { rng: &mut rng, base: base.clone(), trace: Trace::default() },
-            sample(addr!("x"), Bernoulli::new(0.5).unwrap())
+            ReplayHandler {
+                rng: &mut rng,
+                base: base.clone(),
+                trace: Trace::default(),
+            },
+            sample(addr!("x"), Bernoulli::new(0.5).unwrap()),
         );
     }
 
@@ -909,10 +972,14 @@ mod tests {
         // Base trace without address "z"
         let base = Trace::default();
         let (_a, t) = crate::runtime::handler::run(
-            SafeReplayHandler { rng: &mut rng, base, trace: Trace::default(), warn_on_mismatch: true },
-            sample(addr!("z"), Normal::new(0.0, 1.0).unwrap())
+            SafeReplayHandler {
+                rng: &mut rng,
+                base,
+                trace: Trace::default(),
+                warn_on_mismatch: true,
+            },
+            sample(addr!("z"), Normal::new(0.0, 1.0).unwrap()),
         );
         assert!(t.get_f64(&addr!("z")).is_some());
     }
 }
-

@@ -6,22 +6,22 @@ use crate::core::model::Model;
 use crate::runtime::trace::Trace;
 
 /// Core trait for interpreting probabilistic model effects.
-/// 
+///
 /// Handlers define how to interpret the three fundamental effects in probabilistic programming:
 /// sampling, observation, and factoring. Different implementations enable different execution modes.
-/// 
+///
 /// Example:
 /// ```rust
 /// # use fugue::*;
 /// # use fugue::runtime::interpreters::PriorHandler;
 /// # use rand::rngs::StdRng;
 /// # use rand::SeedableRng;
-/// 
+///
 /// // Use a built-in handler
 /// let mut rng = StdRng::seed_from_u64(42);
-/// let handler = PriorHandler { 
-///     rng: &mut rng, 
-///     trace: Trace::default() 
+/// let handler = PriorHandler {
+///     rng: &mut rng,
+///     trace: Trace::default()
 /// };
 /// let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
 /// let (result, trace) = runtime::handler::run(handler, model);
@@ -71,23 +71,23 @@ pub trait Handler {
 }
 
 /// Execute a probabilistic model using the provided handler.
-/// 
+///
 /// This is the core execution engine for probabilistic models. It walks through
 /// the model structure and dispatches effects to the handler, returning both
 /// the model's final result and the accumulated execution trace.
-/// 
+///
 /// Example:
 /// ```rust
 /// # use fugue::*;
 /// # use fugue::runtime::interpreters::PriorHandler;
 /// # use rand::rngs::StdRng;
 /// # use rand::SeedableRng;
-/// 
+///
 /// // Create a simple model
 /// let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
 ///     .bind(|x| observe(addr!("y"), Normal::new(x, 0.1).unwrap(), 1.2))
 ///     .map(|_| "completed");
-/// 
+///
 /// let mut rng = StdRng::seed_from_u64(123);
 /// let (result, trace) = runtime::handler::run(
 ///     PriorHandler { rng: &mut rng, trace: Trace::default() },
@@ -177,7 +177,9 @@ mod tests {
     fn run_accumulates_logs_for_sample_observe_factor() {
         // Model: sample x ~ Normal(0,1); observe y ~ Normal(x,1) with value 0.5; factor(-1.0)
         let model = crate::core::model::sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
-            .and_then(|x| crate::core::model::observe(addr!("y"), Normal::new(x, 1.0).unwrap(), 0.5))
+            .and_then(|x| {
+                crate::core::model::observe(addr!("y"), Normal::new(x, 1.0).unwrap(), 0.5)
+            })
             .and_then(|_| crate::core::model::factor(-1.0));
 
         let mut rng = StdRng::seed_from_u64(123);

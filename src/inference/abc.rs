@@ -548,7 +548,7 @@ mod tests {
     use crate::addr;
     use crate::core::distribution::*;
     use crate::core::model::sample;
-    
+
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
@@ -573,7 +573,7 @@ mod tests {
             &mut rng,
             || sample(addr!("mu"), Normal::new(0.0, 2.0).unwrap()),
             |trace| trace.get_f64(&addr!("mu")).unwrap_or(0.0),
-            0.0, // observed summary
+            0.0,  // observed summary
             10.0, // large tolerance to ensure acceptance
             3,
         );
@@ -600,7 +600,11 @@ mod tests {
     fn abc_smc_respects_tolerance_schedule() {
         let mut rng = StdRng::seed_from_u64(44);
         let observed = vec![0.0];
-        let config = ABCSMCConfig { initial_tolerance: 2.0, tolerance_schedule: vec![1.0, 0.5], particles_per_round: 4 };
+        let config = ABCSMCConfig {
+            initial_tolerance: 2.0,
+            tolerance_schedule: vec![1.0, 0.5],
+            particles_per_round: 4,
+        };
         let res = abc_smc(
             &mut rng,
             || sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap()),

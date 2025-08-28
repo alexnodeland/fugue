@@ -71,10 +71,10 @@ macro_rules! scoped_addr {
 
 #[cfg(test)]
 mod tests {
-    
+
     use crate::addr;
     use crate::core::distribution::*;
-    use crate::core::model::{observe, sample, pure};
+    use crate::core::model::{observe, pure, sample};
     use crate::runtime::handler::run;
     use crate::runtime::interpreters::PriorHandler;
     use crate::runtime::trace::Trace;
@@ -85,13 +85,19 @@ mod tests {
     fn prob_macro_chains_computations() {
         // Equivalent to: let x <- sample(...); observe(...); pure(x)
         let model = prob!({
-            sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
-        ;   let x = pure(())
-        ;   observe(addr!("y"), Normal::new(0.0, 1.0).unwrap(), 0.1)
-        ;   pure(1)
+            sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
+            let x = pure(());
+            observe(addr!("y"), Normal::new(0.0, 1.0).unwrap(), 0.1);
+            pure(1)
         });
         let mut rng = StdRng::seed_from_u64(30);
-        let (val, trace) = run(PriorHandler { rng: &mut rng, trace: Trace::default() }, model);
+        let (val, trace) = run(
+            PriorHandler {
+                rng: &mut rng,
+                trace: Trace::default(),
+            },
+            model,
+        );
         assert_eq!(val, 1);
         assert!(trace.log_prior.is_finite());
         assert!(trace.log_likelihood.is_finite());
@@ -101,8 +107,14 @@ mod tests {
     fn plate_macro_traverses_range() {
         let xs = 0..5;
         let model = plate!(i in xs => pure(i));
-        let (vals, _t) = run(PriorHandler { rng: &mut StdRng::seed_from_u64(31), trace: Trace::default() }, model);
-        assert_eq!(vals, vec![0,1,2,3,4]);
+        let (vals, _t) = run(
+            PriorHandler {
+                rng: &mut StdRng::seed_from_u64(31),
+                trace: Trace::default(),
+            },
+            model,
+        );
+        assert_eq!(vals, vec![0, 1, 2, 3, 4]);
     }
 
     #[test]

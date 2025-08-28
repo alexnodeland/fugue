@@ -132,18 +132,20 @@ impl Normal {
     pub fn new(mu: f64, sigma: f64) -> crate::error::FugueResult<Self> {
         if !mu.is_finite() {
             return Err(crate::error::FugueError::invalid_parameters(
-                "Normal", 
-                "Mean (mu) must be finite", 
-                crate::error::ErrorCode::InvalidMean
-            ).with_context("mu", format!("{}", mu)));
+                "Normal",
+                "Mean (mu) must be finite",
+                crate::error::ErrorCode::InvalidMean,
+            )
+            .with_context("mu", format!("{}", mu)));
         }
         if sigma <= 0.0 || !sigma.is_finite() {
             return Err(crate::error::FugueError::invalid_parameters(
-                "Normal", 
-                "Standard deviation (sigma) must be positive and finite", 
-                crate::error::ErrorCode::InvalidVariance
-            ).with_context("sigma", format!("{}", sigma))
-             .with_context("expected", "> 0.0 and finite"));
+                "Normal",
+                "Standard deviation (sigma) must be positive and finite",
+                crate::error::ErrorCode::InvalidVariance,
+            )
+            .with_context("sigma", format!("{}", sigma))
+            .with_context("expected", "> 0.0 and finite"));
         }
         Ok(Normal { mu, sigma })
     }
@@ -189,29 +191,29 @@ impl Distribution<f64> for Normal {
 }
 
 /// A continuous distribution that assigns equal probability density to all values within a specified interval, from `low` to `high`.
-/// 
+///
 /// Commonly used as an uninformative prior when you want to express complete uncertainty over a bounded range.
-/// 
+///
 /// Mathematical Properties:
 /// - **Support**: [low, high)
 /// - **PDF**: f(x) = 1/(high-low) for low ≤ x < high, 0 otherwise
 /// - **Mean**: (low + high) / 2
 /// - **Variance**: (high - low)² / 12
-/// 
+///
 /// Example:
-/// 
+///
 /// ```rust
 /// # use fugue::*;
-/// 
+///
 /// // Unit interval [0, 1)
 /// let unit = sample(addr!("p"), Uniform::new(0.0, 1.0).unwrap());
-/// 
+///
 /// // Symmetric around zero
 /// let symmetric = sample(addr!("x"), Uniform::new(-5.0, 5.0).unwrap());
-/// 
+///
 /// // Uninformative prior for weight
 /// let weight = sample(addr!("weight"), Uniform::new(0.0, 100.0).unwrap());
-/// 
+///
 /// // Random angle in radians
 /// let angle = sample(addr!("angle"), Uniform::new(0.0, 2.0 * std::f64::consts::PI).unwrap());
 /// ```
@@ -227,19 +229,21 @@ impl Uniform {
     pub fn new(low: f64, high: f64) -> crate::error::FugueResult<Self> {
         if !low.is_finite() || !high.is_finite() {
             return Err(crate::error::FugueError::invalid_parameters(
-                "Uniform", 
-                "Bounds must be finite", 
-                crate::error::ErrorCode::InvalidRange
-            ).with_context("low", format!("{}", low))
-             .with_context("high", format!("{}", high)));
+                "Uniform",
+                "Bounds must be finite",
+                crate::error::ErrorCode::InvalidRange,
+            )
+            .with_context("low", format!("{}", low))
+            .with_context("high", format!("{}", high)));
         }
         if low >= high {
             return Err(crate::error::FugueError::invalid_parameters(
-                "Uniform", 
-                "Lower bound must be less than upper bound", 
-                crate::error::ErrorCode::InvalidRange
-            ).with_context("low", format!("{}", low))
-             .with_context("high", format!("{}", high)));
+                "Uniform",
+                "Lower bound must be less than upper bound",
+                crate::error::ErrorCode::InvalidRange,
+            )
+            .with_context("low", format!("{}", low))
+            .with_context("high", format!("{}", high)));
         }
         Ok(Uniform { low, high })
     }
@@ -331,18 +335,20 @@ impl LogNormal {
     pub fn new(mu: f64, sigma: f64) -> crate::error::FugueResult<Self> {
         if !mu.is_finite() {
             return Err(crate::error::FugueError::invalid_parameters(
-                "LogNormal", 
-                "Mean (mu) must be finite", 
-                crate::error::ErrorCode::InvalidMean
-            ).with_context("mu", format!("{}", mu)));
+                "LogNormal",
+                "Mean (mu) must be finite",
+                crate::error::ErrorCode::InvalidMean,
+            )
+            .with_context("mu", format!("{}", mu)));
         }
         if sigma <= 0.0 || !sigma.is_finite() {
             return Err(crate::error::FugueError::invalid_parameters(
-                "LogNormal", 
-                "Standard deviation (sigma) must be positive and finite", 
-                crate::error::ErrorCode::InvalidVariance
-            ).with_context("sigma", format!("{}", sigma))
-             .with_context("expected", "> 0.0 and finite"));
+                "LogNormal",
+                "Standard deviation (sigma) must be positive and finite",
+                crate::error::ErrorCode::InvalidVariance,
+            )
+            .with_context("sigma", format!("{}", sigma))
+            .with_context("expected", "> 0.0 and finite"));
         }
         Ok(LogNormal { mu, sigma })
     }
@@ -432,11 +438,12 @@ impl Exponential {
     pub fn new(rate: f64) -> crate::error::FugueResult<Self> {
         if rate <= 0.0 || !rate.is_finite() {
             return Err(crate::error::FugueError::invalid_parameters(
-                "Exponential", 
-                "Rate parameter must be positive and finite", 
-                crate::error::ErrorCode::InvalidRate
-            ).with_context("rate", format!("{}", rate))
-             .with_context("expected", "> 0.0 and finite"));
+                "Exponential",
+                "Rate parameter must be positive and finite",
+                crate::error::ErrorCode::InvalidRate,
+            )
+            .with_context("rate", format!("{}", rate))
+            .with_context("expected", "> 0.0 and finite"));
         }
         Ok(Exponential { rate })
     }
@@ -511,11 +518,12 @@ impl Bernoulli {
     pub fn new(p: f64) -> crate::error::FugueResult<Self> {
         if !p.is_finite() || !(0.0..=1.0).contains(&p) {
             return Err(crate::error::FugueError::invalid_parameters(
-                "Bernoulli", 
-                "Probability must be in [0, 1]", 
-                crate::error::ErrorCode::InvalidProbability
-            ).with_context("p", format!("{}", p))
-             .with_context("expected", "[0.0, 1.0]"));
+                "Bernoulli",
+                "Probability must be in [0, 1]",
+                crate::error::ErrorCode::InvalidProbability,
+            )
+            .with_context("p", format!("{}", p))
+            .with_context("expected", "[0.0, 1.0]"));
         }
         Ok(Bernoulli { p })
     }
@@ -586,7 +594,7 @@ impl Distribution<bool> for Bernoulli {
 ///     .map(move |idx| options[idx].to_string());
 ///
 /// // Observe a specific choice
-/// let observed = observe(addr!("user_choice"), 
+/// let observed = observe(addr!("user_choice"),
 ///     Categorical::uniform(3).unwrap(), 1usize);
 /// ```
 #[derive(Clone, Debug)]
@@ -599,32 +607,35 @@ impl Categorical {
     pub fn new(probs: Vec<f64>) -> crate::error::FugueResult<Self> {
         if probs.is_empty() {
             return Err(crate::error::FugueError::invalid_parameters(
-                "Categorical", 
-                "Probability vector cannot be empty", 
-                crate::error::ErrorCode::InvalidProbability
-            ).with_context("length", "0"));
+                "Categorical",
+                "Probability vector cannot be empty",
+                crate::error::ErrorCode::InvalidProbability,
+            )
+            .with_context("length", "0"));
         }
 
         let sum: f64 = probs.iter().sum();
         if (sum - 1.0).abs() > 1e-6 {
             return Err(crate::error::FugueError::invalid_parameters(
-                "Categorical", 
-                "Probabilities must sum to 1.0", 
-                crate::error::ErrorCode::InvalidProbability
-            ).with_context("sum", format!("{:.6}", sum))
-             .with_context("expected", "1.0")
-             .with_context("tolerance", "1e-6"));
+                "Categorical",
+                "Probabilities must sum to 1.0",
+                crate::error::ErrorCode::InvalidProbability,
+            )
+            .with_context("sum", format!("{:.6}", sum))
+            .with_context("expected", "1.0")
+            .with_context("tolerance", "1e-6"));
         }
 
         for (i, &p) in probs.iter().enumerate() {
             if !p.is_finite() || p < 0.0 {
                 return Err(crate::error::FugueError::invalid_parameters(
-                    "Categorical", 
-                    "All probabilities must be non-negative and finite", 
-                    crate::error::ErrorCode::InvalidProbability
-                ).with_context("index", format!("{}", i))
-                 .with_context("value", format!("{}", p))
-                 .with_context("expected", ">= 0.0 and finite"));
+                    "Categorical",
+                    "All probabilities must be non-negative and finite",
+                    crate::error::ErrorCode::InvalidProbability,
+                )
+                .with_context("index", format!("{}", i))
+                .with_context("value", format!("{}", p))
+                .with_context("expected", ">= 0.0 and finite"));
             }
         }
 
@@ -635,10 +646,11 @@ impl Categorical {
     pub fn uniform(k: usize) -> crate::error::FugueResult<Self> {
         if k == 0 {
             return Err(crate::error::FugueError::invalid_parameters(
-                "Categorical", 
-                "Number of categories must be positive", 
-                crate::error::ErrorCode::InvalidCount
-            ).with_context("k", "0"));
+                "Categorical",
+                "Number of categories must be positive",
+                crate::error::ErrorCode::InvalidCount,
+            )
+            .with_context("k", "0"));
         }
 
         let prob = 1.0 / k as f64;
@@ -745,19 +757,21 @@ impl Beta {
     pub fn new(alpha: f64, beta: f64) -> crate::error::FugueResult<Self> {
         if alpha <= 0.0 || !alpha.is_finite() {
             return Err(crate::error::FugueError::invalid_parameters(
-                "Beta", 
-                "Alpha parameter must be positive and finite", 
-                crate::error::ErrorCode::InvalidShape
-            ).with_context("alpha", format!("{}", alpha))
-             .with_context("expected", "> 0.0 and finite"));
+                "Beta",
+                "Alpha parameter must be positive and finite",
+                crate::error::ErrorCode::InvalidShape,
+            )
+            .with_context("alpha", format!("{}", alpha))
+            .with_context("expected", "> 0.0 and finite"));
         }
         if beta <= 0.0 || !beta.is_finite() {
             return Err(crate::error::FugueError::invalid_parameters(
-                "Beta", 
-                "Beta parameter must be positive and finite", 
-                crate::error::ErrorCode::InvalidShape
-            ).with_context("beta", format!("{}", beta))
-             .with_context("expected", "> 0.0 and finite"));
+                "Beta",
+                "Beta parameter must be positive and finite",
+                crate::error::ErrorCode::InvalidShape,
+            )
+            .with_context("beta", format!("{}", beta))
+            .with_context("expected", "> 0.0 and finite"));
         }
         Ok(Beta { alpha, beta })
     }
@@ -859,19 +873,21 @@ impl Gamma {
     pub fn new(shape: f64, rate: f64) -> crate::error::FugueResult<Self> {
         if shape <= 0.0 || !shape.is_finite() {
             return Err(crate::error::FugueError::invalid_parameters(
-                "Gamma", 
-                "Shape parameter must be positive and finite", 
-                crate::error::ErrorCode::InvalidShape
-            ).with_context("shape", format!("{}", shape))
-             .with_context("expected", "> 0.0 and finite"));
+                "Gamma",
+                "Shape parameter must be positive and finite",
+                crate::error::ErrorCode::InvalidShape,
+            )
+            .with_context("shape", format!("{}", shape))
+            .with_context("expected", "> 0.0 and finite"));
         }
         if rate <= 0.0 || !rate.is_finite() {
             return Err(crate::error::FugueError::invalid_parameters(
-                "Gamma", 
-                "Rate parameter must be positive and finite", 
-                crate::error::ErrorCode::InvalidRate
-            ).with_context("rate", format!("{}", rate))
-             .with_context("expected", "> 0.0 and finite"));
+                "Gamma",
+                "Rate parameter must be positive and finite",
+                crate::error::ErrorCode::InvalidRate,
+            )
+            .with_context("rate", format!("{}", rate))
+            .with_context("expected", "> 0.0 and finite"));
         }
         Ok(Gamma { shape, rate })
     }
@@ -968,11 +984,12 @@ impl Binomial {
     pub fn new(n: u64, p: f64) -> crate::error::FugueResult<Self> {
         if !p.is_finite() || !(0.0..=1.0).contains(&p) {
             return Err(crate::error::FugueError::invalid_parameters(
-                "Binomial", 
-                "Probability must be in [0, 1]", 
-                crate::error::ErrorCode::InvalidProbability
-            ).with_context("p", format!("{}", p))
-             .with_context("expected", "[0.0, 1.0]"));
+                "Binomial",
+                "Probability must be in [0, 1]",
+                crate::error::ErrorCode::InvalidProbability,
+            )
+            .with_context("p", format!("{}", p))
+            .with_context("expected", "[0.0, 1.0]"));
         }
         Ok(Binomial { n, p })
     }
@@ -1051,11 +1068,12 @@ impl Poisson {
     pub fn new(lambda: f64) -> crate::error::FugueResult<Self> {
         if lambda <= 0.0 || !lambda.is_finite() {
             return Err(crate::error::FugueError::invalid_parameters(
-                "Poisson", 
-                "Rate parameter lambda must be positive and finite", 
-                crate::error::ErrorCode::InvalidRate
-            ).with_context("lambda", format!("{}", lambda))
-             .with_context("expected", "> 0.0 and finite"));
+                "Poisson",
+                "Rate parameter lambda must be positive and finite",
+                crate::error::ErrorCode::InvalidRate,
+            )
+            .with_context("lambda", format!("{}", lambda))
+            .with_context("expected", "> 0.0 and finite"));
         }
         Ok(Poisson { lambda })
     }
@@ -1223,7 +1241,8 @@ mod tests {
     fn categorical_uniform_constructor() {
         let cu = Categorical::uniform(4).unwrap();
         assert_eq!(cu.len(), 4);
-        for &p in cu.probs() { assert!((p - 0.25).abs() < 1e-12); }
+        for &p in cu.probs() {
+            assert!((p - 0.25).abs() < 1e-12);
+        }
     }
 }
-

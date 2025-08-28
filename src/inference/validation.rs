@@ -101,8 +101,8 @@ pub fn test_conjugate_normal_model<R: Rng>(
     let posterior_precision = prior_precision + likelihood_precision;
     let posterior_variance = 1.0 / posterior_precision;
     let posterior_sigma = posterior_variance.sqrt();
-    let posterior_mu =
-        posterior_variance * (prior_precision * config.prior_mu + likelihood_precision * config.observation);
+    let posterior_mu = posterior_variance
+        * (prior_precision * config.prior_mu + likelihood_precision * config.observation);
 
     // Run MCMC
     let samples = mcmc_fn(rng, config.n_samples, config.n_warmup);
@@ -268,7 +268,6 @@ mod tests_more {
         assert!(res.is_valid());
     }
 }
-
 
 #[cfg(test)]
 mod validation_tests {

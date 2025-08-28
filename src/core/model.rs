@@ -10,10 +10,10 @@ use crate::core::distribution::{Distribution, LogF64};
 /// # use fugue::*;
 /// // Deterministic value
 /// let m = pure(42.0);
-/// 
+///
 /// // Sample from distribution
 /// let s = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
-/// 
+///
 /// // Dependent sampling
 /// let chain = s.bind(|x| sample(addr!("y"), Normal::new(x, 0.5).unwrap()));
 /// ```
@@ -334,7 +334,7 @@ where
 
 /// Add an unnormalized log-weight `logw` to the model, returning a `Model<()>`.
 ///
-/// Factors allow encoding soft constraints or arbitrary log-probability contributions to the model. 
+/// Factors allow encoding soft constraints or arbitrary log-probability contributions to the model.
 /// They are particularly useful for:
 ///
 /// - Encoding constraints that should be "mostly satisfied"
@@ -378,7 +378,7 @@ pub fn factor(logw: LogF64) -> Model<()> {
 pub trait ModelExt<A>: Sized {
     /// Monadic bind operation (>>=).
     ///
-    /// Chains two probabilistic computations where the second depends on the result of the first. 
+    /// Chains two probabilistic computations where the second depends on the result of the first.
     /// This is the fundamental operation for building complex probabilistic models from simpler parts.
     /// The function `k` takes the result of this model and returns a new model.
     ///
@@ -513,10 +513,10 @@ pub fn zip<A: Send + 'static, B: Send + 'static>(ma: Model<A>, mb: Model<B>) -> 
     ma.bind(|a| mb.map(move |b| (a, b)))
 }
 
-/// Execute a vector of models, `models`, and collect their results into a single model of a vector. 
-/// This function takes a collection of independent models and runs them all, collecting their results into a vector. 
+/// Execute a vector of models, `models`, and collect their results into a single model of a vector.
+/// This function takes a collection of independent models and runs them all, collecting their results into a vector.
 /// This is useful for running multiple similar probabilistic computations.
-/// 
+///
 /// Example:
 /// ```rust
 /// use fugue::*;
@@ -544,9 +544,9 @@ pub fn sequence_vec<A: Send + 'static>(models: Vec<Model<A>>) -> Model<Vec<A>> {
     })
 }
 
-/// Apply a function, `f`, that produces models to each item in a vector, `items`, collecting the results. 
-/// This is a higher-order function that maps each item in the input vector through a function that produces a model, 
-/// then sequences all the resulting models into a single model of a vector. 
+/// Apply a function, `f`, that produces models to each item in a vector, `items`, collecting the results.
+/// This is a higher-order function that maps each item in the input vector through a function that produces a model,
+/// then sequences all the resulting models into a single model of a vector.
 /// This is equivalent to `sequence_vec(items.map(f))` but more convenient.
 ///
 /// Example:
@@ -571,11 +571,11 @@ pub fn traverse_vec<T, A: Send + 'static>(
     sequence_vec(items.into_iter().map(f).collect())
 }
 
-/// Conditional execution: fail with zero probability when predicate is false. 
+/// Conditional execution: fail with zero probability when predicate is false.
 ///
 /// Guards provide a way to enforce hard constraints in probabilistic models.
-/// When the predicate `pred` is true, the model continues normally. 
-/// When false, the model receives negative infinite log-weight, effectively ruling out that execution path, 
+/// When the predicate `pred` is true, the model continues normally.
+/// When false, the model receives negative infinite log-weight, effectively ruling out that execution path,
 /// returning a `Model<()>` that fails with zero probability.
 ///
 /// Example:
@@ -616,7 +616,13 @@ mod tests {
     #[test]
     fn pure_and_map_work() {
         let m = pure(2).map(|x| x + 3);
-        let (val, t) = run(PriorHandler { rng: &mut StdRng::seed_from_u64(1), trace: Trace::default() }, m);
+        let (val, t) = run(
+            PriorHandler {
+                rng: &mut StdRng::seed_from_u64(1),
+                trace: Trace::default(),
+            },
+            m,
+        );
         assert_eq!(val, 5);
         assert_eq!(t.choices.len(), 0);
     }
@@ -627,7 +633,13 @@ mod tests {
             .and_then(|x| observe(addr!("y"), Normal::new(x, 1.0).unwrap(), 0.5).map(move |_| x));
 
         let mut rng = StdRng::seed_from_u64(42);
-        let (_val, trace) = run(PriorHandler { rng: &mut rng, trace: Trace::default() }, m);
+        let (_val, trace) = run(
+            PriorHandler {
+                rng: &mut rng,
+                trace: Trace::default(),
+            },
+            m,
+        );
         assert!(trace.choices.contains_key(&addr!("x")));
         // Observation contributes to likelihood but not to choices
         assert!((trace.log_likelihood.is_finite()));
@@ -637,26 +649,52 @@ mod tests {
     fn factor_and_guard_affect_weight() {
         // factor adds a finite weight
         let m_ok = factor(-1.23);
-        let ((), t_ok) = run(PriorHandler { rng: &mut StdRng::seed_from_u64(2), trace: Trace::default() }, m_ok);
+        let ((), t_ok) = run(
+            PriorHandler {
+                rng: &mut StdRng::seed_from_u64(2),
+                trace: Trace::default(),
+            },
+            m_ok,
+        );
         assert!((t_ok.total_log_weight() + 1.23).abs() < 1e-12);
 
         // guard(false) adds -inf weight via factor
         let m_bad = guard(false);
-        let ((), t_bad) = run(PriorHandler { rng: &mut StdRng::seed_from_u64(3), trace: Trace::default() }, m_bad);
-        assert!(t_bad.total_log_weight().is_infinite() && t_bad.total_log_weight().is_sign_negative());
+        let ((), t_bad) = run(
+            PriorHandler {
+                rng: &mut StdRng::seed_from_u64(3),
+                trace: Trace::default(),
+            },
+            m_bad,
+        );
+        assert!(
+            t_bad.total_log_weight().is_infinite() && t_bad.total_log_weight().is_sign_negative()
+        );
     }
 
     #[test]
     fn sequence_and_traverse_vec() {
         let models: Vec<Model<i32>> = (0..5).map(|i| pure(i)).collect();
         let seq = sequence_vec(models);
-        let (vals, t) = run(PriorHandler { rng: &mut StdRng::seed_from_u64(4), trace: Trace::default() }, seq);
-        assert_eq!(vals, vec![0,1,2,3,4]);
+        let (vals, t) = run(
+            PriorHandler {
+                rng: &mut StdRng::seed_from_u64(4),
+                trace: Trace::default(),
+            },
+            seq,
+        );
+        assert_eq!(vals, vec![0, 1, 2, 3, 4]);
         assert_eq!(t.choices.len(), 0);
 
-        let trav = traverse_vec(vec![1,2,3], |i| pure(i * 2));
-        let (v2, _t2) = run(PriorHandler { rng: &mut StdRng::seed_from_u64(5), trace: Trace::default() }, trav);
-        assert_eq!(v2, vec![2,4,6]);
+        let trav = traverse_vec(vec![1, 2, 3], |i| pure(i * 2));
+        let (v2, _t2) = run(
+            PriorHandler {
+                rng: &mut StdRng::seed_from_u64(5),
+                trace: Trace::default(),
+            },
+            trav,
+        );
+        assert_eq!(v2, vec![2, 4, 6]);
     }
 
     #[test]
@@ -664,19 +702,36 @@ mod tests {
         // zip
         let m1 = pure(1);
         let m2 = pure(2);
-        let (pair, _t) = run(PriorHandler { rng: &mut StdRng::seed_from_u64(6), trace: Trace::default() }, zip(m1, m2));
-        assert_eq!(pair, (1,2));
+        let (pair, _t) = run(
+            PriorHandler {
+                rng: &mut StdRng::seed_from_u64(6),
+                trace: Trace::default(),
+            },
+            zip(m1, m2),
+        );
+        assert_eq!(pair, (1, 2));
 
         // sequence empty
         let empty: Vec<Model<i32>> = vec![];
-        let (vals, _t2) = run(PriorHandler { rng: &mut StdRng::seed_from_u64(7), trace: Trace::default() }, sequence_vec(empty));
+        let (vals, _t2) = run(
+            PriorHandler {
+                rng: &mut StdRng::seed_from_u64(7),
+                trace: Trace::default(),
+            },
+            sequence_vec(empty),
+        );
         assert!(vals.is_empty());
 
         // bind chaining across types
         let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
             .bind(|x| pure(x > 0.0))
             .bind(|b| if b { pure(1u64) } else { pure(0u64) });
-        let (_val, _t3) = run(PriorHandler { rng: &mut StdRng::seed_from_u64(8), trace: Trace::default() }, model);
+        let (_val, _t3) = run(
+            PriorHandler {
+                rng: &mut StdRng::seed_from_u64(8),
+                trace: Trace::default(),
+            },
+            model,
+        );
     }
 }
-

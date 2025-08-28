@@ -493,10 +493,26 @@ mod tests {
     fn ess_and_resampling_behave() {
         // Construct 4 particles with uneven weights
         let particles = vec![
-            Particle { trace: Trace::default(), weight: 0.7, log_weight: (0.7f64).ln() },
-            Particle { trace: Trace::default(), weight: 0.2, log_weight: (0.2f64).ln() },
-            Particle { trace: Trace::default(), weight: 0.09, log_weight: (0.09f64).ln() },
-            Particle { trace: Trace::default(), weight: 0.01, log_weight: (0.01f64).ln() },
+            Particle {
+                trace: Trace::default(),
+                weight: 0.7,
+                log_weight: (0.7f64).ln(),
+            },
+            Particle {
+                trace: Trace::default(),
+                weight: 0.2,
+                log_weight: (0.2f64).ln(),
+            },
+            Particle {
+                trace: Trace::default(),
+                weight: 0.09,
+                log_weight: (0.09f64).ln(),
+            },
+            Particle {
+                trace: Trace::default(),
+                weight: 0.01,
+                log_weight: (0.01f64).ln(),
+            },
         ];
         let ess_val = effective_sample_size(&particles);
         assert!(ess_val < particles.len() as f64);
@@ -516,14 +532,24 @@ mod tests {
         let resampled = resample_particles(&mut rng, &particles, ResamplingMethod::Systematic);
         let sum_w: f64 = resampled.iter().map(|p| p.weight).sum();
         assert!((sum_w - 1.0).abs() < 1e-12);
-        for p in &resampled { assert!((p.weight - 0.25).abs() < 1e-12); }
+        for p in &resampled {
+            assert!((p.weight - 0.25).abs() < 1e-12);
+        }
     }
 
     #[test]
     fn normalize_particles_handles_neg_inf() {
         let mut particles = vec![
-            Particle { trace: Trace::default(), weight: 0.0, log_weight: f64::NEG_INFINITY },
-            Particle { trace: Trace::default(), weight: 0.0, log_weight: f64::NEG_INFINITY },
+            Particle {
+                trace: Trace::default(),
+                weight: 0.0,
+                log_weight: f64::NEG_INFINITY,
+            },
+            Particle {
+                trace: Trace::default(),
+                weight: 0.0,
+                log_weight: f64::NEG_INFINITY,
+            },
         ];
         normalize_particles(&mut particles);
         // Fallback to uniform
@@ -534,11 +560,16 @@ mod tests {
     #[test]
     fn adaptive_smc_runs_with_small_config() {
         let model_fn = || {
-            sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
-                .and_then(|mu| observe(addr!("y"), Normal::new(mu, 1.0).unwrap(), 0.5).map(move |_| mu))
+            sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap()).and_then(|mu| {
+                observe(addr!("y"), Normal::new(mu, 1.0).unwrap(), 0.5).map(move |_| mu)
+            })
         };
         let mut rng = StdRng::seed_from_u64(2);
-        let config = SMCConfig { resampling_method: ResamplingMethod::Systematic, ess_threshold: 0.5, rejuvenation_steps: 1 };
+        let config = SMCConfig {
+            resampling_method: ResamplingMethod::Systematic,
+            ess_threshold: 0.5,
+            rejuvenation_steps: 1,
+        };
         let particles = adaptive_smc(&mut rng, 5, model_fn, config);
         assert_eq!(particles.len(), 5);
         // Weights normalized
@@ -546,4 +577,3 @@ mod tests {
         assert!((sum_w - 1.0).abs() < 1e-9);
     }
 }
-

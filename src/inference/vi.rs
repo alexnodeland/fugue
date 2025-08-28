@@ -449,7 +449,7 @@ pub fn optimize_meanfield_vi<A, R: Rng>(
                     }
                     let elbo_plus = elbo_with_guide(rng, &model_fn, &guide_plus, 10);
                     let grad_mu = (elbo_plus - current_elbo) / eps;
-                    
+
                     // Add numerical stability checks
                     if grad_mu.is_finite() {
                         let update = learning_rate * grad_mu;
@@ -471,7 +471,7 @@ pub fn optimize_meanfield_vi<A, R: Rng>(
                     }
                     let elbo_plus = elbo_with_guide(rng, &model_fn, &guide_plus, 10);
                     let grad_mu = (elbo_plus - current_elbo) / eps;
-                    
+
                     // Add numerical stability checks
                     if grad_mu.is_finite() {
                         let update = learning_rate * grad_mu;
@@ -498,7 +498,7 @@ pub fn optimize_meanfield_vi<A, R: Rng>(
                     }
                     let elbo_plus = elbo_with_guide(rng, &model_fn, &guide_plus, 10);
                     let grad_alpha = (elbo_plus - current_elbo) / eps;
-                    
+
                     // Add numerical stability checks
                     if grad_alpha.is_finite() {
                         let update = learning_rate * grad_alpha;
@@ -551,7 +551,7 @@ pub fn estimate_elbo<A, R: Rng>(
 mod tests {
     use super::*;
     use crate::addr;
-    
+
     use crate::core::model::{observe, sample, ModelExt};
     use crate::runtime::trace::{Choice, ChoiceValue, Trace};
     use rand::rngs::StdRng;
@@ -560,12 +560,18 @@ mod tests {
     #[test]
     fn variational_param_sampling_and_log_prob() {
         let mut rng = StdRng::seed_from_u64(20);
-        let vp_n = VariationalParam::Normal { mu: 0.0, log_sigma: 0.0 };
+        let vp_n = VariationalParam::Normal {
+            mu: 0.0,
+            log_sigma: 0.0,
+        };
         let x = vp_n.sample(&mut rng);
         assert!(x.is_finite());
         assert!(vp_n.log_prob(x).is_finite());
 
-        let vp_b = VariationalParam::Beta { log_alpha: (2.0f64).ln(), log_beta: (3.0f64).ln() };
+        let vp_b = VariationalParam::Beta {
+            log_alpha: (2.0f64).ln(),
+            log_beta: (3.0f64).ln(),
+        };
         let y = vp_b.sample(&mut rng);
         assert!(y > 0.0 && y < 1.0);
         assert!(vp_b.log_prob(y).is_finite());
@@ -574,15 +580,19 @@ mod tests {
     #[test]
     fn elbo_computation_is_finite() {
         let model_fn = || {
-            sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
-                .and_then(|mu| observe(addr!("y"), Normal::new(mu, 1.0).unwrap(), 0.2).map(move |_| mu))
+            sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap()).and_then(|mu| {
+                observe(addr!("y"), Normal::new(mu, 1.0).unwrap(), 0.2).map(move |_| mu)
+            })
         };
 
         // Build a simple guide
         let mut guide = MeanFieldGuide::new();
         guide.params.insert(
             addr!("mu"),
-            VariationalParam::Normal { mu: 0.0, log_sigma: 0.0 }
+            VariationalParam::Normal {
+                mu: 0.0,
+                log_sigma: 0.0,
+            },
         );
 
         let mut rng = StdRng::seed_from_u64(21);
@@ -596,15 +606,27 @@ mod tests {
         let mut base = Trace::default();
         base.choices.insert(
             addr!("pos"),
-            Choice { addr: addr!("pos"), value: ChoiceValue::F64(-1.0), logp: -0.1 }
+            Choice {
+                addr: addr!("pos"),
+                value: ChoiceValue::F64(-1.0),
+                logp: -0.1,
+            },
         );
         base.choices.insert(
             addr!("bool"),
-            Choice { addr: addr!("bool"), value: ChoiceValue::Bool(true), logp: -0.7 }
+            Choice {
+                addr: addr!("bool"),
+                value: ChoiceValue::Bool(true),
+                logp: -0.7,
+            },
         );
         base.choices.insert(
             addr!("u64"),
-            Choice { addr: addr!("u64"), value: ChoiceValue::U64(3), logp: -0.5 }
+            Choice {
+                addr: addr!("u64"),
+                value: ChoiceValue::U64(3),
+                logp: -0.5,
+            },
         );
 
         let guide = MeanFieldGuide::from_trace(&base);
@@ -619,21 +641,25 @@ mod tests {
     #[test]
     fn optimize_vi_updates_parameters_and_is_stable() {
         let model_fn = || {
-            sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
-                .and_then(|mu| observe(addr!("y"), Normal::new(mu, 1.0).unwrap(), 0.3).map(move |_| mu))
+            sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap()).and_then(|mu| {
+                observe(addr!("y"), Normal::new(mu, 1.0).unwrap(), 0.3).map(move |_| mu)
+            })
         };
 
         let mut guide = MeanFieldGuide::new();
         guide.params.insert(
             addr!("mu"),
-            VariationalParam::Normal { mu: 0.0, log_sigma: 0.0 }
+            VariationalParam::Normal {
+                mu: 0.0,
+                log_sigma: 0.0,
+            },
         );
 
         let optimized = optimize_meanfield_vi(
             &mut StdRng::seed_from_u64(23),
             model_fn,
             guide.clone(),
-            2,   // small iterations for speed
+            2, // small iterations for speed
             3,
             0.1,
         );

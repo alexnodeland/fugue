@@ -17,28 +17,28 @@ pub enum ErrorCode {
     InvalidShape = 104,
     InvalidRate = 105,
     InvalidCount = 106,
-    
+
     // Numerical computation errors (2xx)
     NumericalOverflow = 200,
     NumericalUnderflow = 201,
     NumericalInstability = 202,
     InvalidLogDensity = 203,
-    
+
     // Model execution errors (3xx)
     ModelExecutionFailed = 300,
     AddressConflict = 301,
     UnexpectedModelStructure = 302,
-    
+
     // Inference algorithm errors (4xx)
     InferenceConvergenceFailed = 400,
     InsufficientSamples = 401,
     InvalidInferenceConfig = 402,
-    
+
     // Trace manipulation errors (5xx)
     TraceAddressNotFound = 500,
     TraceCorrupted = 501,
     TraceReplayFailed = 502,
-    
+
     // Type system errors (6xx)
     TypeMismatch = 600,
     UnsupportedType = 601,
@@ -55,24 +55,24 @@ impl ErrorCode {
             ErrorCode::InvalidShape => "Shape parameter is invalid",
             ErrorCode::InvalidRate => "Rate parameter is invalid",
             ErrorCode::InvalidCount => "Count parameter is invalid",
-            
+
             ErrorCode::NumericalOverflow => "Numerical computation resulted in overflow",
-            ErrorCode::NumericalUnderflow => "Numerical computation resulted in underflow", 
+            ErrorCode::NumericalUnderflow => "Numerical computation resulted in underflow",
             ErrorCode::NumericalInstability => "Numerical computation is unstable",
             ErrorCode::InvalidLogDensity => "Log density computation is invalid",
-            
+
             ErrorCode::ModelExecutionFailed => "Model execution failed",
             ErrorCode::AddressConflict => "Address already exists in trace",
             ErrorCode::UnexpectedModelStructure => "Model structure is unexpected",
-            
+
             ErrorCode::InferenceConvergenceFailed => "Inference algorithm failed to converge",
             ErrorCode::InsufficientSamples => "Insufficient samples for reliable inference",
             ErrorCode::InvalidInferenceConfig => "Inference configuration is invalid",
-            
+
             ErrorCode::TraceAddressNotFound => "Address not found in trace",
             ErrorCode::TraceCorrupted => "Trace data is corrupted",
             ErrorCode::TraceReplayFailed => "Trace replay failed",
-            
+
             ErrorCode::TypeMismatch => "Type mismatch in trace value",
             ErrorCode::UnsupportedType => "Unsupported type for operation",
         }
@@ -161,8 +161,8 @@ pub enum FugueError {
         context: ErrorContext,
     },
     /// Numerical computation failed
-    NumericalError { 
-        operation: String, 
+    NumericalError {
+        operation: String,
         details: String,
         code: ErrorCode,
         context: ErrorContext,
@@ -175,8 +175,8 @@ pub enum FugueError {
         context: ErrorContext,
     },
     /// Inference algorithm failed
-    InferenceError { 
-        algorithm: String, 
+    InferenceError {
+        algorithm: String,
         reason: String,
         code: ErrorCode,
         context: ErrorContext,
@@ -208,22 +208,30 @@ impl fmt::Display for FugueError {
                 code,
                 context,
             } => {
-                write!(f, "[{}] Invalid parameters for {}: {}", *code as u32, distribution, reason)?;
+                write!(
+                    f,
+                    "[{}] Invalid parameters for {}: {}",
+                    *code as u32, distribution, reason
+                )?;
                 self.write_context(f, context)?;
                 Ok(())
             }
-            FugueError::NumericalError { 
-                operation, 
+            FugueError::NumericalError {
+                operation,
                 details,
                 code,
                 context,
             } => {
-                write!(f, "[{}] Numerical error in {}: {}", *code as u32, operation, details)?;
+                write!(
+                    f,
+                    "[{}] Numerical error in {}: {}",
+                    *code as u32, operation, details
+                )?;
                 self.write_context(f, context)?;
                 Ok(())
             }
-            FugueError::ModelError { 
-                address, 
+            FugueError::ModelError {
+                address,
                 reason,
                 code,
                 context,
@@ -236,13 +244,17 @@ impl fmt::Display for FugueError {
                 self.write_context(f, context)?;
                 Ok(())
             }
-            FugueError::InferenceError { 
-                algorithm, 
+            FugueError::InferenceError {
+                algorithm,
                 reason,
                 code,
                 context,
             } => {
-                write!(f, "[{}] Inference error in {}: {}", *code as u32, algorithm, reason)?;
+                write!(
+                    f,
+                    "[{}] Inference error in {}: {}",
+                    *code as u32, algorithm, reason
+                )?;
                 self.write_context(f, context)?;
                 Ok(())
             }
@@ -254,9 +266,17 @@ impl fmt::Display for FugueError {
                 context,
             } => {
                 if let Some(addr) = address {
-                    write!(f, "[{}] Trace error in {} at {}: {}", *code as u32, operation, addr, reason)?;
+                    write!(
+                        f,
+                        "[{}] Trace error in {} at {}: {}",
+                        *code as u32, operation, addr, reason
+                    )?;
                 } else {
-                    write!(f, "[{}] Trace error in {}: {}", *code as u32, operation, reason)?;
+                    write!(
+                        f,
+                        "[{}] Trace error in {}: {}",
+                        *code as u32, operation, reason
+                    )?;
                 }
                 self.write_context(f, context)?;
                 Ok(())
@@ -551,7 +571,7 @@ impl From<String> for FugueError {
 /// ```rust
 /// # use fugue::*;
 /// let err = invalid_params!("Normal", "sigma must be positive", InvalidVariance);
-/// let err_with_ctx = invalid_params!("Normal", "sigma must be positive", InvalidVariance, 
+/// let err_with_ctx = invalid_params!("Normal", "sigma must be positive", InvalidVariance,
 ///     "sigma" => "-1.0", "expected" => "> 0.0");
 /// ```
 #[macro_export]
@@ -612,16 +632,16 @@ impl Validate for Normal {
     fn validate(&self) -> FugueResult<()> {
         if !self.mu().is_finite() {
             return Err(invalid_params!(
-                "Normal", 
-                "Mean (mu) must be finite", 
+                "Normal",
+                "Mean (mu) must be finite",
                 InvalidMean,
                 "mu" => format!("{}", self.mu())
             ));
         }
         if self.sigma() <= 0.0 || !self.sigma().is_finite() {
             return Err(invalid_params!(
-                "Normal", 
-                "Standard deviation (sigma) must be positive and finite", 
+                "Normal",
+                "Standard deviation (sigma) must be positive and finite",
                 InvalidVariance,
                 "sigma" => format!("{}", self.sigma()),
                 "expected" => "> 0.0 and finite"
@@ -635,8 +655,8 @@ impl Validate for Exponential {
     fn validate(&self) -> FugueResult<()> {
         if self.rate() <= 0.0 || !self.rate().is_finite() {
             return Err(invalid_params!(
-                "Exponential", 
-                "Rate parameter must be positive and finite", 
+                "Exponential",
+                "Rate parameter must be positive and finite",
                 InvalidRate,
                 "rate" => format!("{}", self.rate()),
                 "expected" => "> 0.0 and finite"
@@ -650,8 +670,8 @@ impl Validate for Beta {
     fn validate(&self) -> FugueResult<()> {
         if self.alpha() <= 0.0 || !self.alpha().is_finite() {
             return Err(invalid_params!(
-                "Beta", 
-                "Alpha parameter must be positive and finite", 
+                "Beta",
+                "Alpha parameter must be positive and finite",
                 InvalidShape,
                 "alpha" => format!("{}", self.alpha()),
                 "expected" => "> 0.0 and finite"
@@ -659,8 +679,8 @@ impl Validate for Beta {
         }
         if self.beta() <= 0.0 || !self.beta().is_finite() {
             return Err(invalid_params!(
-                "Beta", 
-                "Beta parameter must be positive and finite", 
+                "Beta",
+                "Beta parameter must be positive and finite",
                 InvalidShape,
                 "beta" => format!("{}", self.beta()),
                 "expected" => "> 0.0 and finite"
@@ -674,8 +694,8 @@ impl Validate for Gamma {
     fn validate(&self) -> FugueResult<()> {
         if self.shape() <= 0.0 || !self.shape().is_finite() {
             return Err(invalid_params!(
-                "Gamma", 
-                "Shape parameter must be positive and finite", 
+                "Gamma",
+                "Shape parameter must be positive and finite",
                 InvalidShape,
                 "shape" => format!("{}", self.shape()),
                 "expected" => "> 0.0 and finite"
@@ -683,8 +703,8 @@ impl Validate for Gamma {
         }
         if self.rate() <= 0.0 || !self.rate().is_finite() {
             return Err(invalid_params!(
-                "Gamma", 
-                "Rate parameter must be positive and finite", 
+                "Gamma",
+                "Rate parameter must be positive and finite",
                 InvalidRate,
                 "rate" => format!("{}", self.rate()),
                 "expected" => "> 0.0 and finite"
@@ -698,8 +718,8 @@ impl Validate for Uniform {
     fn validate(&self) -> FugueResult<()> {
         if !self.low().is_finite() || !self.high().is_finite() {
             return Err(invalid_params!(
-                "Uniform", 
-                "Bounds must be finite", 
+                "Uniform",
+                "Bounds must be finite",
                 InvalidRange,
                 "low" => format!("{}", self.low()),
                 "high" => format!("{}", self.high())
@@ -707,8 +727,8 @@ impl Validate for Uniform {
         }
         if self.low() >= self.high() {
             return Err(invalid_params!(
-                "Uniform", 
-                "Lower bound must be less than upper bound", 
+                "Uniform",
+                "Lower bound must be less than upper bound",
                 InvalidRange,
                 "low" => format!("{}", self.low()),
                 "high" => format!("{}", self.high())
@@ -722,8 +742,8 @@ impl Validate for Bernoulli {
     fn validate(&self) -> FugueResult<()> {
         if !self.p().is_finite() || self.p() < 0.0 || self.p() > 1.0 {
             return Err(invalid_params!(
-                "Bernoulli", 
-                "Probability must be in [0, 1]", 
+                "Bernoulli",
+                "Probability must be in [0, 1]",
                 InvalidProbability,
                 "p" => format!("{}", self.p()),
                 "expected" => "[0.0, 1.0]"
@@ -737,8 +757,8 @@ impl Validate for Categorical {
     fn validate(&self) -> FugueResult<()> {
         if self.probs().is_empty() {
             return Err(invalid_params!(
-                "Categorical", 
-                "Probability vector cannot be empty", 
+                "Categorical",
+                "Probability vector cannot be empty",
                 InvalidProbability,
                 "length" => "0"
             ));
@@ -747,8 +767,8 @@ impl Validate for Categorical {
         let sum: f64 = self.probs().iter().sum();
         if (sum - 1.0).abs() > 1e-6 {
             return Err(invalid_params!(
-                "Categorical", 
-                "Probabilities must sum to 1.0", 
+                "Categorical",
+                "Probabilities must sum to 1.0",
                 InvalidProbability,
                 "sum" => format!("{:.6}", sum),
                 "expected" => "1.0",
@@ -759,8 +779,8 @@ impl Validate for Categorical {
         for (i, &p) in self.probs().iter().enumerate() {
             if !p.is_finite() || p < 0.0 {
                 return Err(invalid_params!(
-                    "Categorical", 
-                    "All probabilities must be non-negative and finite", 
+                    "Categorical",
+                    "All probabilities must be non-negative and finite",
                     InvalidProbability,
                     "index" => format!("{}", i),
                     "value" => format!("{}", p),
@@ -777,7 +797,6 @@ impl Validate for Categorical {
 mod tests {
     use super::*;
     use crate::addr;
-    
 
     #[test]
     fn error_code_category_and_description() {
@@ -812,13 +831,17 @@ mod tests {
 
         let e2 = numerical_error!("compute", "overflow", NumericalOverflow, "x" => "1e309");
         match e2 {
-            FugueError::NumericalError { code, .. } => assert_eq!(code, ErrorCode::NumericalOverflow),
+            FugueError::NumericalError { code, .. } => {
+                assert_eq!(code, ErrorCode::NumericalOverflow)
+            }
             _ => panic!("expected NumericalError"),
         }
 
         let e3 = trace_error!("lookup", Some(addr!("x")), "missing", TraceAddressNotFound);
         match e3 {
-            FugueError::TraceError { code, .. } => assert_eq!(code, ErrorCode::TraceAddressNotFound),
+            FugueError::TraceError { code, .. } => {
+                assert_eq!(code, ErrorCode::TraceAddressNotFound)
+            }
             _ => panic!("expected TraceError"),
         }
     }
@@ -845,11 +868,21 @@ mod tests {
         // Build a cause chain
         let base = FugueError::invalid_parameters("Normal", "bad", ErrorCode::InvalidMean);
         let ctx = ErrorContext::new().with_cause(base.clone());
-        let inf = FugueError::InferenceError { algorithm: "MH".into(), reason: "did not converge".into(), code: ErrorCode::InferenceConvergenceFailed, context: ctx.clone() };
+        let inf = FugueError::InferenceError {
+            algorithm: "MH".into(),
+            reason: "did not converge".into(),
+            code: ErrorCode::InferenceConvergenceFailed,
+            context: ctx.clone(),
+        };
         let msg = format!("{}", inf);
         assert!(msg.contains("Inference error"));
 
-        let model_err = FugueError::ModelError { address: Some(crate::addr!("x")), reason: "failed".into(), code: ErrorCode::ModelExecutionFailed, context: ctx };
+        let model_err = FugueError::ModelError {
+            address: Some(crate::addr!("x")),
+            reason: "failed".into(),
+            code: ErrorCode::ModelExecutionFailed,
+            context: ctx,
+        };
         let msg2 = format!("{}", model_err);
         assert!(msg2.contains("Model error"));
     }
@@ -858,18 +891,18 @@ mod tests {
     fn from_conversions_cover_paths() {
         // ParseFloatError
         let e_float: FugueError = "abc".parse::<f64>().unwrap_err().into();
-        assert!(matches!(e_float, FugueError::NumericalError{..}));
+        assert!(matches!(e_float, FugueError::NumericalError { .. }));
 
         // ParseIntError
         let e_int: FugueError = "abc".parse::<i32>().unwrap_err().into();
-        assert!(matches!(e_int, FugueError::NumericalError{..}));
+        assert!(matches!(e_int, FugueError::NumericalError { .. }));
 
         // From<&str>
         let e_str: FugueError = "oops".into();
-        assert!(matches!(e_str, FugueError::ModelError{..}));
+        assert!(matches!(e_str, FugueError::ModelError { .. }));
 
         // From<String>
         let e_string: FugueError = String::from("oops").into();
-        assert!(matches!(e_string, FugueError::ModelError{..}));
+        assert!(matches!(e_string, FugueError::ModelError { .. }));
     }
 }

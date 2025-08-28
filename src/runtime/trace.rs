@@ -5,26 +5,26 @@ use crate::error::{FugueError, FugueResult};
 use std::collections::BTreeMap;
 
 /// Type-safe storage for values from different distribution types.
-/// 
+///
 /// ChoiceValue enables traces to store values from any supported distribution
 /// while maintaining type safety. Each variant corresponds to a distribution
 /// return type, preventing runtime type errors.
-/// 
+///
 /// Example:
 /// ```rust
 /// # use fugue::runtime::trace::ChoiceValue;
-/// 
+///
 /// // Different value types from distributions
 /// let continuous = ChoiceValue::F64(3.14159);  // Normal, Uniform, etc.
 /// let discrete = ChoiceValue::U64(42);         // Poisson, Binomial
 /// let categorical = ChoiceValue::Usize(2);     // Categorical selection
 /// let binary = ChoiceValue::Bool(true);        // Bernoulli outcome
-/// 
+///
 /// // Type-safe extraction
 /// assert_eq!(continuous.as_f64(), Some(3.14159));
 /// assert_eq!(discrete.as_u64(), Some(42));
 /// assert_eq!(binary.as_bool(), Some(true));
-/// 
+///
 /// // Type mismatches return None
 /// assert_eq!(continuous.as_bool(), None);
 /// ```
@@ -95,26 +95,26 @@ impl ChoiceValue {
 }
 
 /// A single recorded choice made during model execution.
-/// 
+///
 /// Each Choice represents a random variable assignment at a specific address,
 /// complete with the value chosen and its log-probability. Choices form the
 /// building blocks of execution traces.
-/// 
+///
 /// Example:
 /// ```rust
 /// # use fugue::*;
 /// # use fugue::runtime::trace::{Choice, ChoiceValue};
-/// 
+///
 /// // Choices are typically created by handlers during execution
 /// let choice = Choice {
 ///     addr: addr!("theta"),
 ///     value: ChoiceValue::F64(1.5),
 ///     logp: -0.918, // log-probability under generating distribution
 /// };
-/// 
-/// println!("Choice at {}: {:?} (logp: {:.3})", 
+///
+/// println!("Choice at {}: {:?} (logp: {:.3})",
 ///          choice.addr, choice.value, choice.logp);
-/// 
+///
 /// // Extract the value with type safety
 /// if let Some(val) = choice.value.as_f64() {
 ///     println!("Theta value: {:.3}", val);
@@ -131,35 +131,35 @@ pub struct Choice {
 }
 
 /// Complete execution trace of a probabilistic model.
-/// 
+///
 /// A Trace records the complete execution history of a probabilistic model,
 /// including all choices made and accumulated log-weights from different sources.
 /// This enables replay, scoring, and inference operations.
-/// 
+///
 /// Example:
 /// ```rust
 /// # use fugue::*;
 /// # use fugue::runtime::interpreters::PriorHandler;
 /// # use rand::rngs::StdRng;
 /// # use rand::SeedableRng;
-/// 
+///
 /// // Execute a model and examine the trace
 /// let model = sample(addr!("theta"), Normal::new(0.0, 1.0).unwrap())
 ///     .bind(|theta| observe(addr!("y"), Normal::new(theta, 0.5).unwrap(), 1.2)
 ///         .map(move |_| theta));
-/// 
+///
 /// let mut rng = StdRng::seed_from_u64(42);
 /// let (result, trace) = runtime::handler::run(
 ///     PriorHandler { rng: &mut rng, trace: Trace::default() },
 ///     model
 /// );
-/// 
+///
 /// // Examine trace components
 /// println!("Sampled theta: {:.3}", result);
 /// println!("Prior log-weight: {:.3}", trace.log_prior);
 /// println!("Likelihood log-weight: {:.3}", trace.log_likelihood);
 /// println!("Total log-weight: {:.3}", trace.total_log_weight());
-/// 
+///
 /// // Type-safe value access
 /// let theta_value = trace.get_f64(&addr!("theta")).unwrap();
 /// assert_eq!(theta_value, result);
@@ -178,21 +178,21 @@ pub struct Trace {
 
 impl Trace {
     /// Compute the total unnormalized log-probability of this execution.
-    /// 
+    ///
     /// The total log-weight combines all three components (prior, likelihood, factors)
     /// and represents the unnormalized log-probability of this execution path.
-    /// 
+    ///
     /// Example:
     /// ```rust
     /// # use fugue::runtime::trace::Trace;
-    /// 
+    ///
     /// let trace = Trace {
     ///     log_prior: -1.5,
     ///     log_likelihood: -2.3,
     ///     log_factors: 0.8,
     ///     ..Default::default()
     /// };
-    /// 
+    ///
     /// assert_eq!(trace.total_log_weight(), -3.0);
     /// ```
     pub fn total_log_weight(&self) -> f64 {
@@ -226,137 +226,110 @@ impl Trace {
 
     /// Type-safe accessor that returns a Result for better error handling.
     pub fn get_f64_result(&self, addr: &Address) -> FugueResult<f64> {
-        let choice = self
-            .choices
-            .get(addr)
-            .ok_or_else(|| FugueError::trace_error(
+        let choice = self.choices.get(addr).ok_or_else(|| {
+            FugueError::trace_error(
                 "get_f64",
                 Some(addr.clone()),
                 "Address not found in trace",
                 crate::error::ErrorCode::TraceAddressNotFound,
-            ))?;
+            )
+        })?;
 
         choice
             .value
             .as_f64()
-            .ok_or_else(|| FugueError::type_mismatch(
-                addr.clone(),
-                "f64",
-                choice.value.type_name(),
-            ))
+            .ok_or_else(|| FugueError::type_mismatch(addr.clone(), "f64", choice.value.type_name()))
     }
 
     /// Type-safe accessor that returns a Result for better error handling.
     pub fn get_bool_result(&self, addr: &Address) -> FugueResult<bool> {
-        let choice = self
-            .choices
-            .get(addr)
-            .ok_or_else(|| FugueError::trace_error(
+        let choice = self.choices.get(addr).ok_or_else(|| {
+            FugueError::trace_error(
                 "get_bool",
                 Some(addr.clone()),
                 "Address not found in trace",
                 crate::error::ErrorCode::TraceAddressNotFound,
-            ))?;
+            )
+        })?;
 
-        choice
-            .value
-            .as_bool()
-            .ok_or_else(|| FugueError::type_mismatch(
-                addr.clone(),
-                "bool",
-                choice.value.type_name(),
-            ))
+        choice.value.as_bool().ok_or_else(|| {
+            FugueError::type_mismatch(addr.clone(), "bool", choice.value.type_name())
+        })
     }
 
     /// Type-safe accessor that returns a Result for better error handling.
     pub fn get_u64_result(&self, addr: &Address) -> FugueResult<u64> {
-        let choice = self
-            .choices
-            .get(addr)
-            .ok_or_else(|| FugueError::trace_error(
+        let choice = self.choices.get(addr).ok_or_else(|| {
+            FugueError::trace_error(
                 "get_u64",
                 Some(addr.clone()),
                 "Address not found in trace",
                 crate::error::ErrorCode::TraceAddressNotFound,
-            ))?;
+            )
+        })?;
 
         choice
             .value
             .as_u64()
-            .ok_or_else(|| FugueError::type_mismatch(
-                addr.clone(),
-                "u64",
-                choice.value.type_name(),
-            ))
+            .ok_or_else(|| FugueError::type_mismatch(addr.clone(), "u64", choice.value.type_name()))
     }
 
     /// Type-safe accessor that returns a Result for better error handling.
     pub fn get_usize_result(&self, addr: &Address) -> FugueResult<usize> {
-        let choice = self
-            .choices
-            .get(addr)
-            .ok_or_else(|| FugueError::trace_error(
+        let choice = self.choices.get(addr).ok_or_else(|| {
+            FugueError::trace_error(
                 "get_usize",
                 Some(addr.clone()),
                 "Address not found in trace",
                 crate::error::ErrorCode::TraceAddressNotFound,
-            ))?;
+            )
+        })?;
 
-        choice
-            .value
-            .as_usize()
-            .ok_or_else(|| FugueError::type_mismatch(
-                addr.clone(),
-                "usize",
-                choice.value.type_name(),
-            ))
+        choice.value.as_usize().ok_or_else(|| {
+            FugueError::type_mismatch(addr.clone(), "usize", choice.value.type_name())
+        })
     }
 
     /// Type-safe accessor that returns a Result for better error handling.
     pub fn get_i64_result(&self, addr: &Address) -> FugueResult<i64> {
-        let choice = self
-            .choices
-            .get(addr)
-            .ok_or_else(|| FugueError::trace_error(
+        let choice = self.choices.get(addr).ok_or_else(|| {
+            FugueError::trace_error(
                 "get_i64",
                 Some(addr.clone()),
                 "Address not found in trace",
                 crate::error::ErrorCode::TraceAddressNotFound,
-            ))?;
+            )
+        })?;
 
         choice
             .value
             .as_i64()
-            .ok_or_else(|| FugueError::type_mismatch(
-                addr.clone(),
-                "i64",
-                choice.value.type_name(),
-            ))
+            .ok_or_else(|| FugueError::type_mismatch(addr.clone(), "i64", choice.value.type_name()))
     }
 
     /// Insert a typed choice into the trace with type safety.
-    /// 
+    ///
     /// This is a convenience method for manually constructing traces. Note that
-    /// this method only updates the choices map - it does not modify the 
+    /// this method only updates the choices map - it does not modify the
     /// log-weight accumulators (log_prior, log_likelihood, log_factors).
-    /// 
+    ///
     /// Example:
     /// ```rust
     /// # use fugue::*;
     /// # use fugue::runtime::trace::{Trace, ChoiceValue};
-    /// 
+    ///
     /// let mut trace = Trace::default();
-    /// 
+    ///
     /// // Insert different types of choices
     /// trace.insert_choice(addr!("mu"), ChoiceValue::F64(1.5), -0.125);
     /// trace.insert_choice(addr!("success"), ChoiceValue::Bool(true), -0.693);
     /// trace.insert_choice(addr!("count"), ChoiceValue::U64(10), -2.303);
-    /// 
+    ///
     /// // Retrieve with type safety
     /// assert_eq!(trace.get_f64(&addr!("mu")), Some(1.5));
     /// assert_eq!(trace.get_bool(&addr!("success")), Some(true));
     /// assert_eq!(trace.get_u64(&addr!("count")), Some(10));
-    /// 
+    ///
     /// println!("Trace has {} choices", trace.choices.len());
     /// ```
     pub fn insert_choice(&mut self, addr: Address, value: ChoiceValue, logp: f64) {
@@ -398,7 +371,7 @@ mod tests {
 
         // Type mismatch
         let err = t.get_f64_result(&addr!("b")).unwrap_err();
-        assert!(matches!(err, crate::error::FugueError::TypeMismatch{..}));
+        assert!(matches!(err, crate::error::FugueError::TypeMismatch { .. }));
     }
 
     #[test]
@@ -416,7 +389,6 @@ mod tests {
     fn result_accessors_return_errors_for_missing_addresses() {
         let t = Trace::default();
         let e = t.get_f64_result(&addr!("missing")).unwrap_err();
-        assert!(matches!(e, crate::error::FugueError::TraceError{..}));
+        assert!(matches!(e, crate::error::FugueError::TraceError { .. }));
     }
 }
-
