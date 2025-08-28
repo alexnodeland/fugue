@@ -1,10 +1,54 @@
 # Production Deployment
 
-Deploying probabilistic models to production requires specialized patterns for reliability, performance, and operational excellence. Fugue provides comprehensive tools for building production-ready systems with proper error handling, monitoring, and scalability.
+Production deployment of probabilistic models requires **reliability engineering**, **performance optimization**, and **operational excellence** at scale. This guide establishes a mathematical framework for **fault tolerance**, **service reliability**, and **system observability** using Fugue's production-ready infrastructure patterns.
+
+```admonish info title="Reliability Theory Framework"
+Production systems exhibit **stochastic reliability** characterized by:
+- **Availability**: $A(t) = \frac{\text{MTBF}}{\text{MTBF} + \text{MTTR}}$ where MTBF = Mean Time Between Failures
+- **Reliability Function**: $R(t) = P(T > t) = e^{-\lambda t}$ for exponential failure rates
+- **Service Level Agreement**: $\text{SLA} = P(\text{response time} < T) \geq \alpha$
+
+Fugue's deployment patterns optimize these metrics through **systematic fault isolation** and **graceful degradation**.
+```
 
 ## Error Handling and Graceful Degradation
 
-Production systems must handle failures gracefully without compromising service availability:
+**Graceful degradation** implements **fault tolerance** through **systematic error recovery** and **service continuity**. The mathematical foundation relies on **Markov reliability models** and **circuit breaker theory**:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Healthy
+    Healthy --> Degraded : Error Rate > τ₁
+    Degraded --> Failed : Error Rate > τ₂  
+    Failed --> Recovery : Time > T_recovery
+    Recovery --> Healthy : Success Rate > σ
+    Degraded --> Healthy : Error Rate < τ₀
+    
+    note right of Healthy
+        Error Rate: λ < τ₀
+        SLA: 99.9%
+        Full Functionality
+    end note
+    
+    note right of Degraded  
+        Error Rate: τ₀ < λ < τ₁
+        SLA: 95%
+        Limited Functionality
+    end note
+    
+    note right of Failed
+        Error Rate: λ > τ₂
+        Circuit Open
+        Fallback Mode
+    end note
+```
+
+**Circuit Breaker Mathematics**: The failure rate follows a **Poisson process** with rate $\lambda(t)$. The circuit breaker transitions based on:
+
+$$P(\text{trip}) = 1 - e^{-\int_0^T \lambda(t) dt}$$
+
+**Error Budget Model**: For SLA target $\alpha$, the **error budget** is:
+$$\text{Budget}(t) = (1 - \alpha) \cdot t - \int_0^t \mathbb{1}_{\text{error}}(s) ds$$
 
 ```rust,ignore
 {{#include ../../../examples/production_deployment.rs:error_handling}}
@@ -36,7 +80,50 @@ Production models require flexible configuration for different environments:
 
 ## Production Metrics and Observability
 
-Comprehensive monitoring enables proactive maintenance and optimization:
+**Observability** requires **systematic metric collection** with **statistical analysis** and **anomaly detection**. The **metric taxonomy** follows the **USE method** (Utilization, Saturation, Errors) and **RED method** (Rate, Errors, Duration):
+
+```mermaid
+graph TD
+    subgraph "Observability Architecture"
+        A[Model Execution] --> B[Metric Collection]
+        B --> C{Metric Type}
+        C -->|USE| D[Resource Metrics]
+        C -->|RED| E[Service Metrics]  
+        C -->|Business| F[Domain Metrics]
+        
+        D --> G[Utilization: ρ = λ/μ]
+        D --> H[Saturation: Queue Length]
+        D --> I[Error Rate: λₑ]
+        
+        E --> J[Request Rate: λᵣ]
+        E --> K[Error Rate: εᵣ] 
+        E --> L[Duration: T₉₉]
+        
+        F --> M[Inference Accuracy]
+        F --> N[Model Drift]
+        F --> O[Business KPIs]
+        
+        G --> P[(Time Series DB)]
+        H --> P
+        I --> P
+        J --> P
+        K --> P
+        L --> P
+        M --> Q[(Analytics DB)]
+        N --> Q
+        O --> Q
+    end
+```
+
+**Statistical Process Control**: Metrics follow **control chart theory** with **statistical control limits**:
+
+$$\begin{align}
+\text{UCL} &= \bar{X} + 3\sigma/\sqrt{n} \\
+\text{LCL} &= \bar{X} - 3\sigma/\sqrt{n}
+\end{align}$$
+
+**Anomaly Detection**: Using **exponentially weighted moving averages**:
+$$\text{EWMA}_t = \alpha X_t + (1-\alpha)\text{EWMA}_{t-1}$$
 
 ```rust,ignore
 {{#include ../../../examples/production_deployment.rs:production_metrics}}
@@ -52,7 +139,43 @@ Comprehensive monitoring enables proactive maintenance and optimization:
 
 ## Health Checks and System Validation
 
-Automated health monitoring ensures system reliability:
+**Health monitoring** implements **continuous system validation** through **multi-level health checks** with **statistical thresholds** and **predictive alerting**:
+
+```mermaid
+graph TD
+    subgraph "Health Check Hierarchy"
+        A[System Health H⁽ˢ⁾] --> B[Model Health H⁽ᵐ⁾]
+        B --> C[Inference Health H⁽ⁱ⁾]
+        C --> D[Resource Health H⁽ʳ⁾]
+
+        A --> E{H⁽ˢ⁾ > θₛ?}
+        B --> F{H⁽ᵐ⁾ > θₘ?}
+        C --> G{H⁽ⁱ⁾ > θᵢ?}
+        D --> H{H⁽ʳ⁾ > θʳ?}
+
+        E -->|No| I[System Alert]
+        F -->|No| J[Model Alert]
+        G -->|No| K[Inference Alert]
+        H -->|No| L[Resource Alert]
+
+        E -->|Yes| M[System OK]
+        F -->|Yes| M
+        G -->|Yes| M
+        H -->|Yes| M
+    end
+```
+
+**Health Score Calculation**: Weighted combination of subsystem health:
+$$H^{(s)} = \sum_{i} w_i H^{(i)}$$
+
+where $w_i$ are **importance weights** and $\sum w_i = 1$.
+
+**Predictive Health Modeling**: Using **time series forecasting**:
+$$H_{t+k} = \alpha H_t + \beta \frac{dH}{dt}\bigg|_t + \gamma \frac{d^2H}{dt^2}\bigg|_t$$
+
+```admonish warning title="Health Degradation Alert"
+**Early Warning System**: When $\frac{dH}{dt} < -\delta$ for sustained periods, the system triggers **preemptive scaling** or **graceful degradation** before reaching critical thresholds.
+```
 
 ```rust,ignore
 {{#include ../../../examples/production_deployment.rs:health_checks}}
@@ -84,7 +207,40 @@ Robust input validation prevents security vulnerabilities and system failures:
 
 ## Deployment Strategies and Patterns
 
-Production deployments require careful rollout strategies:
+**Deployment strategies** implement **risk management** through **controlled rollout** and **statistical validation**. Each strategy provides different **risk-latency tradeoffs**:
+
+```mermaid
+graph TD
+    subgraph "Deployment Strategy Matrix"  
+        A[New Model Version] --> B{Strategy Selection}
+        B -->|Low Risk| C[Blue-Green]
+        B -->|Medium Risk| D[Canary]
+        B -->|High Risk| E[A/B Test]
+
+        C --> F[Instant Switch<br/>Risk: High<br/>Rollback: Fast]
+        D --> G[Gradual Rollout<br/>Risk: Medium<br/>Validation: Statistical]
+        E --> H[Statistical Test<br/>Risk: Low<br/>Duration: Long]
+
+        F --> I{Success?}
+        G --> J{Performance > Baseline?}
+        E --> K{Significance Test?}
+
+        I -->|No| L[Instant Rollback]
+        J -->|No| M[Gradual Rollback]
+        K -->|No| N[Maintain Status Quo]
+
+        I -->|Yes| O[Full Deployment]
+        J -->|Yes| P[Continue Rollout]
+        K -->|Yes| Q[Gradual Migration]
+    end
+```
+
+**Canary Analysis**: Statistical significance testing for canary deployments:
+
+$$\text{Z-score} = \frac{(\bar{X}_{\text{canary}} - \bar{X}_{\text{control}})}{\sqrt{\frac{s_1^2}{n_1} + \frac{s_2^2}{n_2}}}$$
+
+**A/B Testing**: **Welch's t-test** for unequal variances:
+$$t = \frac{\bar{X}_A - \bar{X}_B}{\sqrt{\frac{s_A^2}{n_A} + \frac{s_B^2}{n_B}}}$$
 
 ```rust,ignore
 {{#include ../../../examples/production_deployment.rs:deployment_strategies}}
@@ -458,4 +614,16 @@ let value = match risky_operation() {
 };
 ```
 
-Production deployment of probabilistic models requires careful attention to reliability, performance, security, and operational concerns. Fugue's comprehensive tooling enables robust production systems that can handle the complexities of real-world probabilistic computing.
+```admonish success title="Production Excellence Framework"
+Successful production deployment combines **mathematical rigor** with **engineering excellence**:
+
+1. **Reliability Engineering**: Fault tolerance through statistical modeling and circuit breaker patterns
+2. **Performance Optimization**: Memory pooling, numerical stability, and batch processing
+3. **Observability**: Multi-dimensional metrics with statistical process control
+4. **Deployment Strategies**: Risk-managed rollouts with statistical validation
+5. **Health Monitoring**: Predictive alerting and graceful degradation
+
+These patterns enable **robust production systems** capable of handling real-world probabilistic computing at scale.
+```
+
+Production deployment represents the culmination of probabilistic programming excellence, where **theoretical foundations** meet **operational reality**. Fugue's comprehensive tooling transforms academic probabilistic models into production-grade systems that deliver reliable, scalable, and maintainable probabilistic computing solutions.

@@ -38,11 +38,6 @@ graph LR
     P --> Post
     L --> Post
     D --> Post
-
-    style P fill:#e8f5e8
-    style L fill:#fff3e0
-    style D fill:#fff3e0
-    style Post fill:#f3e5f5
 ```
 
 ## The Challenge
@@ -317,11 +312,6 @@ graph TD
 
     E -->|Yes| MCMC[MCMC]
     E -->|No| VI2[VI for speed]
-
-    style MCMC fill:#e8f5e8
-    style SMC fill:#fff3e0
-    style VI fill:#f3e5f5
-    style ABC fill:#fce4ec
 ```
 
 ### Rules of Thumb

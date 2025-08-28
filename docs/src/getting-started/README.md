@@ -25,9 +25,6 @@ flowchart LR
     B --> C[Understanding Models<br/>8 min]
     C --> D[Running Inference<br/>5 min]
     D --> E[Complete Tutorials<br/>45-60 min each]
-
-    style A fill:#e1f5fe
-    style E fill:#f3e5f5
 ```
 
 ## Quick Start
@@ -111,16 +108,6 @@ graph TB
     T --> SMC
     T --> VI
     T --> ABC
-
-    style M fill:#e8f5e8
-    style D fill:#e8f5e8
-    style C fill:#fff3e0
-    style H fill:#fff3e0
-    style T fill:#fff3e0
-    style MCMC fill:#f3e5f5
-    style SMC fill:#f3e5f5
-    style VI fill:#f3e5f5
-    style ABC fill:#f3e5f5
 ```
 
 ## The Big Picture

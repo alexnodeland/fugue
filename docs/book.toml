@@ -15,6 +15,14 @@ site-url = "/fugue/"
 additional-css = ["./mdbook-admonish.css"]
 additional-js = ["mermaid.min.js", "mermaid-init.js"]
 
+[output.html.fold]
+enable = true
+level = 0
+
+[output.html.print]
+enable = true
+page-break = true
+
 [output.linkcheck]
 follow-web-links = false
 traverse-parent-directories = true
@@ -29,4 +37,5 @@ command = "mdbook-mermaid"
 
 [preprocessor.katex]
 after = ["links"]
+
 

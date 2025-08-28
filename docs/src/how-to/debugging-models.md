@@ -1,10 +1,44 @@
 # Debugging Models
 
-Debugging probabilistic models requires specialized techniques since traditional debugging tools don't reveal the stochastic behavior. Fugue provides comprehensive debugging capabilities through trace inspection, diagnostics, and validation tools.
+Debugging probabilistic models presents unique challenges due to their **stochastic nature** and **high-dimensional parameter spaces**. Unlike deterministic programs, probabilistic models require **statistical validation**, **convergence analysis**, and **distributional testing**. This guide establishes a systematic methodology for probabilistic model debugging using Fugue's comprehensive diagnostic framework.
+
+```admonish info title="Probabilistic Debugging Theory"
+Model debugging operates on multiple **abstraction levels**:
+- **Syntactic**: Code structure and type correctness
+- **Semantic**: Model specification and parameter validity  
+- **Statistical**: Distributional properties and moment consistency
+- **Computational**: Numerical stability and convergence behavior
+
+Each level requires specialized diagnostic techniques and validation criteria.
+```
 
 ## Trace Inspection and Analysis
 
-Every model execution produces a complete trace that records all choices and log-weights. This is your primary debugging tool:
+**Execution traces** form the foundation of probabilistic model debugging. Each trace $\mathcal{T}$ contains a complete record of the program's stochastic execution:
+
+$$\mathcal{T} = \{(a_i, v_i, w_i)\}_{i=1}^n$$
+
+where $a_i$ is the address, $v_i$ is the sampled value, and $w_i$ is the log-weight contribution.
+
+```mermaid
+graph TD
+    subgraph "Trace Analysis Workflow"
+        A[Execution Trace T] --> B{Finite Log-Weight?}
+        B -->|No| C[Numerical Instability]
+        B -->|Yes| D[Choice Analysis]
+        D --> E[Parameter Extraction]
+        E --> F[Statistical Validation]
+        F --> G{Passes Tests?}
+        G -->|No| H[Model Refinement]
+        G -->|Yes| I[Model Validated]
+        C --> J[Debug Constraints]
+        H --> A
+        J --> A
+    end
+```
+
+**Mathematical Properties**: A valid trace must satisfy the **weight consistency condition**:
+$$\log P(\mathcal{T}) = \sum_{i=1}^n w_i < \infty$$
 
 ```rust,ignore
 {{#include ../../../examples/debugging_models.rs:trace_inspection}}
@@ -63,7 +97,32 @@ Fugue provides both strict (fail-fast) and safe (error-resilient) execution mode
 
 ## MCMC Diagnostics
 
-For inference algorithms, convergence diagnostics are essential:
+**Markov Chain Monte Carlo** convergence assessment requires **statistical hypothesis testing** and **diagnostic metrics**. The fundamental question is whether the chain has reached its **stationary distribution** $\pi(\theta)$.
+
+### Gelman-Rubin Diagnostic
+
+The **potential scale reduction factor** $\hat{R}$ compares **within-chain** and **between-chain** variance:
+
+$$\hat{R} = \sqrt{\frac{\hat{V}}{W}}$$
+
+where:
+- $W = \frac{1}{m}\sum_{j=1}^m s_j^2$ (within-chain variance)
+- $B = \frac{n}{m-1}\sum_{j=1}^m (\bar{\theta}_{j\cdot} - \bar{\theta}_{\cdot\cdot})^2$ (between-chain variance)
+- $\hat{V} = \frac{n-1}{n}W + \frac{1}{n}B$ (marginal posterior variance estimate)
+
+```admonish important title="Convergence Criterion"
+**Theoretical Result**: As $n \to \infty$, if the chain has converged, then $\hat{R} \to 1$. 
+**Practical Threshold**: $\hat{R} < 1.1$ indicates approximate convergence for most applications.
+**Statistical Interpretation**: $\hat{R} > 1$ suggests the chain hasn't explored the full posterior distribution.
+```
+
+### Effective Sample Size
+
+The **effective sample size** accounts for **autocorrelation** in MCMC samples:
+
+$$\text{ESS} = \frac{mn}{1 + 2\sum_{t=1}^{\infty} \rho_t}$$
+
+where $\rho_t$ is the lag-$t$ autocorrelation and $mn$ is the total number of samples.
 
 ```rust,ignore
 {{#include ../../../examples/debugging_models.rs:mcmc_diagnostics}}
@@ -78,7 +137,29 @@ For inference algorithms, convergence diagnostics are essential:
 
 ## Model Structure Analysis
 
-Complex models benefit from systematic structure analysis:
+**Model structure analysis** reveals the **computational graph** and **parameter dependencies**. This analysis is crucial for understanding model complexity and identifying potential issues:
+
+```mermaid
+graph TD
+    subgraph "Model Structure Hierarchy"
+        A[Model M] --> B[Parameter Groups]
+        B --> C1[Hyperpriors θ₁]
+        B --> C2[Primary Parameters θ₂] 
+        B --> C3[Observations y]
+        C1 --> D1[Constraint Analysis]
+        C2 --> D2[Dependency Graph]
+        C3 --> D3[Likelihood Terms]
+        D1 --> E[Structure Validation]
+        D2 --> E
+        D3 --> E
+    end
+```
+
+**Structural Invariants** to validate:
+1. **Address Uniqueness**: $|\{a_i\}| = n$ (no collisions)
+2. **Parameter Hierarchy**: $\forall i, j: a_i \preceq a_j \implies \text{dependency}(i, j)$
+3. **Choice Count Consistency**: Expected vs. actual parameter count
+4. **Type Safety**: Each address maps to consistent value types
 
 ```rust,ignore
 {{#include ../../../examples/debugging_models.rs:model_structure_debugging}}
@@ -108,7 +189,37 @@ Monitor computational efficiency and identify bottlenecks:
 
 ## Common Debugging Patterns
 
-Systematic debugging approaches for robust model development:
+**Systematic debugging** follows a **hierarchical validation strategy** from basic correctness to statistical validity:
+
+```mermaid
+graph TD
+    subgraph "Debugging Methodology"
+        A[Model Implementation] --> B{Syntax Valid?}
+        B -->|No| C[Fix Code Structure]
+        B -->|Yes| D{Types Consistent?}
+        D -->|No| E[Fix Type Errors]
+        D -->|Yes| F{Finite Log-Weights?}
+        F -->|No| G[Fix Constraints]
+        F -->|Yes| H{Statistical Properties?}
+        H -->|No| I[Validate Distributions]
+        H -->|Yes| J{Convergence?}
+        J -->|No| K[Tune Inference]
+        J -->|Yes| L[Model Validated]
+        
+        C --> A
+        E --> A
+        G --> A
+        I --> A
+        K --> A
+    end
+```
+
+**Debug Level Hierarchy**:
+1. **Syntactic**: Code compiles and types check
+2. **Semantic**: Model executes without runtime errors
+3. **Numerical**: Computations remain stable and finite
+4. **Statistical**: Results match theoretical expectations
+5. **Convergence**: Inference algorithms reach stationarity
 
 ```rust,ignore
 {{#include ../../../examples/debugging_models.rs:debugging_patterns}}

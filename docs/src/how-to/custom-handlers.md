@@ -1,10 +1,44 @@
 # Custom Handlers
 
-Fugue's handler system enables you to create custom interpreters for probabilistic models, extending beyond the built-in handlers. Custom handlers allow for specialized execution strategies, monitoring, debugging, and novel inference algorithms.
+Fugue's handler system is grounded in **algebraic effect theory**, providing a principled approach to **effect interpretation** and **computational extension**. Custom handlers enable specialized execution strategies, monitoring systems, and novel inference algorithms through systematic **effect handling** and **handler composition**.
+
+```admonish info title="Algebraic Effects Foundation"
+Fugue models effects through an **algebra** $(\mathcal{E}, \Sigma)$ where:
+- $\mathcal{E}$ is the set of **effect operations** (sample, observe, factor)
+- $\Sigma$ is the **signature** defining operation types
+- **Handlers** provide **interpretations** $h: \mathcal{E} \to \mathcal{C}$ into a **carrier** $\mathcal{C}$
+
+This algebraic structure ensures **compositional semantics** and **modular interpretation**.
+```
 
 ## Understanding the Handler Trait
 
-The `Handler` trait defines how to interpret probabilistic effects. Every custom handler must implement all methods for different distribution types:
+The `Handler` trait provides the **algebraic signature** for probabilistic effects. Each method represents an **effect operation** with its **semantic interpretation**:
+
+```mermaid
+graph TD
+    subgraph "Handler Architecture"
+        A[Effect E] --> B{Effect Type}
+        B -->|sample| C[on_sample_T]
+        B -->|observe| D[on_observe_T]  
+        B -->|factor| E[on_factor]
+        C --> F[Handler State H]
+        D --> F
+        E --> F
+        F --> G[Updated State H']
+        G --> H[Continue Execution]
+    end
+```
+
+**Effect Algebra**: Each handler interprets the **probabilistic effect signature**:
+
+$$\begin{align}
+\text{sample} &: \text{Dist}[T] \to T \\
+\text{observe} &: \text{Dist}[T] \times T \to \text{Unit} \\
+\text{factor} &: \mathbb{R} \to \text{Unit}
+\end{align}$$
+
+where the **carrier type** varies by handler implementation.
 
 ```rust,ignore
 {{#include ../../../examples/custom_handlers.rs:basic_custom_handler}}
@@ -20,7 +54,29 @@ The `Handler` trait defines how to interpret probabilistic effects. Every custom
 
 ## Decorator Pattern for Handler Composition
 
-The decorator pattern allows you to wrap existing handlers with additional functionality:
+The **decorator pattern** implements **handler composition** through **effect forwarding** with **computational augmentation**. This pattern follows the mathematical principle of **function composition**:
+
+$$(f \circ g)(x) = f(g(x))$$
+
+Applied to handlers: $h_{\text{decorated}} = h_{\text{decorator}} \circ h_{\text{base}}$
+
+```mermaid
+graph LR
+    subgraph "Handler Composition Chain"
+        A[Effect] --> B[Decorator₁]
+        B --> C[Decorator₂]
+        C --> D[Base Handler]
+        D --> E[Result]
+
+        B -.->|"Log, Monitor"| F[Side Effects]
+        C -.->|"Transform, Filter"| G[Modifications]
+    end
+```
+
+**Compositional Properties**:
+- **Associativity**: $(h_1 \circ h_2) \circ h_3 = h_1 \circ (h_2 \circ h_3)$
+- **Identity**: $\text{id} \circ h = h \circ \text{id} = h$
+- **Effect Preservation**: Core semantics remain unchanged
 
 ```rust,ignore
 {{#include ../../../examples/custom_handlers.rs:logging_handler}}
@@ -78,9 +134,35 @@ Track and optimize computational characteristics with monitoring handlers:
 - Execution hotspots and optimization opportunities
 - Scalability analysis for production deployment
 
-## Custom Inference Algorithms
+## Custom Inference Algorithms  
 
-Build specialized inference algorithms by implementing domain-specific handlers:
+**Custom inference algorithms** extend Fugue's **effect interpretation** to implement novel **sampling strategies** and **approximate inference** methods. Each algorithm provides a unique **semantic mapping** from probabilistic effects to computational actions:
+
+```mermaid
+graph TD
+    subgraph "Inference Algorithm Architecture"
+        A[Model M] --> B[Effect Sequence]
+        B --> C{Handler Type}
+        C -->|MCMC| D[Markov Chain<br/>Sampling]
+        C -->|VI| E[Variational<br/>Approximation]
+        C -->|SMC| F[Sequential<br/>Monte Carlo]
+        C -->|ABC| G[Approximate<br/>Bayesian Computation]
+
+        D --> H[Posterior Samples]
+        E --> I[Approximate<br/>Distribution]
+        F --> J[Weighted<br/>Particles]
+        G --> K[Likelihood-Free<br/>Samples]
+    end
+```
+
+**Algorithm Design Principles**:
+
+1. **Effect Consistency**: $\forall e \in \mathcal{E}: h(e)$ preserves probabilistic semantics
+2. **Convergence Guarantees**: Algorithm converges to target distribution under regularity conditions  
+3. **Computational Tractability**: Runtime complexity is polynomial in problem dimensions
+4. **Statistical Efficiency**: Effective sample size scales appropriately with computational cost
+
+**Mathematical Framework**: Each inference handler implements a **stochastic operator** $T: \mathcal{P}(\Theta) \to \mathcal{P}(\Theta)$ with **fixed point** $\pi$ such that $T\pi = \pi$.
 
 ```rust,ignore
 {{#include ../../../examples/custom_handlers.rs:custom_inference_handler}}
@@ -95,7 +177,35 @@ Build specialized inference algorithms by implementing domain-specific handlers:
 
 ## Handler Composition and Chaining
 
-Combine multiple handler decorators for comprehensive functionality:
+**Handler chaining** implements **multi-stage effect processing** through systematic **composition operators**. The composition forms a **computational pipeline** with well-defined **data flow** and **effect propagation**:
+
+```mermaid
+graph TD
+    subgraph "Handler Composition Pipeline"
+        A[Raw Effect E] --> B[Statistics Handler]
+        B --> C[Logging Handler] 
+        C --> D[Performance Handler]
+        D --> E[Base Handler]
+        E --> F[Result + Trace]
+
+        B -.->|Metrics| G[(Statistics DB)]
+        C -.->|Events| H[(Log Stream)]
+        D -.->|Timing| I[(Performance Monitor)]
+
+        F --> J{Validation}
+        J -->|Pass| K[Success]
+        J -->|Fail| L[Error Recovery]
+    end
+```
+
+**Composition Laws**:
+
+1. **Preservation**: $h_n \circ \ldots \circ h_1$ preserves effect semantics
+2. **Associativity**: Composition order affects performance but not correctness
+3. **Commutativity**: Decorators with disjoint side effects commute
+4. **Distributivity**: $h \circ (g_1 + g_2) = h \circ g_1 + h \circ g_2$ for effect unions
+
+**Performance Analysis**: Handler chain depth $d$ introduces overhead $\mathcal{O}(d \cdot c)$ where $c$ is the per-handler cost. Optimization strategies include **handler fusion** and **effect batching**.
 
 ```rust,ignore
 {{#include ../../../examples/custom_handlers.rs:handler_composition}}

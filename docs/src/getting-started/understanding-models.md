@@ -31,10 +31,6 @@ graph LR
     
     M --> H
     H --> T
-    
-    style M fill:#e8f5e8
-    style H fill:#fff3e0  
-    style T fill:#e1f5fe
 ```
 
 **Why this matters**: The same model can be executed in different ways:
@@ -127,10 +123,6 @@ graph TB
         M[map: Model⟨A⟩ → ⟨A → B⟩ → Model⟨B⟩<br/>Transform outputs]  
         B[bind: Model⟨A⟩ → ⟨A → Model⟨B⟩⟩ → Model⟨B⟩<br/>Chain dependent computations]
     end
-    
-    style P fill:#e8f5e8
-    style M fill:#fff3e0
-    style B fill:#f3e5f5
 ```
 
 ### `pure` - Lift Values
