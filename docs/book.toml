@@ -4,6 +4,7 @@ language = "en"
 src = "src"
 title = "Fugue Docs"
 multilingual = false
+text-direction = "ltr"
 
 [build]
 create-missing = true
