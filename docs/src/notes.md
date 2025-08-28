@@ -30,56 +30,56 @@
 
 ##### Bayesian Coin Flip
 
-- Examples: `coin_flip_01_basic.rs` → `coin_flip_05_advanced.rs`
+- Examples: `bayesian_coin_flip.rs`
 - Concepts: Core Bayesian inference, prior/likelihood/posterior
 
 ##### Type Safety Features
 
-- Examples: `fully_type_safe.rs`, `type_safe_improvements.rs`
+- Examples: `type_safety.rs`
 - Concepts: Fugue's unique type system advantages
 
 ##### Trace Manipulation
 
-- Examples: `trace_manipulation.rs` + new 5-part series needed
+- Examples: `trace_manipulation.rs`
 - Concepts: Runtime system, custom inference, debugging
 
 #### Statistical Modeling (Real Applications)
 
 ##### Linear Regression
 
-- Examples: `linear_regression_01_data.rs` → `linear_regression_05_polynomial.rs`
+- Examples: `linear_regression.rs`
 - Concepts: Continuous outcomes, uncertainty quantification, diagnostics
 
-##### Classification ⭐ NEW SERIES NEEDED
+##### Classification
 
-- Examples: `classification_01_logistic.rs` → `classification_05_multiclass.rs`
+- Examples: `classification.rs`
 - Concepts: Discrete outcomes, ROC analysis, multi-class
 
 ##### Mixture Models
 
-- Examples: `mixture_models_01_data.rs` → `mixture_models_05_clustering.rs`
+- Examples: `mixture_models.rs`
 - Concepts: Latent variables, clustering, component identification
 
 ##### Hierarchical Models
 
-- Examples: `hierarchical_models_01_data.rs` → `hierarchical_models_05_predictions.rs`
+- Examples: `hierarchical_models.rs`
 - Concepts: Multi-level data, partial pooling, shrinkage
 
 #### Advanced Applications (Research/Production)
 
-##### Time Series & Forecasting ⭐ NEW SERIES NEEDED
+##### Time Series & Forecasting
 
-- Examples: `time_series_01_ar.rs` → `time_series_05_forecasting.rs`
+- Examples: `time_series.rs`
 - Concepts: Sequential data, state space models, forecasting
 
-##### Model Comparison & Selection ⭐ NEW SERIES NEEDED
+##### Model Comparison & Selection
 
-- Examples: `model_selection_01_aic.rs` → `model_selection_05_crossval.rs`
+- Examples: `model_selection.rs`
 - Concepts: Information criteria, cross-validation, model averaging
 
 ##### Advanced Inference
 
-- Examples: `improved_gaussian_mean.rs`, validation examples
+- Examples: `advanced_inference.rs`
 - Concepts: Custom algorithms, production optimization, diagnostics
 
 ### How-To Guides (10-15 min each)
@@ -105,7 +105,7 @@ Real-world context and motivation...
 **Data Generation & Exploration**
 
 ```rust
-{{#include ../../examples/series_01_data.rs:data_setup}}
+{{#include ../../examples/series.rs:data_setup}}
 ```
 ````
 

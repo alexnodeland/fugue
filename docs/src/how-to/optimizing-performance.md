@@ -1,5 +1,9 @@
 # Optimizing Performance
 
+```admonish info title="Contents"
+<!-- toc -->
+```
+
 Performance optimization in probabilistic programming requires understanding both **computational complexity** and **numerical analysis**. This guide explores Fugue's systematic approach to memory optimization, numerical stability, and algorithmic efficiency for production-scale probabilistic workloads.
 
 ```admonish info title="Computational Complexity Framework"

@@ -1,5 +1,9 @@
 # Installation
 
+```admonish info title="Contents"
+<!-- toc -->
+```
+
 Getting Fugue set up in your Rust project takes just 2 minutes. Let's get you running!
 
 ````admonish note
@@ -172,7 +176,7 @@ ls examples/
 cargo run --example gaussian_mean -- --obs 2.5 --seed 42
 
 # Try a more complex one
-cargo run --example coin_flip_01_basic
+cargo run --example working_with_distributions
 ```
 
 ## Troubleshooting

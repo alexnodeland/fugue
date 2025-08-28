@@ -1,5 +1,9 @@
 # Your First Model
 
+```admonish info title="Contents"
+<!-- toc -->
+```
+
 Now that Fugue is installed, let's build your first probabilistic model step by step. We'll start simple and gradually introduce the key concepts.
 
 ```admonish note

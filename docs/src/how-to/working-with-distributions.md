@@ -1,5 +1,9 @@
 # Working with Distributions
 
+```admonish info title="Contents"
+<!-- toc -->
+```
+
 Fugue's type-safe distribution system represents a principled approach to probabilistic programming, eliminating entire classes of runtime errors through rigorous type theory while preserving the full expressiveness of statistical modeling. This guide demonstrates the mathematical foundations and practical applications of Fugue's distribution architecture.
 
 ```admonish info title="Type Theory Foundation"

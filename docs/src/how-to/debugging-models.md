@@ -1,5 +1,9 @@
 # Debugging Models
 
+```admonish info title="Contents"
+<!-- toc -->
+```
+
 Debugging probabilistic models presents unique challenges due to their **stochastic nature** and **high-dimensional parameter spaces**. Unlike deterministic programs, probabilistic models require **statistical validation**, **convergence analysis**, and **distributional testing**. This guide establishes a systematic methodology for probabilistic model debugging using Fugue's comprehensive diagnostic framework.
 
 ```admonish info title="Probabilistic Debugging Theory"

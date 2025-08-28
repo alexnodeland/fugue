@@ -1037,6 +1037,7 @@ dependencies = [
  "mdbook-katex",
  "mdbook-linkcheck",
  "mdbook-mermaid",
+ "mdbook-toc",
  "proptest",
  "rand 0.8.5",
  "rand_distr",
@@ -2081,6 +2082,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "mdbook-toc"
+version = "0.14.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7441446fed07c2cdc1f92b8662dac3d79341637b321bb48ab66eca161b66edc"
+dependencies = [
+ "clap 4.5.45",
+ "log",
+ "mdbook",
+ "pulldown-cmark 0.9.6",
+ "serde_json",
+ "toml 0.5.11",
+]
+
+[[package]]
 name = "mdbook_fork4ls"
 version = "0.4.48"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2668,6 +2683,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57206b407293d2bcd3af849ce869d52068623f19e1b5ff8e8778e3309439682b"
 dependencies = [
  "bitflags 2.9.3",
+ "getopts",
  "memchr",
  "unicase",
 ]

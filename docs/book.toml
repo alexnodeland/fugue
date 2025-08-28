@@ -39,4 +39,6 @@ command = "mdbook-mermaid"
 [preprocessor.katex]
 after = ["links"]
 
-
+[preprocessor.toc]
+command = "mdbook-toc"
+renderer = ["html"]

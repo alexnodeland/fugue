@@ -1,5 +1,9 @@
 # How-To Guides
 
+```admonish info title="Contents"
+<!-- toc -->
+```
+
 The How-To guides provide **practical, task-oriented instructions** for accomplishing specific goals with Fugue. Unlike tutorials that teach concepts step-by-step, these guides assume you understand the basics and want to solve particular problems efficiently.
 
 ## Guide Overview

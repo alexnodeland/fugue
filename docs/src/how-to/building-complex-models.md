@@ -1,5 +1,9 @@
 # Building Complex Models
 
+```admonish info title="Contents"
+<!-- toc -->
+```
+
 Fugue's compositional architecture is grounded in **category theory** and **monadic structures**, enabling the systematic construction of sophisticated probabilistic models through principled composition operators. This guide explores the mathematical foundations and practical applications of Fugue's macro system for building complex probabilistic programs.
 
 ```admonish info title="Categorical Foundations"

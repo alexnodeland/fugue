@@ -1,5 +1,9 @@
 # Getting Started with Fugue
 
+```admonish info title="Contents"
+<!-- toc -->
+```
+
 Welcome to **Fugue**, a type-safe probabilistic programming library for Rust! This guide will get you building Bayesian models in just 15-20 minutes.
 
 ```admonish note

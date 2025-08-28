@@ -1,5 +1,9 @@
 # Understanding Models
 
+```admonish info title="Contents"
+<!-- toc -->
+```
+
 Now that you can build basic models, let's understand the key concepts that make Fugue powerful. This will give you the mental framework to build sophisticated probabilistic programs.
 
 ```admonish note

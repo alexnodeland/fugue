@@ -1,5 +1,9 @@
 # Custom Handlers
 
+```admonish info title="Contents"
+<!-- toc -->
+```
+
 Fugue's handler system is grounded in **algebraic effect theory**, providing a principled approach to **effect interpretation** and **computational extension**. Custom handlers enable specialized execution strategies, monitoring systems, and novel inference algorithms through systematic **effect handling** and **handler composition**.
 
 ```admonish info title="Algebraic Effects Foundation"

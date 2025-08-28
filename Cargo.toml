@@ -28,6 +28,7 @@ libm = "0.2"
 clap = { version = "4", features = ["derive"] }
 # Testing dependencies  
 proptest = "1.0"
+cargo-llvm-cov = "0.6.18"
 # Benchmarking dependencies
 criterion = { version = "0.5", features = ["html_reports"] }
 # Documentation Dependencies
@@ -36,7 +37,7 @@ mdbook-mermaid = "0.15.0"
 mdbook-katex = "0.9.4"
 mdbook-admonish = "1.20.0"
 mdbook-linkcheck = "0.7.7"
-cargo-llvm-cov = "0.6.18"
+mdbook-toc = "0.14.2"
 
 [[bench]]
 name = "memory_benchmarks"

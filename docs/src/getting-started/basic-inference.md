@@ -1,5 +1,9 @@
 # Running Inference
 
+```admonish info title="Contents"
+<!-- toc -->
+```
+
 You now know how to build probabilistic models. But models alone don't give you answers - you need **inference** to extract insights from them. Let's explore Fugue's inference algorithms!
 
 ```admonish note
