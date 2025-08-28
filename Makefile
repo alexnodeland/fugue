@@ -30,6 +30,9 @@ bench: ## Run benchmarks
 doc: ## Generate and open documentation
 	cargo doc --all-features --no-deps --open
 
+mdbook: ## Build mdbook documentation
+	mdbook build docs
+
 install-tools: ## Install development tools
 	cargo install cargo-llvm-cov
 	cargo install cargo-watch
@@ -39,3 +42,5 @@ watch: ## Watch for changes and run tests
 	cargo watch -x test
 
 all: fmt lint test coverage ## Run all checks (format, lint, test, coverage)
+
+docs-all: doc mdbook ## Build all documentation (rustdoc + mdbook)
