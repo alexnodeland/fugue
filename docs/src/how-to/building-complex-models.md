@@ -11,8 +11,9 @@ The `prob!` macro provides Haskell-style do-notation for chaining probabilistic 
 ```
 
 **Key Features:**
+
 - `<-` for probabilistic binding (monadic bind)
-- `=` for regular variable assignment  
+- `=` for regular variable assignment
 - `pure()` to lift deterministic values
 - Natural control flow without callback nesting
 
@@ -29,6 +30,7 @@ Plate notation handles independent replications efficiently:
 ```
 
 **Benefits:**
+
 - Automatic address indexing prevents conflicts
 - Natural iteration over data structures
 - Vectorized likelihood computations
@@ -47,6 +49,7 @@ Complex models need systematic parameter organization:
 ```
 
 **Address Strategy:**
+
 - `scoped_addr!` prevents parameter name collisions
 - Hierarchical structure mirrors model dependencies
 - Systematic naming aids debugging and introspection
@@ -61,6 +64,7 @@ For time series and state-dependent models:
 ```
 
 **Patterns:**
+
 - Explicit state threading through computations
 - Observation conditioning at each time step
 - Autoregressive dependencies
@@ -79,6 +83,7 @@ Build reusable model components:
 ```
 
 **Design Principles:**
+
 - Functions return `Model<T>` for composability
 - Pattern matching enables model selection
 - Pure functions for deterministic transformations
@@ -93,6 +98,7 @@ For large-scale models like neural networks:
 ```
 
 **Scaling Strategies:**
+
 - Systematic parameter naming conventions
 - Multi-level scoping for complex architectures
 - Consistent indexing schemes
@@ -107,6 +113,7 @@ Combine macros with traditional function composition:
 ```
 
 **Best Practices:**
+
 - Use functions for reusable components
 - Use macros for readable composition
 - Separate concerns (priors, likelihood, observations)
@@ -147,6 +154,7 @@ Population → Groups → Individuals structure:
 ```
 
 **Key Features:**
+
 - Partial pooling across hierarchy levels
 - Systematic parameter organization
 - Natural shrinkage properties
@@ -161,6 +169,7 @@ Dynamic model construction:
 ```
 
 **Flexibility Benefits:**
+
 - Runtime model configuration
 - Conditional model components
 - A/B testing different model structures

@@ -7,7 +7,7 @@ Learning Goals
 
 In 5 minutes, you'll understand:
 - What inference is and why you need it
-- Fugue's main inference algorithms (MCMC, SMC, VI, ABC)  
+- Fugue's main inference algorithms (MCMC, SMC, VI, ABC)
 - When to use each algorithm
 - How to run inference and interpret results
 
@@ -25,23 +25,23 @@ graph LR
     subgraph "Before Data"
         P[Prior Beliefs<br/>p⟨θ⟩]
     end
-    
-    subgraph "Observing Data"  
+
+    subgraph "Observing Data"
         L[Likelihood<br/>p⟨y|θ⟩]
         D[Data<br/>y₁, y₂, ...]
     end
-    
+
     subgraph "After Data"
         Post[Posterior Beliefs<br/>p⟨θ|y⟩]
     end
-    
+
     P --> Post
-    L --> Post  
+    L --> Post
     D --> Post
-    
+
     style P fill:#e8f5e8
     style L fill:#fff3e0
-    style D fill:#fff3e0  
+    style D fill:#fff3e0
     style Post fill:#f3e5f5
 ```
 
@@ -72,7 +72,7 @@ fn coin_bias_model(heads: u64, total: u64) -> Model<f64> {
 
 fn main() {
     let mut rng = StdRng::seed_from_u64(42);
-    
+
     // Run adaptive MCMC
     let samples = inference::mh::adaptive_mcmc_chain(
         &mut rng,
@@ -80,15 +80,15 @@ fn main() {
         1000,  // number of samples
         500,   // warmup samples
     );
-    
+
     // Extract bias estimates
     let bias_samples: Vec<f64> = samples.iter()
         .filter_map(|(_, trace)| trace.get_f64(&addr!("bias")))
         .collect();
-    
+
     let mean_bias = bias_samples.iter().sum::<f64>() / bias_samples.len() as f64;
     println!("Estimated bias: {:.3}", mean_bias);
-    
+
     // Compute 90% credible interval
     let mut sorted = bias_samples.clone();
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -100,7 +100,7 @@ fn main() {
 
 **When to use MCMC:**
 
-- ✅ Want exact posterior samples  
+- ✅ Want exact posterior samples
 - ✅ Moderate number of parameters (< 100)
 - ✅ Can afford computation time
 - ✅ Model evaluation is reasonably fast
@@ -118,16 +118,16 @@ use rand::SeedableRng;
 
 fn main() {
     let mut rng = StdRng::seed_from_u64(42);
-    
+
     // Generate particles from prior
     let particles = inference::smc::smc_prior_particles(
         &mut rng,
         1000,  // number of particles
         || coin_bias_model(7, 10),
     );
-    
+
     println!("Generated {} particles", particles.len());
-    
+
     // Compute weighted posterior mean
     let total_weight: f64 = particles.iter().map(|p| p.weight).sum();
     let weighted_mean: f64 = particles.iter()
@@ -136,9 +136,9 @@ fn main() {
                 .map(|bias| bias * p.weight)
         })
         .sum::<f64>() / total_weight;
-    
+
     println!("Weighted posterior mean: {:.3}", weighted_mean);
-    
+
     // Check effective sample size
     let weights: Vec<f64> = particles.iter().map(|p| p.weight).collect();
     let ess = 1.0 / weights.iter().map(|w| w * w).sum::<f64>();
@@ -149,7 +149,7 @@ fn main() {
 **When to use SMC:**
 
 - ✅ Sequential/streaming data
-- ✅ Online inference needed  
+- ✅ Online inference needed
 - ✅ Many discrete latent variables
 - ✅ Want to visualize inference process
 
@@ -166,16 +166,16 @@ use rand::SeedableRng;
 
 fn main() {
     let mut rng = StdRng::seed_from_u64(42);
-    
-    // Estimate ELBO (Evidence Lower BOund) 
+
+    // Estimate ELBO (Evidence Lower BOund)
     let elbo = inference::vi::estimate_elbo(
         &mut rng,
         || coin_bias_model(7, 10),
         100,  // number of samples for estimation
     );
-    
+
     println!("ELBO estimate: {:.3}", elbo);
-    
+
     // For more sophisticated VI, you'd set up a variational guide
     // and optimize it (see the VI tutorial for details)
 }
@@ -185,7 +185,7 @@ fn main() {
 
 - ✅ Need fast approximate inference
 - ✅ Many parameters (> 100)
-- ✅ Can accept approximation error  
+- ✅ Can accept approximation error
 - ✅ Want predictable runtime
 
 ### 4. ABC (Approximate Bayesian Computation) 🎲
@@ -201,7 +201,7 @@ use rand::SeedableRng;
 
 fn main() {
     let mut rng = StdRng::seed_from_u64(42);
-    
+
     // ABC with summary statistics
     let observed_summary = 0.7; // 7/10 = 0.7 success rate
     let samples = inference::abc::abc_scalar_summary(
@@ -209,12 +209,12 @@ fn main() {
         || sample(addr!("bias"), Beta::new(1.0, 1.0).unwrap()), // Prior only
         |trace| trace.get_f64(&addr!("bias")).unwrap_or(0.0), // Extract bias
         observed_summary,  // Target summary statistic
-        0.1,              // Tolerance  
+        0.1,              // Tolerance
         1000,             // Max samples to try
     );
-    
+
     println!("ABC accepted {} samples", samples.len());
-    
+
     if !samples.is_empty() {
         let abc_estimates: Vec<f64> = samples.iter()
             .filter_map(|trace| trace.get_f64(&addr!("bias")))
@@ -234,12 +234,12 @@ fn main() {
 
 ## Algorithm Comparison
 
-| Method | Speed | Accuracy | Use Case |
-|--------|-------|----------|----------|
-| **MCMC** | 🐌 Slow | 🎯 Exact | General-purpose, exact inference |
-| **SMC** | 🏃 Medium | 🎯 Good | Sequential data, online learning |  
-| **VI** | 🚀 Fast | ⚠️ Approximate | Large models, fast approximate inference |
-| **ABC** | 🐌 Slow | ⚠️ Approximate | Intractable likelihoods |
+| Method   | Speed     | Accuracy       | Use Case                                 |
+| -------- | --------- | -------------- | ---------------------------------------- |
+| **MCMC** | 🐌 Slow   | 🎯 Exact       | General-purpose, exact inference         |
+| **SMC**  | 🏃 Medium | 🎯 Good        | Sequential data, online learning         |
+| **VI**   | 🚀 Fast   | ⚠️ Approximate | Large models, fast approximate inference |
+| **ABC**  | 🐌 Slow   | ⚠️ Approximate | Intractable likelihoods                  |
 
 ## Practical Inference Workflow
 
@@ -247,15 +247,15 @@ Here's a typical workflow for real inference:
 
 ```rust,ignore
 use fugue::*;
-use rand::rngs::StdRng;  
+use rand::rngs::StdRng;
 use rand::SeedableRng;
 
 fn inference_workflow() {
     let mut rng = StdRng::seed_from_u64(42);
-    
+
     // 1. Define your model
     let model = || coin_bias_model(17, 25);  // 17 heads out of 25 flips
-    
+
     // 2. Run inference (adaptive MCMC is often a good default)
     let samples = inference::mh::adaptive_mcmc_chain(
         &mut rng,
@@ -263,36 +263,36 @@ fn inference_workflow() {
         2000,  // samples
         1000,  // warmup
     );
-    
+
     // 3. Extract parameter values
     let bias_samples: Vec<f64> = samples.iter()
         .filter_map(|(_, trace)| trace.get_f64(&addr!("bias")))
         .collect();
-    
-    // 4. Compute summary statistics  
+
+    // 4. Compute summary statistics
     let mean = bias_samples.iter().sum::<f64>() / bias_samples.len() as f64;
     let variance = bias_samples.iter()
         .map(|&x| (x - mean).powi(2))
         .sum::<f64>() / (bias_samples.len() - 1) as f64;
     let std_dev = variance.sqrt();
-    
+
     println!("Posterior Summary:");
     println!("  Mean: {:.3}", mean);
     println!("  Std Dev: {:.3}", std_dev);
-    
+
     // 5. Check convergence (effective sample size)
     let ess = inference::diagnostics::effective_sample_size(&bias_samples);
     println!("  Effective Sample Size: {:.1}", ess);
-    
+
     if ess > 100.0 {
         println!("  ✅ Good mixing!");
     } else {
         println!("  ⚠️ Poor mixing - consider more samples");
     }
-    
+
     // 6. Make predictions
     println!("\nPredictions:");
-    println!("  P(bias > 0.5) = {:.2}", 
+    println!("  P(bias > 0.5) = {:.2}",
         bias_samples.iter().filter(|&&b| b > 0.5).count() as f64 / bias_samples.len() as f64);
 }
 ```
@@ -305,22 +305,22 @@ fn inference_workflow() {
 graph TD
     A[Need inference?] -->|Yes| B[Real-time/online?]
     A -->|No| Z[Use PriorHandler<br/>for forward sampling]
-    
+
     B -->|Yes| SMC[SMC]
     B -->|No| C[Likelihood tractable?]
-    
+
     C -->|No| ABC[ABC]
     C -->|Yes| D[Many parameters?]
-    
+
     D -->|Yes > 100| VI[Variational Inference]
     D -->|No < 100| E[Need exact samples?]
-    
+
     E -->|Yes| MCMC[MCMC]
     E -->|No| VI2[VI for speed]
-    
+
     style MCMC fill:#e8f5e8
     style SMC fill:#fff3e0
-    style VI fill:#f3e5f5  
+    style VI fill:#f3e5f5
     style ABC fill:#fce4ec
 ```
 

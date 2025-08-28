@@ -38,8 +38,9 @@ graph LR
 ```
 
 **Why this matters**: The same model can be executed in different ways:
+
 - **Forward sampling** (generate data from priors)
-- **Conditioning** (inference given observations) 
+- **Conditioning** (inference given observations)
 - **Replay** (MCMC proposals)
 - **Scoring** (compute probabilities)
 

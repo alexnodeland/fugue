@@ -11,6 +11,7 @@ Every model execution produces a complete trace that records all choices and log
 ```
 
 **Key Debugging Insights:**
+
 - **Choice count** reveals model complexity and structure
 - **Log-weight decomposition** identifies prior vs. likelihood vs. factor issues
 - **Per-choice analysis** shows individual parameter contributions
@@ -25,6 +26,7 @@ Fugue provides robust access patterns that handle type mismatches gracefully:
 ```
 
 **Error Handling Strategies:**
+
 - Use `get_*_result()` for detailed error information
 - Use `get_*()` for simple None-handling
 - Always check for missing addresses before assuming success
@@ -39,6 +41,7 @@ Systematic validation ensures your model behaves as expected:
 ```
 
 **Validation Best Practices:**
+
 - Test against known analytical solutions
 - Verify all traces have finite log-weights
 - Check basic statistical properties (means, variances)
@@ -53,6 +56,7 @@ Fugue provides both strict (fail-fast) and safe (error-resilient) execution mode
 ```
 
 **When to Use Each:**
+
 - **Strict handlers** (`ReplayHandler`, `ScoreGivenTrace`): Development and testing
 - **Safe handlers** (`SafeReplayHandler`, `SafeScoreGivenTrace`): Production systems
 - Safe handlers log warnings instead of panicking on mismatches
@@ -66,6 +70,7 @@ For inference algorithms, convergence diagnostics are essential:
 ```
 
 **Convergence Indicators:**
+
 - **R-hat < 1.1**: Chains have converged
 - **High ESS**: Efficient sampling without excessive correlation
 - **Multiple chains**: Essential for reliable convergence assessment
@@ -80,6 +85,7 @@ Complex models benefit from systematic structure analysis:
 ```
 
 **Structure Analysis Benefits:**
+
 - Understand parameter organization and hierarchies
 - Detect unexpected address patterns
 - Verify choice counts match model expectations
@@ -94,6 +100,7 @@ Monitor computational efficiency and identify bottlenecks:
 ```
 
 **Performance Warning Signs:**
+
 - Zero choices recorded (model execution failure)
 - Infinite log-weights (constraint violations)
 - Excessive execution time (optimization needed)
@@ -108,6 +115,7 @@ Systematic debugging approaches for robust model development:
 ```
 
 **Debugging Workflow:**
+
 1. **Start Simple**: Test individual components before complex composition
 2. **Validate Incrementally**: Add complexity one piece at a time
 3. **Check Address Uniqueness**: Prevent parameter collision bugs
@@ -123,6 +131,7 @@ Embed debugging checks in your test suite:
 ```
 
 **Testing Strategy:**
+
 - Unit tests for individual model components
 - Integration tests for complete workflows
 - Performance regression tests
@@ -135,11 +144,13 @@ Embed debugging checks in your test suite:
 **Symptoms:** `trace.total_log_weight().is_infinite()`
 
 **Causes:**
+
 - Factor statements with impossible constraints
 - Parameters outside valid ranges
 - Numerical overflow in likelihood computations
 
 **Solutions:**
+
 - Check factor conditions carefully
 - Validate parameter ranges in constructors
 - Use log-space computations for numerical stability
@@ -149,11 +160,13 @@ Embed debugging checks in your test suite:
 **Symptoms:** `get_*()` returns `None` or wrong types
 
 **Causes:**
+
 - Address typos or inconsistencies
 - Model structure doesn't match expectations
 - Type mismatches in trace replay
 
 **Solutions:**
+
 - Use consistent address naming conventions
 - Print all addresses for verification
 - Use safe handlers for production resilience
@@ -163,11 +176,13 @@ Embed debugging checks in your test suite:
 **Symptoms:** High R-hat values, low ESS
 
 **Causes:**
+
 - Inappropriate step sizes
 - Poor model parameterization
 - Insufficient warm-up periods
 
 **Solutions:**
+
 - Increase warm-up iterations
 - Reparameterize for better geometry
 - Use adaptive algorithms with proper tuning
@@ -177,11 +192,13 @@ Embed debugging checks in your test suite:
 **Symptoms:** High execution times, memory usage
 
 **Causes:**
+
 - Inefficient model structure
 - Excessive address creation
 - Large trace construction overhead
 
 **Solutions:**
+
 - Use `plate!` for vectorized operations
 - Pre-allocate data structures when possible
 - Profile with performance diagnostics

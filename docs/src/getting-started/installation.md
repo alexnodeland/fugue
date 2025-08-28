@@ -39,7 +39,7 @@ rand = "0.8"  # For random number generation
 Add Fugue to your existing `Cargo.toml`:
 
 ```toml
-[dependencies] 
+[dependencies]
 fugue = "0.3.0"
 rand = "0.8"
 ```
@@ -63,10 +63,10 @@ use rand::SeedableRng;
 
 fn main() {
     println!("🎲 Hello, Probabilistic World!");
-    
+
     // Create a simple model: flip a biased coin
     let coin_model = sample(addr!("coin"), Bernoulli::new(0.7).unwrap());
-    
+
     // Run the model with a seeded RNG for reproducible results
     let mut rng = StdRng::seed_from_u64(42);
     let (is_heads, trace) = runtime::handler::run(
@@ -76,15 +76,15 @@ fn main() {
         },
         coin_model,
     );
-    
+
     // Print the result - notice it's a bool, not a float!
     let result = if is_heads { "Heads" } else { "Tails" };
     println!("🪙 Coin flip result: {}", result);
     println!("📊 Log probability: {:.4}", trace.total_log_weight());
-    
+
     // Demonstrate type safety with different distributions
     let mut rng = StdRng::seed_from_u64(123);
-    
+
     // Count events - returns u64 directly
     let (event_count, _) = runtime::handler::run(
         runtime::interpreters::PriorHandler {
@@ -94,8 +94,8 @@ fn main() {
         sample(addr!("events"), Poisson::new(3.5).unwrap()),
     );
     println!("🎯 Event count: {} (type: u64)", event_count);
-    
-    // Choose category - returns usize for safe indexing  
+
+    // Choose category - returns usize for safe indexing
     let options = vec!["red", "green", "blue"];
     let (category_idx, _) = runtime::handler::run(
         runtime::interpreters::PriorHandler {
@@ -105,7 +105,7 @@ fn main() {
         sample(addr!("color"), Categorical::uniform(3).unwrap()),
     );
     println!("🎨 Chosen color: {} (safe indexing!)", options[category_idx]);
-    
+
     println!("✅ Fugue is working correctly!");
 }
 ```
@@ -132,7 +132,7 @@ Type Safety in Action!
 
 Notice how each distribution returns its natural type:
 
-- `Bernoulli` → `bool` (not `f64`)  
+- `Bernoulli` → `bool` (not `f64`)
 - `Poisson` → `u64` (not `f64`)
 - `Categorical` → `usize` (not `f64`)
 
@@ -147,7 +147,7 @@ Install the **rust-analyzer** extension for the best development experience:
 
 1. Open VS Code
 2. Go to Extensions (Ctrl+Shift+X)
-3. Search for "rust-analyzer"  
+3. Search for "rust-analyzer"
 4. Install the official rust-analyzer extension
 
 ### Other IDEs
@@ -185,7 +185,7 @@ cargo run --example coin_flip_01_basic
 # Make sure you're using Rust 1.70+
 rustc --version
 
-# Update your dependencies  
+# Update your dependencies
 cargo update
 ```
 

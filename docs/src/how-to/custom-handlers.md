@@ -11,6 +11,7 @@ The `Handler` trait defines how to interpret probabilistic effects. Every custom
 ```
 
 **Handler Responsibilities:**
+
 - **Type-specific sampling**: Handle `f64`, `bool`, `u64`, and `usize` distributions appropriately
 - **Observation handling**: Process observed values and update likelihood components
 - **Factor management**: Accumulate constraint and penalty terms
@@ -26,6 +27,7 @@ The decorator pattern allows you to wrap existing handlers with additional funct
 ```
 
 **Decorator Benefits:**
+
 - Non-invasive functionality addition
 - Composable and reusable components
 - Separation of concerns between core logic and cross-cutting features
@@ -40,6 +42,7 @@ Handlers can maintain state to accumulate statistics and monitor model behavior:
 ```
 
 **Analytics Applications:**
+
 - Model complexity analysis (parameter counts by type)
 - Execution profiling and bottleneck identification
 - Parameter range monitoring for numerical stability
@@ -54,6 +57,7 @@ Implement business logic and constraints through conditional handling:
 ```
 
 **Filtering Use Cases:**
+
 - Parameter clamping for numerical stability
 - Outlier detection and handling
 - Domain-specific constraints enforcement
@@ -68,6 +72,7 @@ Track and optimize computational characteristics with monitoring handlers:
 ```
 
 **Performance Insights:**
+
 - Operation timing and bottleneck identification
 - Memory allocation patterns
 - Execution hotspots and optimization opportunities
@@ -82,6 +87,7 @@ Build specialized inference algorithms by implementing domain-specific handlers:
 ```
 
 **Inference Handler Patterns:**
+
 - **MCMC variants**: Custom proposal mechanisms and acceptance criteria
 - **Variational methods**: Gradient-based optimization with custom families
 - **Rejection sampling**: Domain-specific acceptance/rejection logic
@@ -96,6 +102,7 @@ Combine multiple handler decorators for comprehensive functionality:
 ```
 
 **Composition Strategies:**
+
 - **Layered approach**: Statistics → Logging → Performance → Base
 - **Conditional activation**: Enable decorators based on environment/configuration
 - **Feature flags**: Runtime selection of handler combinations
@@ -142,6 +149,7 @@ Systematic testing ensures handler correctness:
 ```
 
 **Testing Strategy:**
+
 - **Unit tests**: Individual handler method behavior
 - **Integration tests**: Handler with realistic models
 - **Property tests**: Invariant verification across random inputs

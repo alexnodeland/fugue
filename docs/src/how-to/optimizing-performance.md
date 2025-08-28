@@ -42,10 +42,10 @@ When building traces programmatically, use `TraceBuilder` for optimal performanc
 
 **Construction Benefits:**
 
--   Pre-allocated data structures minimize reallocations
--   Type-specific insertion methods avoid boxing overhead
--   Batch operations for multiple choices
--   Efficient conversion to immutable traces
+- Pre-allocated data structures minimize reallocations
+- Type-specific insertion methods avoid boxing overhead
+- Batch operations for multiple choices
+- Efficient conversion to immutable traces
 
 ## Copy-on-Write for MCMC
 
@@ -57,10 +57,10 @@ MCMC algorithms frequently modify small portions of large traces. COW sharing op
 
 **MCMC Optimizations:**
 
--   O(1) trace cloning until modification
--   Shared memory for unchanged parameters
--   Lazy copying only when traces diverge
--   Perfect for Metropolis-Hastings and Gibbs sampling
+- O(1) trace cloning until modification
+- Shared memory for unchanged parameters
+- Lazy copying only when traces diverge
+- Perfect for Metropolis-Hastings and Gibbs sampling
 
 ## Vectorized Model Patterns
 
@@ -72,10 +72,10 @@ Structure models for efficient batch processing:
 
 **Vectorization Strategy:**
 
--   Pre-allocate data collections
--   Use `plate!` for independent parallel operations
--   Minimize dynamic allocations in hot paths
--   Leverage compiler optimizations with static sizing
+- Pre-allocate data collections
+- Use `plate!` for independent parallel operations
+- Minimize dynamic allocations in hot paths
+- Leverage compiler optimizations with static sizing
 
 ## Performance Monitoring
 
@@ -87,10 +87,10 @@ Track and optimize inference performance systematically:
 
 **Monitoring Approach:**
 
--   Collect trace characteristics for optimization insights
--   Track memory usage patterns
--   Validate numerical stability
--   Profile execution bottlenecks
+- Collect trace characteristics for optimization insights
+- Track memory usage patterns
+- Validate numerical stability
+- Profile execution bottlenecks
 
 ## Batch Processing
 
@@ -102,10 +102,10 @@ Optimize throughput for multiple inference runs:
 
 **Batch Benefits:**
 
--   Amortized setup costs across samples
--   Memory pool reuse for consistent performance
--   Scalable to large sample counts
--   Predictable memory footprint
+- Amortized setup costs across samples
+- Memory pool reuse for consistent performance
+- Scalable to large sample counts
+- Predictable memory footprint
 
 ## Numerical Precision Testing
 
@@ -117,10 +117,10 @@ Validate stability across different computational scales:
 
 **Testing Strategy:**
 
--   Verify stability across extreme value ranges
--   Test edge cases and boundary conditions
--   Validate consistency of numerical operations
--   Profile precision vs. performance trade-offs
+- Verify stability across extreme value ranges
+- Test edge cases and boundary conditions
+- Validate consistency of numerical operations
+- Profile precision vs. performance trade-offs
 
 ## Performance Testing
 
@@ -132,33 +132,33 @@ Implement systematic performance validation:
 
 **Testing Framework:**
 
--   Memory pool efficiency validation
--   Numerical stability regression tests
--   Trace construction benchmarking
--   COW sharing verification
+- Memory pool efficiency validation
+- Numerical stability regression tests
+- Trace construction benchmarking
+- COW sharing verification
 
 ## Production Deployment
 
 ### Memory Configuration
 
--   Size `TracePool` based on peak concurrent inference
--   Monitor hit ratios to validate pool efficiency
--   Use COW traces for MCMC workloads
--   Pre-warm pools before production traffic
+- Size `TracePool` based on peak concurrent inference
+- Monitor hit ratios to validate pool efficiency
+- Use COW traces for MCMC workloads
+- Pre-warm pools before production traffic
 
 ### Numerical Strategies
 
--   Always use log-space for probability computations
--   Validate extreme value handling in testing
--   Monitor for numerical instabilities in production
--   Use stable algorithms for critical computations
+- Always use log-space for probability computations
+- Validate extreme value handling in testing
+- Monitor for numerical instabilities in production
+- Use stable algorithms for critical computations
 
 ### Monitoring and Alerting
 
--   Track inference latency and memory usage
--   Monitor pool statistics and efficiency metrics
--   Alert on numerical instabilities or performance degradation
--   Profile hot paths for optimization opportunities
+- Track inference latency and memory usage
+- Monitor pool statistics and efficiency metrics
+- Alert on numerical instabilities or performance degradation
+- Profile hot paths for optimization opportunities
 
 ## Common Performance Patterns
 
