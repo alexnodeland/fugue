@@ -13,7 +13,16 @@
     }
 
     const theme = lastThemeWasLight ? 'default' : 'dark';
-    mermaid.initialize({ startOnLoad: true, theme });
+    
+    // Initialize mermaid with modern configuration
+    mermaid.initialize({ 
+        startOnLoad: true, 
+        theme: theme,
+        securityLevel: 'loose'
+    });
+
+    // Run mermaid on existing diagrams
+    mermaid.run();
 
     // Simplest way to make mermaid re-render the diagrams in the new theme is via refreshing the page
 
