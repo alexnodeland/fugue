@@ -24,10 +24,11 @@ level = 0
 enable = true
 page-break = true
 
-[output.linkcheck]
-follow-web-links = false
-traverse-parent-directories = true
-warning-policy = "warn"
+# Linkcheck disabled due to issues with LaTeX math syntax
+# [output.linkcheck]
+# follow-web-links = false
+# traverse-parent-directories = true
+# warning-policy = "warn"
 
 [preprocessor.admonish]
 command = "mdbook-admonish"

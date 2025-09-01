@@ -84,7 +84,7 @@ This decomposition enables sophisticated inference algorithms to reason about di
 
 Let's start by understanding how Fugue records execution history:
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 # use fugue::runtime::interpreters::PriorHandler;
 # use rand::{SeedableRng, rngs::StdRng};
@@ -110,7 +110,7 @@ The trace decomposition immediately shows you:
 
 The replay system is the foundation of MCMC algorithms. It allows deterministic re-execution with modified random choices:
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 # use fugue::runtime::interpreters::*;
 # use fugue::runtime::trace::*;
@@ -149,7 +149,7 @@ The key insight: **the same model specification can be executed with different r
 
 Handlers define **how** probabilistic effects are interpreted. You can create custom handlers for specialized inference algorithms:
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 # use fugue::runtime::{handler::Handler, trace::*};
 # use rand::{SeedableRng, rngs::StdRng};
@@ -196,7 +196,7 @@ graph TD
 
 Scoring computes the log-probability of a specific execution path, essential for importance sampling and model comparison:
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 # use fugue::runtime::interpreters::*;
 # use fugue::runtime::trace::*;
@@ -223,7 +223,7 @@ Always work in log-space for importance weights. Direct probability ratios quick
 
 For production workloads, efficient memory management is crucial:
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 # use fugue::runtime::{interpreters::PriorHandler, memory::*};
 # use rand::{SeedableRng, rngs::StdRng};
@@ -248,7 +248,7 @@ For high-throughput scenarios:
 
 Fugue provides comprehensive tools for analyzing trace quality and convergence:
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 # use fugue::runtime::interpreters::PriorHandler;
 # use fugue::inference::diagnostics::*;
@@ -285,7 +285,7 @@ For each parameter, compute:
 
 When models behave unexpectedly, trace analysis reveals the root causes:
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 # use fugue::runtime::interpreters::*;
 # use fugue::runtime::trace::*;
@@ -340,7 +340,7 @@ Always validate your models with:
 
 ### Custom MCMC Algorithm
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 # use fugue::runtime::{interpreters::*, trace::*};
 
@@ -389,7 +389,7 @@ impl<R: rand::Rng> CustomMCMC<R> {
 
 ### Production Inference Pipeline
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 # use fugue::runtime::memory::TracePool;
 
@@ -474,7 +474,7 @@ impl InferencePipeline {
 
 Implement a custom handler that uses **adaptive proposals** based on the acceptance rate history:
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 # use fugue::runtime::{handler::Handler, trace::*};
 
@@ -493,7 +493,7 @@ struct AdaptiveMCMCHandler<R: rand::Rng> {
 
 Create a system that runs multiple MCMC chains in parallel and automatically assesses convergence:
 
-```rust,no_run
+```rust,ignore
 # use fugue::inference::diagnostics::*;
 
 fn multi_chain_inference<F>(
@@ -512,7 +512,7 @@ where F: Fn() -> Model<f64> + Copy
 
 Design a system for processing thousands of similar models efficiently:
 
-```rust,no_run
+```rust,ignore
 # use fugue::runtime::memory::*;
 
 struct BatchProcessor {

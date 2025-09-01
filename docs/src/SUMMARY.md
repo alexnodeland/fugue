@@ -1,6 +1,6 @@
 # Summary
 
-[Home](../../README.md)
+[Home](./home.md)
 
 ---
 
