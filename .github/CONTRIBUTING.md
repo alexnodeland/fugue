@@ -5,7 +5,7 @@ Thank you for your interest in contributing to Fugue! This document provides gui
 ## Quick Start
 
 ```bash
-git clone https://github.com/alexandernodeland/fugue.git
+git clone https://github.com/alexnodeland/fugue.git
 cd fugue
 cargo test --all-features
 ```
