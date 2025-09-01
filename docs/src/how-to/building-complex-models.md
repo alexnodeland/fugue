@@ -256,25 +256,25 @@ Dynamic model construction:
 ```mermaid
 graph TD
     A[Model M] --> B[Syntactic Tests]
-    A --> C[Semantic Tests] 
+    A --> C[Semantic Tests]
     A --> D[Statistical Tests]
-    
+
     B --> E[Type Checking]
     B --> F[Address Uniqueness]
-    
+
     C --> G[Trace Validity]
     C --> H[Parameter Bounds]
-    
+
     D --> I[Prior Predictive]
     D --> J[Posterior Consistency]
-    
+
     E --> K{All Pass?}
     F --> K
     G --> K
     H --> K
     I --> K
     J --> K
-    
+
     K -->|Yes| L[Model Validated]
     K -->|No| M[Refinement Required]
 ```
