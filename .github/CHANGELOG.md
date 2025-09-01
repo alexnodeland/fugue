@@ -1,84 +1,83 @@
 # Changelog
 
-## [0.3.0] - 2024-12-19 - General Improvements
+All notable changes to this project will be documented in this file.
 
-### 🚀 **Major Improvements**
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-#### **Numerical Stability & Correctness**
+## [Unreleased]
 
-- **Fixed all distribution implementations** with proper parameter validation and overflow protection
-- **Implemented stable log-sum-exp** for SMC weight normalization
-- **Added numerical utilities module** with robust mathematical functions
-- **Enhanced error handling** with comprehensive FugueError types and validation traits
+## [0.1.0] - 2025-09-XX
 
-#### **Theoretical Soundness**
+### Added
 
-- **Proper diminishing adaptation** for MCMC following Roberts & Rosenthal (2007)
-- **Ergodicity-preserving algorithms** with mathematical guarantees
-- **Stable acceptance probability computation** using log-space comparisons
-- **Correct conditioning semantics** for probabilistic programming
+- Initial release of Fugue, a monadic probabilistic programming library for Rust.
+- **Core probabilistic programming framework**:
+  - `Model<A>` abstraction for composable probabilistic programs.
+  - Monadic operations: `bind`, `map`, `and_then`, `pure` for program composition.
+  - `sample`, `observe`, `factor`, `guard` primitives for probabilistic modeling.
+- **Type-safe distribution system** with natural return types:
+  - `Bernoulli` distribution returning `bool` (eliminates `== 1.0` comparisons).
+  - `Poisson` and `Binomial` distributions returning `u64` (natural counting).
+  - `Categorical` distribution returning `usize` (safe array indexing).
+  - Continuous distributions (`Normal`, `Beta`, `Gamma`, etc.) returning `f64`.
+  - 10 built-in distributions with parameter validation and numerical stability.
+- **Ergonomic macros** for probabilistic programming:
+  - `prob!` macro for Haskell-style do-notation.
+  - `plate!` macro for vectorized operations over collections.
+  - `addr!` and `scoped_addr!` macros for hierarchical addressing.
+- **Multiple inference algorithms**:
+  - MCMC: Adaptive Metropolis-Hastings with convergence diagnostics.
+  - SMC: Sequential Monte Carlo with multiple resampling methods.
+  - VI: Mean-field variational inference with ELBO optimization.
+  - ABC: Approximate Bayesian Computation with distance functions.
+- **Effect handler system**:
+  - `Handler` trait for pluggable model interpreters.
+  - 5 built-in handlers: `PriorHandler`, `ReplayHandler`, `ScoreGivenTrace`, `SafeReplayHandler`, `SafeScoreGivenTrace`.
+  - Type-safe execution preserving distribution return types.
+- **Trace system** for execution history:
+  - Complete recording of random choices and log-weights.
+  - Type-safe value access with `get_f64()`, `get_bool()`, `get_u64()`, `get_usize()`.
+  - Three-component log-weight decomposition (prior, likelihood, factors).
+- **Memory optimization**:
+  - Copy-on-write traces (`CowTrace`) for efficient MCMC proposals.
+  - Object pooling (`TracePool`) for zero-allocation inference.
+  - Efficient trace construction (`TraceBuilder`).
+- **Production features**:
+  - Comprehensive error handling with `FugueError` and error codes.
+  - Numerically stable algorithms with overflow protection.
+  - Convergence diagnostics: R-hat, effective sample size, Geweke tests.
+  - Statistical validation against analytical solutions.
+- **Documentation and examples**:
+  - Comprehensive user guide with 20+ tutorial and how-to pages.
+  - Complete API documentation with rustdoc.
+  - 14 examples covering foundation concepts, statistical modeling, and advanced patterns.
+  - 158+ doctests ensuring example correctness.
+- **Testing infrastructure**:
+  - 82+ unit tests across all modules.
+  - 9+ integration tests for end-to-end workflows.
+  - Property-based testing with `proptest`.
+  - Continuous integration with format, lint, and test enforcement.
 
-#### **Performance & Memory Optimization**
+### Changed
 
-- **Copy-on-write traces** reducing MCMC allocation overhead by ~60%
-- **Memory pooling** for efficient object reuse
-- **Optimized model execution** with reduced heap allocations
-- **Efficient weight normalization** preventing underflow/overflow
+- N/A (initial release)
 
-#### **Enhanced Diagnostics**
+### Deprecated
 
-- **Effective sample size computation** with proper autocorrelation analysis
-- **Geweke convergence diagnostics** for single-chain assessment
-- **Statistical validation framework** against analytical solutions
-- **Comprehensive convergence monitoring** with multiple metrics
+- N/A (initial release)
 
-#### **Production Features**
+### Removed
 
-- **Parameter validation** for all probability distributions
-- **Structured error handling** with context and recovery suggestions
-- **Extensive test suite** including numerical stability stress tests
-- **Complete documentation** with mathematical foundations
+- N/A (initial release)
 
-### 🔧 **Breaking Changes**
+### Fixed
 
-- `AdaptiveScales` removed entirely - use `DiminishingAdaptation` instead
-- Distribution constructors now return `Result<T, FugueError>` for validation
-- Enhanced `VariationalParam` with numerical stability improvements
-- Improved MCMC functions with better theoretical properties
+- N/A (initial release)
 
-### 🚀 **New Features**
+### Security
 
-- `DiminishingAdaptation` for theoretically sound MCMC adaptation
-- `log_sum_exp` and numerical utilities for stable computation
-- `CowTrace` and memory management optimizations
-- `ValidationResult` and statistical testing framework
-- Comprehensive diagnostics with `effective_sample_size_mcmc` and `geweke_diagnostic`
+- N/A (initial release)
 
-### 📚 **Documentation**
-
-- Complete mathematical formulations for all algorithms
-- 70+ working examples with compilation verification
-- Theoretical background and convergence properties
-- Production deployment guidelines
-
-### ⚡ **Performance**
-
-- ~60% reduction in memory allocations for MCMC
-- Stable numerical computation preventing overflow/underflow
-- Optimized SMC with proper weight handling
-- Efficient trace operations with copy-on-write semantics
-
----
-
-## [0.2.0]
-
-- Basic probabilistic programming functionality
-- Simple inference algorithms
-- Monadic model composition
-- Original documentation
-
----
-
-## [0.1.0]
-
-- Initial release
+[Unreleased]: https://github.com/alexandernodeland/fugue/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/alexandernodeland/fugue/releases/tag/v0.1.0

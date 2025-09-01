@@ -32,7 +32,7 @@ A **production-ready**, **monadic probabilistic programming library** for Rust. 
 
 ```toml
 [dependencies]
-fugue = "0.3.0"
+fugue = "0.1.0"
 ```
 
 ### Quickstart

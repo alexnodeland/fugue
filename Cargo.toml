@@ -1,6 +1,6 @@
 [package]
 name = "fugue"
-version = "0.3.0"
+version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Production-ready monadic PPL with numerically stable inference, comprehensive diagnostics, and memory optimization."
