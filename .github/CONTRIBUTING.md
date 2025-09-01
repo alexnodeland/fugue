@@ -144,15 +144,43 @@ graph LR
 
 ### Directory Structure
 
-- `src/core/` - Core probabilistic programming abstractions
-- `src/inference/` - Inference algorithms (MCMC, SMC, VI, ABC)
-- `src/runtime/` - Execution engine and memory optimization
-- `src/macros/` - Ergonomic macros for model construction
-- `src/error/` - Comprehensive error handling
-- `examples/` - 14 complete examples and tutorials
-- `docs/` - User guide and API documentation
-- `benches/` - Performance benchmarks for MCMC and memory optimization
-- `tests/` - Integration and end-to-end tests
+```text
+fugue/
+├── src/
+│   ├── core/                   # Core probabilistic programming abstractions
+│   │   ├── address.rs          # Hierarchical addressing system
+│   │   ├── distribution.rs     # Type-safe distributions (10 built-in)
+│   │   ├── model.rs            # Monadic Model<T> abstraction
+│   │   └── numerical.rs        # Numerically stable algorithms
+│   ├── inference/              # Inference algorithms
+│   │   ├── mh.rs               # MCMC (Adaptive Metropolis-Hastings)
+│   │   ├── smc.rs              # Sequential Monte Carlo
+│   │   ├── vi.rs               # Variational Inference
+│   │   ├── abc.rs              # Approximate Bayesian Computation
+│   │   └── diagnostics.rs      # R-hat, ESS, validation
+│   ├── runtime/                # Execution engine
+│   │   ├── handler.rs          # Effect handler system
+│   │   ├── interpreters.rs     # Built-in handlers
+│   │   ├── trace.rs            # Execution history recording
+│   │   └── memory.rs           # Memory optimization (pooling, COW)
+│   ├── macros/                 # Ergonomic macros
+│   │   └── mod.rs              # prob!, plate!, addr! macros
+│   └── error.rs                # Comprehensive error handling
+├── examples/                   # 14 complete examples
+│   ├── bayesian_coin_flip.rs
+│   ├── linear_regression.rs
+│   ├── mixture_models.rs
+│   ├── hierarchical_models.rs
+│   └── ...
+├── benches/                    # Performance benchmarks
+│   ├── mcmc_benchmarks.rs      # MCMC adaptation & diagnostics
+│   └── memory_benchmarks.rs    # Memory pooling & COW traces
+├── tests/                      # Integration tests
+├── docs/                       # User guide & documentation
+│   ├── src/                    # mdBook source
+│   └── api/                    # API documentation
+└── target/                     # Build artifacts
+```
 
 ## Questions?
 
