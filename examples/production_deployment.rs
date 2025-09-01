@@ -3,7 +3,6 @@ use fugue::runtime::interpreters::PriorHandler;
 use fugue::runtime::memory::{PooledPriorHandler, TraceBuilder, TracePool};
 use fugue::runtime::trace::{ChoiceValue, Trace};
 use fugue::*;
-// use fugue::error::{FugueError, ErrorCode};
 use rand::thread_rng;
 use std::collections::HashMap;
 use std::sync::Arc;
