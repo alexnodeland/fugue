@@ -249,8 +249,7 @@ fn propose_using_strategies<R: RngCore>(rng: &mut R, choice: &Choice, scale: f64
             let strategy: Box<dyn ProposalStrategy<f64>> =
                 if current_val > 0.0 && looks_like_scale_param {
                     Box::new(LogSpaceWalkProposal)
-                } else if current_val >= 0.0
-                    && current_val <= 1.0
+                } else if (0.0..=1.0).contains(&current_val)
                     && (addr_str.contains("prob")
                         || addr_str.contains("p")
                         || addr_str.contains("beta"))
