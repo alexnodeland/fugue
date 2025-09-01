@@ -116,6 +116,8 @@ jobs:
           # Install plugins with version constraints
           cargo install mdbook-admonish --vers "^1.18" --locked --force
           cargo install mdbook-mermaid --vers "^0.14" --locked --force
+          cargo install mdbook-toc --vers "^0.14" --locked --force
+          cargo install mdbook-katex --vers "^0.9" --locked --force
 
       - name: Build documentation
         run: |

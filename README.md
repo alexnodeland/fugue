@@ -65,13 +65,13 @@ let mu_values: Vec<f64> = samples.iter()
 
 ## 📚 Documentation
 
-- **[User Guide](https://alexandernodeland.github.io/fugue/)** - Comprehensive tutorials and examples
-- **[API Reference](https://docs.rs/fugue)** - Complete API documentation
+- **[User Guide](https://alexnodeland.github.io/fugue/)** - Comprehensive tutorials and examples
+- **[API Reference](https://docs.rs/fugue-ppl/latest/fugue/)** - Complete API documentation
 - **Examples** - See `examples/` directory
 
 ## 🤝 Community
 
-- **Issues & Bugs**: Use [GitHub Issues](https://github.com/alexandernodeland/fugue/issues)
+- **Issues & Bugs**: Use [GitHub Issues](https://github.com/alexnodeland/fugue/issues)
 - **Feature Requests**: Open an issue with the `enhancement` label
 
 ## 🗺️ Roadmap
@@ -90,7 +90,7 @@ Planned focus areas:
 Contributions welcome! See our [contributing guidelines](.github/CONTRIBUTING.md).
 
 ```bash
-git clone https://github.com/alexandernodeland/fugue.git
+git clone https://github.com/alexnodeland/fugue.git
 cd fugue && cargo test
 ```
 
@@ -106,7 +106,7 @@ If you use Fugue in your research, please cite:
 @software{fugue2024,
   title = {Fugue: Production-Ready Monadic Probabilistic Programming for Rust},
   author = {Alexander Nodeland},
-  url = {https://github.com/alexandernodeland/fugue},
+  url = {https://github.com/alexnodeland/fugue},
   version = {0.3.0},
   year = {2024}
 }

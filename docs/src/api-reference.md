@@ -2,7 +2,7 @@
 
 The complete API documentation for Fugue is hosted on docs.rs:
 
-**[→ View API Documentation on docs.rs](https://docs.rs/fugue-ppl/latest/fugue_ppl/)**
+**[→ View API Documentation on docs.rs](https://docs.rs/fugue-ppl/latest/fugue/)**
 
 This includes:
 
