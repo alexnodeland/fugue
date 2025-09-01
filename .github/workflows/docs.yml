@@ -47,6 +47,8 @@ jobs:
           cargo install mdbook-linkcheck --vers "^0.7" --locked
           cargo install mdbook-admonish --vers "^1.18" --locked
           cargo install mdbook-mermaid --vers "^0.14" --locked
+          cargo install mdbook-toc --vers "^0.14" --locked
+          cargo install mdbook-katex --vers "^0.9" --locked
 
       - name: Test Rust code blocks
         run: |
