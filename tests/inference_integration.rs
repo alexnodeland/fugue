@@ -81,7 +81,7 @@
 //! ## Example Test Pattern
 //!
 //! ```rust
-//! #[test]
+//! // #[test] - Example test structure (not executed in doctest)
 //! fn test_mcmc_beta_binomial_recovery() {
 //!     let mut rng = StdRng::seed_from_u64(42);
 //!     
@@ -278,8 +278,8 @@ fn test_diagnostics_basic() {
     // Generate two MCMC chains
     let model_fn = || sample(addr!("theta"), Normal::new(0.0, 1.0).unwrap());
 
-    let chain1 = adaptive_mcmc_chain(&mut rng, &model_fn, 100, 20);
-    let chain2 = adaptive_mcmc_chain(&mut rng, &model_fn, 100, 20);
+    let chain1 = adaptive_mcmc_chain(&mut rng, model_fn, 100, 20);
+    let chain2 = adaptive_mcmc_chain(&mut rng, model_fn, 100, 20);
 
     // Extract theta values from both chains
     let theta1: Vec<f64> = chain1.iter().map(|(theta, _)| *theta).collect();
@@ -397,7 +397,7 @@ fn test_mcmc_beta_binomial_conjugacy() {
     let model_fn = || {
         sample(addr!("theta"), Beta::new(2.0, 3.0).unwrap()).bind(|theta| {
             // Ensure theta is in valid range [0, 1] for Binomial
-            let valid_theta = theta.max(0.001).min(0.999);
+            let valid_theta = theta.clamp(0.001, 0.999);
             observe(addr!("k"), Binomial::new(10, valid_theta).unwrap(), 7)
                 .bind(move |_| pure(theta)) // Return original theta for inference
         })
@@ -418,7 +418,7 @@ fn test_mcmc_beta_binomial_conjugacy() {
 
     // Check chain properties
     assert_eq!(theta_values.len(), 300);
-    assert!(theta_values.iter().all(|&x| x >= 0.0 && x <= 1.0)); // Valid probability
+    assert!(theta_values.iter().all(|&x| (0.0..=1.0).contains(&x))); // Valid probability
     assert!(theta_values.iter().all(|x| x.is_finite()));
 
     // Basic mixing check - variance should be reasonable
@@ -453,7 +453,7 @@ fn test_smc_resampling_methods() {
             rejuvenation_steps: 0,
         };
 
-        let particles = adaptive_smc(&mut rng, 30, &model_fn, config);
+        let particles = adaptive_smc(&mut rng, 30, model_fn, config);
 
         // Should have the expected number of particles
         assert_eq!(particles.len(), 30);
@@ -557,7 +557,7 @@ fn test_diagnostics_multi_chain() {
     // Generate 3 chains
     let chains: Vec<Vec<runtime::trace::Trace>> = (0..3)
         .map(|_| {
-            adaptive_mcmc_chain(&mut rng, &model_fn, 100, 20)
+            adaptive_mcmc_chain(&mut rng, model_fn, 100, 20)
                 .into_iter()
                 .map(|(_, trace)| trace)
                 .collect()
@@ -684,7 +684,7 @@ fn test_workflow_complete_bayesian_analysis() {
     // Step 2: Run MCMC (multiple chains)
     let chains: Vec<Vec<runtime::trace::Trace>> = (0..3)
         .map(|_| {
-            adaptive_mcmc_chain(&mut rng, &model_fn, 200, 50)
+            adaptive_mcmc_chain(&mut rng, model_fn, 200, 50)
                 .into_iter()
                 .map(|(_, trace)| trace)
                 .collect()

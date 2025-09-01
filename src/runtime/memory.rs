@@ -598,8 +598,10 @@ mod memory_tests {
         pool.return_trace(extra_trace); // pool now has 2 items (full)
 
         // Now this should be dropped
-        let mut dummy_trace = Trace::default();
-        dummy_trace.log_prior = 1.0; // Make it non-empty
+        let dummy_trace = Trace {
+            log_prior: 1.0, // Make it non-empty
+            ..Trace::default()
+        };
         pool.return_trace(dummy_trace); // should be dropped because pool is full
         assert_eq!(pool.stats().drops, 1);
     }

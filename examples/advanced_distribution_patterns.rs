@@ -37,7 +37,7 @@ fn main() {
     let selected_component: usize = component_selector.sample(&mut rng);
 
     // Different components
-    let components = vec![
+    let components = [
         Normal::new(-2.0, 0.5).unwrap(),
         Normal::new(0.0, 1.0).unwrap(),
         Normal::new(3.0, 0.8).unwrap(),

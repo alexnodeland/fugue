@@ -22,7 +22,7 @@ fn generate_classification_data(n: usize, seed: u64) -> (Vec<Vec<f64>>, Vec<bool
 
         // Compute true log-odds and probability
         let log_odds = true_intercept + true_coef1 * x1 + true_coef2 * x2;
-        let prob = 1.0 / (1.0 + (-log_odds as f64).exp());
+        let prob = 1.0 / (1.0 + { -log_odds }.exp());
 
         // Sample binary outcome
         let y = rng.gen::<f64>() < prob;
@@ -86,7 +86,7 @@ fn generate_hierarchical_data(
             let x: f64 = StandardNormal.sample(&mut rng);
 
             let log_odds: f64 = group_intercept + slope * x;
-            let prob = 1.0 / (1.0 + (-log_odds as f64).exp());
+            let prob = 1.0 / (1.0 + { -log_odds }.exp());
             let y = rng.gen::<f64>() < prob;
 
             features.push(vec![1.0, x]); // Intercept + one feature
@@ -121,10 +121,10 @@ fn logistic_regression_model(features: Vec<Vec<f64>>, labels: Vec<bool>) -> Mode
             }
 
             // Convert to probability using logistic function
-            let prob = 1.0 / (1.0 + (-linear_pred as f64).exp());
+            let prob = 1.0 / (1.0 + { -linear_pred }.exp());
 
             // Ensure probability is in valid range
-            let bounded_prob = prob.max(1e-10).min(1.0 - 1e-10);
+            let bounded_prob = prob.clamp(1e-10, 1.0 - 1e-10);
 
             // Observe the binary outcome
             observe(addr!("y", idx), Bernoulli::new(bounded_prob).unwrap(), y)
@@ -211,7 +211,7 @@ fn binary_classification_demo() {
 
         // Make predictions on new data
         println!("\n🔮 Prediction Example:");
-        let test_features = vec![1.0, 0.5, -0.8]; // New observation
+        let test_features = [1.0, 0.5, -0.8]; // New observation
         let mut predicted_probs = Vec::new();
 
         for coeffs in valid_samples.iter().take(50) {
@@ -264,7 +264,7 @@ fn multiclass_classification_demo() {
     println!("   - Features: {} dimensions", features[0].len());
 
     // Count class distribution
-    let mut class_counts = vec![0; 3];
+    let mut class_counts = [0; 3];
     for &label in &labels {
         class_counts[label] += 1;
     }
@@ -351,8 +351,8 @@ fn hierarchical_classification_model(
             .enumerate() => {
             let (obs_idx, ((x_val, &y), &group_id)) = data;
             let linear_pred = group_intercepts_for_obs[group_id] + slope * x_val;
-            let prob = 1.0 / (1.0 + (-linear_pred as f64).exp());
-            let bounded_prob = prob.max(1e-10).min(1.0 - 1e-10);
+            let prob = 1.0 / (1.0 + { -linear_pred }.exp());
+            let bounded_prob = prob.clamp(1e-10, 1.0 - 1e-10);
 
             observe(addr!("obs", obs_idx), Bernoulli::new(bounded_prob).unwrap(), y)
         });

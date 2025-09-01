@@ -353,11 +353,11 @@ fn test_macro_integration() {
 
     // Check that all plate addresses are created correctly
     assert_eq!(plate_results.len(), 3);
-    for i in 0..3 {
+    for (i, &expected_val) in plate_results.iter().enumerate().take(3) {
         let addr = scoped_addr!("plate", "item", "{}", i);
         let val = trace2.get_f64(&addr);
         assert!(val.is_some());
-        assert_eq!(plate_results[i], val.unwrap());
+        assert_eq!(expected_val, val.unwrap());
     }
 }
 
@@ -475,9 +475,9 @@ fn test_distribution_coverage() {
     let binomial_val = trace2.get_u64(&addr!("binomial")).unwrap();
     let categorical_result = trace2.get_usize(&addr!("categorical")).unwrap();
 
-    assert!(bernoulli_val == true || bernoulli_val == false);
-    assert!(poisson_val >= 0);
-    assert!(binomial_val >= 0 && binomial_val <= 10);
+    let _ = bernoulli_val; // Just checking it's a valid bool
+    let _ = poisson_val; // poisson_val is u64, comparison with 0 is always true
+    assert!((0..=10).contains(&binomial_val));
     assert!(categorical_result < 3); // Should be 0, 1, or 2
     assert_eq!(categorical_val, categorical_result);
 
@@ -503,7 +503,7 @@ fn test_distribution_coverage() {
 
     // Check integration between continuous and discrete
     assert!(mu_mixed.is_finite());
-    assert!(success_mixed == true || success_mixed == false);
+    let _ = success_mixed; // Just checking it's a valid bool
     assert!(trace3.log_likelihood.is_finite());
     assert_eq!(mu_mixed, trace3.get_f64(&addr!("mu")).unwrap());
     assert_eq!(success_mixed, trace3.get_bool(&addr!("success")).unwrap());

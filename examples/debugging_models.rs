@@ -277,7 +277,7 @@ fn main() {
             });
 
             // Individual observations (simplified to avoid move issues)
-            let observations = vec![1.2, 1.5, 0.8];
+            let observations = [1.2, 1.5, 0.8];
             let likelihoods <- plate!(i in 0..observations.len() => {
                 // Use fixed parameters for demonstration
                 observe(addr!("obs", i), Normal::new(0.0, 1.0).unwrap(), observations[i])

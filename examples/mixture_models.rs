@@ -90,7 +90,7 @@ fn gaussian_mixture_model(data: Vec<f64>) -> Model<(f64, f64, f64, f64, f64)> {
         // Observations
         let _observations <- plate!(i in 0..data.len() => {
             // Ensure valid probabilities
-            let p1 = pi1.max(0.001).min(0.999); // Clamp to valid range
+            let p1 = pi1.clamp(0.001, 0.999); // Clamp to valid range
             let weights = vec![p1, 1.0 - p1];
             let x = data[i];
 
@@ -208,6 +208,7 @@ fn gaussian_mixture_demo() {
 
 // ANCHOR: multivariate_mixture_model
 // Simple 2-component multivariate Gaussian mixture (2D)
+#[allow(clippy::type_complexity)] // Complex tuple needed for demonstration
 fn multivariate_mixture_model(
     data: Vec<Vec<f64>>,
 ) -> Model<(f64, f64, f64, f64, f64, f64, f64, f64)> {
@@ -229,7 +230,7 @@ fn multivariate_mixture_model(
 
         // Observations (diagonal covariance assumption)
         let _observations <- plate!(i in 0..data.len() => {
-            let p1 = pi1.max(0.001).min(0.999);
+            let p1 = pi1.clamp(0.001, 0.999);
             let weights = vec![p1, 1.0 - p1];
             let x0 = data[i][0];
             let x1 = data[i][1];
@@ -489,6 +490,7 @@ fn mixture_of_experts_demo() {
 
 // ANCHOR: dirichlet_process_mixture
 // Simplified Dirichlet Process with truncated stick-breaking
+#[allow(clippy::type_complexity)] // Complex tuple needed for demonstration
 fn dirichlet_process_mixture_model(
     data: Vec<f64>,
 ) -> Model<(f64, f64, f64, f64, f64, f64, f64, usize)> {
@@ -498,8 +500,8 @@ fn dirichlet_process_mixture_model(
         let v2 <- sample(addr!("v2"), fugue::Beta::new(1.0, 1.0).unwrap());
 
         // Convert to weights (clamp to avoid negative probabilities during MCMC)
-        let v1_safe = v1.max(0.001).min(0.999);
-        let v2_safe = v2.max(0.001).min(0.999);
+        let v1_safe = v1.clamp(0.001, 0.999);
+        let v2_safe = v2.clamp(0.001, 0.999);
 
         let w1 = v1_safe;
         let w2 = (1.0 - v1_safe) * v2_safe;
@@ -526,7 +528,7 @@ fn dirichlet_process_mixture_model(
 
             // Extra safety: clamp all weights to valid range
             let weights: Vec<f64> = raw_weights.iter()
-                .map(|&w| w.max(0.001).min(0.999))
+                .map(|&w| w.clamp(0.001, 0.999))
                 .collect();
 
             // Renormalize after clamping
@@ -589,7 +591,7 @@ fn dirichlet_process_mixture_demo() {
 
         let mean_active = active_counts.iter().sum::<usize>() as f64 / active_counts.len() as f64;
         let mode_active = {
-            let mut counts = vec![0; 4];
+            let mut counts = [0; 4];
             for &ac in &active_counts {
                 if ac < counts.len() {
                     counts[ac] += 1;

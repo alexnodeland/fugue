@@ -249,8 +249,7 @@ fn propose_using_strategies<R: RngCore>(rng: &mut R, choice: &Choice, scale: f64
             let strategy: Box<dyn ProposalStrategy<f64>> =
                 if current_val > 0.0 && looks_like_scale_param {
                     Box::new(LogSpaceWalkProposal)
-                } else if current_val >= 0.0
-                    && current_val <= 1.0
+                } else if (0.0..=1.0).contains(&current_val)
                     && (addr_str.contains("prob")
                         || addr_str.contains("p")
                         || addr_str.contains("beta"))
@@ -586,7 +585,7 @@ mod tests {
             for _ in 0..20 {
                 let proposed = strat.propose(current, 0.3, &mut rng);
                 assert!(
-                    proposed >= 0.0 && proposed <= 1.0,
+                    (0.0..=1.0).contains(&proposed),
                     "ReflectionWalk violated bounds: {} -> {}",
                     current,
                     proposed
@@ -641,10 +640,11 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(12);
         let d = DiscreteWalkProposal;
         let u = d.propose(5u64, 1.0, &mut rng);
-        assert!(u >= 0);
+        // Note: u is u64, so this comparison is always true, but kept for documentation
+        let _ = u; // Just verify it's a valid u64
         let f = FlipProposal;
         let b = f.propose(true, 1.0, &mut rng);
-        assert!(b == true || b == false);
+        let _ = b; // Just checking that we got a valid bool
     }
 
     #[test]

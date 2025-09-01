@@ -86,7 +86,7 @@ mod tests {
         // Equivalent to: let x <- sample(...); observe(...); pure(x)
         let model = prob!({
             sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
-            let x = pure(());
+            let _x = pure(());
             observe(addr!("y"), Normal::new(0.0, 1.0).unwrap(), 0.1);
             pure(1)
         });

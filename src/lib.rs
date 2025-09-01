@@ -4,6 +4,8 @@
 // This file may not be copied, modified, or distributed except according to those terms.
 
 #![doc = include_str!("../README.md")]
+// Allow large error types for rich error context
+#![allow(clippy::result_large_err)]
 
 pub mod core;
 pub mod error;

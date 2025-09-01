@@ -15,7 +15,7 @@ struct RobustProductionHandler<H: Handler> {
     inner: H,
     error_count: u32,
     max_errors: u32,
-    fallback_values: HashMap<String, ChoiceValue>,
+    _fallback_values: HashMap<String, ChoiceValue>,
     circuit_breaker_open: bool,
 }
 
@@ -31,7 +31,7 @@ impl<H: Handler> RobustProductionHandler<H> {
             inner,
             error_count: 0,
             max_errors,
-            fallback_values,
+            _fallback_values: fallback_values,
             circuit_breaker_open: false,
         }
     }
@@ -130,42 +130,46 @@ impl<H: Handler> Handler for RobustProductionHandler<H> {
     }
 
     fn on_observe_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>, value: f64) {
-        if !self.circuit_breaker_open {
-            if let Err(_) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if !self.circuit_breaker_open
+            && std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 self.inner.on_observe_f64(addr, dist, value)
-            })) {
-                self.handle_error("observe_f64_panic", addr);
-            }
+            }))
+            .is_err()
+        {
+            self.handle_error("observe_f64_panic", addr);
         }
     }
 
     fn on_observe_bool(&mut self, addr: &Address, dist: &dyn Distribution<bool>, value: bool) {
-        if !self.circuit_breaker_open {
-            if let Err(_) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if !self.circuit_breaker_open
+            && std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 self.inner.on_observe_bool(addr, dist, value)
-            })) {
-                self.handle_error("observe_bool_panic", addr);
-            }
+            }))
+            .is_err()
+        {
+            self.handle_error("observe_bool_panic", addr);
         }
     }
 
     fn on_observe_u64(&mut self, addr: &Address, dist: &dyn Distribution<u64>, value: u64) {
-        if !self.circuit_breaker_open {
-            if let Err(_) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if !self.circuit_breaker_open
+            && std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 self.inner.on_observe_u64(addr, dist, value)
-            })) {
-                self.handle_error("observe_u64_panic", addr);
-            }
+            }))
+            .is_err()
+        {
+            self.handle_error("observe_u64_panic", addr);
         }
     }
 
     fn on_observe_usize(&mut self, addr: &Address, dist: &dyn Distribution<usize>, value: usize) {
-        if !self.circuit_breaker_open {
-            if let Err(_) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if !self.circuit_breaker_open
+            && std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 self.inner.on_observe_usize(addr, dist, value)
-            })) {
-                self.handle_error("observe_usize_panic", addr);
-            }
+            }))
+            .is_err()
+        {
+            self.handle_error("observe_usize_panic", addr);
         }
     }
 
@@ -223,7 +227,7 @@ struct ModelConfig {
 
     // Environment settings
     environment: String, // "development", "staging", "production"
-    log_level: String,
+    _log_level: String,
     enable_metrics: bool,
 }
 
@@ -239,7 +243,7 @@ impl Default for ModelConfig {
             enable_circuit_breaker: true,
             error_threshold: 10,
             environment: "production".to_string(),
-            log_level: "info".to_string(),
+            _log_level: "info".to_string(),
             enable_metrics: true,
         }
     }
@@ -357,7 +361,7 @@ impl ProductionMetrics {
         }
     }
 
-    fn increment_error_count(&mut self) {
+    fn _increment_error_count(&mut self) {
         if self.enabled {
             self.error_count += 1;
         }
@@ -446,7 +450,7 @@ impl ProductionMetrics {
 struct MetricsHandler<H: Handler> {
     inner: H,
     metrics: Arc<std::sync::Mutex<ProductionMetrics>>,
-    model_name: String,
+    _model_name: String,
 }
 
 impl<H: Handler> MetricsHandler<H> {
@@ -458,7 +462,7 @@ impl<H: Handler> MetricsHandler<H> {
         Self {
             inner,
             metrics,
-            model_name,
+            _model_name: model_name,
         }
     }
 }
@@ -694,7 +698,7 @@ impl InputValidator {
         }
     }
 
-    fn validate_sensor_reading(reading: f64) -> Result<f64, String> {
+    fn _validate_sensor_reading(reading: f64) -> Result<f64, String> {
         match reading {
             r if !r.is_finite() => Err("Sensor reading must be finite".to_string()),
             r if r.abs() > 1000.0 => Err("Sensor reading out of reasonable range".to_string()),
@@ -764,14 +768,14 @@ enum DeploymentStrategy {
     BlueGreen,
     CanaryRelease { percentage: f64 },
     RollingUpdate,
-    ImmediateSwitch,
+    _ImmediateSwitch,
 }
 
 struct ModelDeploymentManager {
     current_model_version: String,
     candidate_model_version: String,
     deployment_strategy: DeploymentStrategy,
-    rollback_threshold_error_rate: f64,
+    _rollback_threshold_error_rate: f64,
 }
 
 impl ModelDeploymentManager {
@@ -780,7 +784,7 @@ impl ModelDeploymentManager {
             current_model_version: "v1.0.0".to_string(),
             candidate_model_version: "v1.1.0".to_string(),
             deployment_strategy: strategy,
-            rollback_threshold_error_rate: 0.05, // 5% error rate triggers rollback
+            _rollback_threshold_error_rate: 0.05, // 5% error rate triggers rollback
         }
     }
 
@@ -799,7 +803,7 @@ impl ModelDeploymentManager {
                 // Gradual rollout based on some criteria
                 request_id % 10 < 3 // 30% rollout
             }
-            DeploymentStrategy::ImmediateSwitch => true,
+            DeploymentStrategy::_ImmediateSwitch => true,
         }
     }
 

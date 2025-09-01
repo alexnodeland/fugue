@@ -8,7 +8,7 @@ fn varying_intercepts_model(
     x_data: Vec<f64>,
     y_data: Vec<f64>,
     group_ids: Vec<usize>,
-    n_groups: usize,
+    _n_groups: usize,
 ) -> Model<(f64, f64, f64, f64, f64)> {
     prob! {
         // Population-level parameters
@@ -119,7 +119,7 @@ fn varying_intercepts_demo() {
 
 // ANCHOR: varying_slopes_model
 // Hierarchical model with shared intercept but group-specific slopes
-fn varying_slopes_model(
+fn _varying_slopes_model(
     x_data: Vec<f64>,
     y_data: Vec<f64>,
     group_ids: Vec<usize>,
@@ -151,7 +151,7 @@ fn varying_slopes_model(
 
 // ANCHOR: mixed_effects_model
 // Full hierarchical model: both intercepts and slopes vary by group
-fn mixed_effects_model(
+fn _mixed_effects_model(
     x_data: Vec<f64>,
     y_data: Vec<f64>,
     group_ids: Vec<usize>,
@@ -189,7 +189,7 @@ fn mixed_effects_model(
 
 // ANCHOR: correlated_effects_model
 // Mixed effects with correlated intercepts and slopes (simplified)
-fn correlated_effects_model(
+fn _correlated_effects_model(
     x_data: Vec<f64>,
     y_data: Vec<f64>,
     group_ids: Vec<usize>,
@@ -230,7 +230,7 @@ fn correlated_effects_model(
 
 // ANCHOR: hierarchical_priors_model
 // Hierarchical model with hierarchical priors on variance parameters
-fn hierarchical_priors_model(
+fn _hierarchical_priors_model(
     x_data: Vec<f64>,
     y_data: Vec<f64>,
     group_ids: Vec<usize>,
@@ -403,7 +403,7 @@ fn computational_diagnostics() {
 
 // ANCHOR: time_varying_hierarchical
 // Simplified time-varying hierarchical model
-fn time_varying_hierarchical(
+fn _time_varying_hierarchical(
     x_data: Vec<f64>,
     y_data: Vec<f64>,
     _time_data: Vec<f64>,
@@ -437,7 +437,7 @@ fn time_varying_hierarchical(
 
 // ANCHOR: nested_hierarchical
 // Simplified nested hierarchical structure
-fn nested_hierarchical(
+fn _nested_hierarchical(
     x_data: Vec<f64>,
     y_data: Vec<f64>,
     class_ids: Vec<usize>,
@@ -531,7 +531,7 @@ fn hierarchical_prediction() {
 
 // Data generation utilities
 fn generate_hierarchical_data(
-    n_groups: usize,
+    _n_groups: usize,
     n_per_group: usize,
     group_effects: &[f64],
     beta: f64,
@@ -543,7 +543,7 @@ fn generate_hierarchical_data(
     let mut y_data = Vec::new();
     let mut group_ids = Vec::new();
 
-    for group in 0..n_groups {
+    for (group, _) in group_effects.iter().enumerate().take(_n_groups) {
         let alpha_j = group_effects[group];
 
         for _i in 0..n_per_group {
