@@ -362,8 +362,6 @@ fn custom_handler_demo() {
     println!();
 
     println!("📝 Execution Log:");
-    // Note: debug_info was moved into the handler, so we can't access it here
-    // In a real implementation, you'd return it with the trace
     println!("   - {} operations recorded", final_trace.choices.len());
 
     println!();
