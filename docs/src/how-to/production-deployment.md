@@ -334,9 +334,9 @@ use serde_json::json;
 
 // Structured logging for production debugging
 fn log_inference_event(
-    request_id: &str, 
-    model_version: &str, 
-    duration: Duration, 
+    request_id: &str,
+    model_version: &str,
+    duration: Duration,
     result: &InferenceResult
 ) {
     let log_entry = json!({
@@ -364,15 +364,15 @@ struct AlertRules {
 impl AlertRules {
     fn check_alerts(&self, metrics: &ProductionMetrics) -> Vec<Alert> {
         let mut alerts = Vec::new();
-        
+
         if metrics.error_rate() > self.max_error_rate {
             alerts.push(Alert::HighErrorRate(metrics.error_rate()));
         }
-        
+
         if metrics.avg_latency().as_millis() > self.max_latency_ms as u128 {
             alerts.push(Alert::HighLatency(metrics.avg_latency()));
         }
-        
+
         alerts
     }
 }
@@ -393,13 +393,13 @@ struct ShadowTester {
 impl ShadowTester {
     fn run_with_shadow(&mut self, input: &Input) -> (PrimaryResult, Option<ShadowResult>) {
         let primary = self.run_primary(input);
-        
+
         let shadow = if rand::random::<f64>() < self.comparison_rate {
             Some(self.run_shadow(input))
         } else {
             None
         };
-        
+
         (primary, shadow)
     }
 }
@@ -411,12 +411,12 @@ impl ShadowTester {
 // Continuous validation in production
 fn validate_model_assumptions(trace: &Trace) -> ValidationResult {
     let mut issues = Vec::new();
-    
+
     // Check log-weight stability
     if !trace.total_log_weight().is_finite() {
         issues.push("Non-finite log-weight detected".to_string());
     }
-    
+
     // Check parameter ranges
     for (addr, choice) in &trace.choices {
         if let ChoiceValue::F64(value) = choice.value {
@@ -425,7 +425,7 @@ fn validate_model_assumptions(trace: &Trace) -> ValidationResult {
             }
         }
     }
-    
+
     ValidationResult { issues }
 }
 ```
@@ -564,7 +564,7 @@ fn log_inference_request(
         model_version: response.model_version.clone(),
         success: response.success,
     };
-    
+
     audit_logger::log(audit_log);
 }
 ```
