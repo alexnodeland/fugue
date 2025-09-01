@@ -1,4 +1,4 @@
-# Fugue
+# 🎼 Fugue
 
 [![Crates.io](https://img.shields.io/crates/v/fugue-ppl.svg)](https://crates.io/crates/fugue-ppl)
 [![Documentation](https://docs.rs/fugue-ppl/badge.svg)](https://docs.rs/fugue-ppl)
@@ -11,7 +11,7 @@ A **production-ready**, **monadic probabilistic programming library** for Rust. 
 
 > Supported Rust: 1.70+ • Platforms: Linux / macOS / Windows • Crate: [`fugue-ppl` on crates.io](https://crates.io/crates/fugue-ppl)
 
-## Features
+## ✨ Features
 
 - **Monadic PPL**: Compose probabilistic programs using pure functional abstractions
 - **Type-Safe Distributions**: 10+ built-in probability distributions with natural return types  
@@ -20,7 +20,7 @@ A **production-ready**, **monadic probabilistic programming library** for Rust. 
 - **Production Ready**: Numerically stable algorithms with memory optimization
 - **Ergonomic Macros**: Do-notation (`prob!`), vectorization (`plate!`), addressing (`addr!`)
 
-## Why Fugue?
+## 🤔 Why Fugue?
 
 - 🔒 **Type-safe distributions**: natural return types (Bernoulli → `bool`, Poisson/Binomial → `u64`, Categorical → `usize`)
 - 🧩 **Direct-style, monadic design**: compose `Model<T>` values with `bind/map` for explicit, readable control flow
@@ -28,7 +28,7 @@ A **production-ready**, **monadic probabilistic programming library** for Rust. 
 - 📊 **Production diagnostics**: R-hat, ESS, validation utilities, and robust error handling
 - ⚡ **Performance-minded**: memory pooling, copy-on-write traces, and numerically stable computations
 
-## Installation
+## 📦 Installation
 
 ```toml
 [dependencies]
@@ -41,7 +41,7 @@ fugue-ppl = "0.1.0"
 cargo add fugue-ppl
 ```
 
-## Example
+## 💡 Example
 
 ```rust
 use fugue::*;
@@ -63,18 +63,18 @@ let mu_values: Vec<f64> = samples.iter()
     .collect();
 ```
 
-## Documentation
+## 📚 Documentation
 
 - **[User Guide](https://alexandernodeland.github.io/fugue/)** - Comprehensive tutorials and examples
 - **[API Reference](https://docs.rs/fugue)** - Complete API documentation
 - **Examples** - See `examples/` directory
 
-## Community
+## 🤝 Community
 
 - **Issues & Bugs**: Use [GitHub Issues](https://github.com/alexandernodeland/fugue/issues)
 - **Feature Requests**: Open an issue with the `enhancement` label
 
-## Roadmap
+## 🗺️ Roadmap
 
 This project is an ongoing exploration of probabilistic programming in Rust. While many pieces are production-leaning, parts may not be 100% complete or correct yet. I’m steadily working toward a more robust implementation and broader feature set.
 
@@ -85,7 +85,7 @@ Planned focus areas:
 - API refinements and stability guarantees
 - Improved documentation, diagnostics, and examples
 
-## Contributing
+## 🤝 Contributing
 
 Contributions welcome! See our [contributing guidelines](.github/CONTRIBUTING.md).
 
@@ -94,10 +94,20 @@ git clone https://github.com/alexandernodeland/fugue.git
 cd fugue && cargo test
 ```
 
-## License
+## 📄 License
 
 Licensed under the [MIT License](LICENSE).
 
----
+## 🔗 Citation
 
-Built with Rust • Monadic PPL • Type-safe distributions
+If you use Fugue in your research, please cite:
+
+```bibtex
+@software{fugue2024,
+  title = {Fugue: Production-Ready Monadic Probabilistic Programming for Rust},
+  author = {Alexander Nodeland},
+  url = {https://github.com/alexandernodeland/fugue},
+  version = {0.3.0},
+  year = {2024}
+}
+```
