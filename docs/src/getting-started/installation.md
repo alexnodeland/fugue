@@ -213,8 +213,8 @@ ls examples/
 
 If you encounter issues:
 
-1. Check the [GitHub Issues](https://github.com/alexandernodeland/fugue-ppl/issues)
-2. Review the [examples](https://github.com/alexandernodeland/fugue-ppl/tree/main/examples) for working code
+1. Check the [GitHub Issues](https://github.com/alexnodeland/fugue-ppl/issues)
+2. Review the [examples](https://github.com/alexnodeland/fugue-ppl/tree/main/examples) for working code
 3. Read the [API documentation](https://docs.rs/fugue-ppl)
 
 ## Next Steps

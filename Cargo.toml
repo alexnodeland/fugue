@@ -8,7 +8,7 @@ readme = "README.md"
 keywords = ["probability-monad", "ppl", "monad", "effects", "traces"]
 categories = ["science", "mathematics"]
 documentation = "https://docs.rs/fugue-ppl"
-repository = "https://github.com/alexandernodeland/fugue-ppl"
+repository = "https://github.com/alexnodeland/fugue"
 
 
 [lib]

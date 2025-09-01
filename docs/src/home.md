@@ -27,4 +27,4 @@ Fugue provides:
 fugue-ppl = "0.1.0"
 ```
 
-For more details, see the [full README on GitHub](https://github.com/alexandernodeland/fugue).
+For more details, see the [full README on GitHub](https://github.com/alexnodeland/fugue).
