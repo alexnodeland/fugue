@@ -496,7 +496,7 @@ let replay_trace = ReplayHandler::new(previous_trace)
 
 - [Building Complex Models](../../how-to/building-complex-models.md) - Advanced modeling techniques
 - [Optimizing Performance](../../how-to/optimizing-performance.md) - Scalable inference
-- [API Documentation](https://docs.rs/fugue/latest/fugue/) - Complete API reference
+- [API Documentation](https://docs.rs/fugue-ppl/latest/fugue/) - Complete API reference
 - [Foundation Tutorials](../foundation/README.md) - Basic probabilistic programming concepts
 
 ### Statistical References

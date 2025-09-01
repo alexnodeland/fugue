@@ -41,7 +41,7 @@ cargo new my_bayesian_project
 cd my_bayesian_project
 
 # Add Fugue
-cargo add fugue rand
+cargo add fugue-ppl rand
 
 # Copy our "Hello, Probabilistic World!" example into src/main.rs
 # (See Installation section)

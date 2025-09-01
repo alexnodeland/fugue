@@ -1,14 +1,17 @@
 [package]
-name = "fugue"
+name = "fugue-ppl"
 version = "0.1.0"
 edition = "2021"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 description = "Production-ready monadic PPL with numerically stable inference, comprehensive diagnostics, and memory optimization."
 readme = "README.md"
 keywords = ["probabilistic-programming", "ppl", "monad", "effects", "traces"]
 categories = ["science", "mathematics"]
-documentation = "https://docs.rs/.../fugue"
-repository = "https://github.com/alexandernodeland/fugue"
+documentation = "https://docs.rs/fugue-ppl"
+repository = "https://github.com/alexandernodeland/fugue-ppl"
+
+[lib]
+name = "fugue"
 
 [package.metadata.docs.rs]
 # Enable all features for documentation
@@ -38,8 +41,6 @@ mdbook-katex = "0.9.4"
 mdbook-admonish = "1.20.0"
 mdbook-linkcheck = "0.7.7"
 mdbook-toc = "0.14.2"
-cargo-watch = "8.5.3"
-cargo-edit = "0.13.7"
 
 [[bench]]
 name = "memory_benchmarks"
