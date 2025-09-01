@@ -41,13 +41,14 @@ jobs:
             --no-default-features \
             --features search \
             --vers "^0.4" \
-            --locked
+            --locked \
+            --force
           
           # Install plugins
-          cargo install mdbook-admonish --vers "^1.18" --locked
-          cargo install mdbook-mermaid --vers "^0.14" --locked
-          cargo install mdbook-toc --vers "^0.14" --locked
-          cargo install mdbook-katex --vers "^0.9" --locked
+          cargo install mdbook-admonish --vers "^1.18" --locked --force
+          cargo install mdbook-mermaid --vers "^0.14" --locked --force
+          cargo install mdbook-toc --vers "^0.14" --locked --force
+          cargo install mdbook-katex --vers "^0.9" --locked --force
           # Note: linkcheck skipped due to issues with LaTeX math syntax
 
       - name: Build documentation (validates structure)
@@ -109,11 +110,12 @@ jobs:
             --no-default-features \
             --features search \
             --vers "^0.4" \
-            --locked
+            --locked \
+            --force
           
           # Install plugins with version constraints
-          cargo install mdbook-admonish --vers "^1.18" --locked
-          cargo install mdbook-mermaid --vers "^0.14" --locked
+          cargo install mdbook-admonish --vers "^1.18" --locked --force
+          cargo install mdbook-mermaid --vers "^0.14" --locked --force
 
       - name: Build documentation
         run: |
