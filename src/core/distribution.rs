@@ -1,4 +1,4 @@
-#![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/api/core/distribution.md"))]
+#![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/docs/core/distribution.md"))]
 use rand::{Rng, RngCore};
 use rand_distr::{
     Beta as RDBeta, Binomial as RDBinomial, Distribution as RandDistr, Exp as RDExp,

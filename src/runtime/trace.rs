@@ -1,4 +1,4 @@
-#![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/api/runtime/trace.md"))]
+#![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/docs/runtime/trace.md"))]
 
 use crate::core::address::Address;
 use crate::error::{FugueError, FugueResult};

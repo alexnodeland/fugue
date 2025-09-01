@@ -5,10 +5,11 @@ edition = "2021"
 license = "MIT"
 description = "Production-ready monadic PPL with numerically stable inference, comprehensive diagnostics, and memory optimization."
 readme = "README.md"
-keywords = ["probabilistic-programming", "ppl", "monad", "effects", "traces"]
+keywords = ["probability-monad", "ppl", "monad", "effects", "traces"]
 categories = ["science", "mathematics"]
 documentation = "https://docs.rs/fugue-ppl"
 repository = "https://github.com/alexandernodeland/fugue-ppl"
+
 
 [lib]
 name = "fugue"
