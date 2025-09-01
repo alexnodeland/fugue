@@ -703,7 +703,10 @@ impl InputValidator {
 
     fn sanitize_address_component(component: &str) -> Result<String, String> {
         // Prevent injection attacks in address components
-        if component.chars().any(|c| !(c.is_alphanumeric() || c == '_' || c == '-')) {
+        if component
+            .chars()
+            .any(|c| !(c.is_alphanumeric() || c == '_' || c == '-'))
+        {
             return Err("Address component contains invalid characters".to_string());
         }
 

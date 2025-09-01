@@ -30,10 +30,8 @@ fn main() {
     let start = Instant::now();
     for _iteration in 0..1000 {
         // Use pooled handler for efficient memory reuse
-        let (_result, trace) = runtime::handler::run(
-            PooledPriorHandler::new(&mut rng, &mut pool),
-            make_model(),
-        );
+        let (_result, trace) =
+            runtime::handler::run(PooledPriorHandler::new(&mut rng, &mut pool), make_model());
         // Return trace to pool for reuse
         pool.return_trace(trace);
     }
@@ -341,7 +339,11 @@ mod tests {
         }
 
         let stats = pool.stats();
-        assert!(stats.hit_ratio() > 50.0, "Pool should have good hit ratio, got {:.1}%", stats.hit_ratio());
+        assert!(
+            stats.hit_ratio() > 50.0,
+            "Pool should have good hit ratio, got {:.1}%",
+            stats.hit_ratio()
+        );
         assert!(stats.hits + stats.misses > 0, "Pool should have been used");
     }
 
