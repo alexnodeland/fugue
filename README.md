@@ -66,7 +66,7 @@ let mu_values: Vec<f64> = samples.iter()
 ## 📚 Documentation
 
 - **[User Guide](https://alexnodeland.github.io/fugue/)** - Comprehensive tutorials and examples
-- **[API Reference](https://docs.rs/fugue)** - Complete API documentation
+- **[API Reference](https://docs.rs/fugue-ppl/latest/fugue/)** - Complete API documentation
 - **Examples** - See `examples/` directory
 
 ## 🤝 Community
