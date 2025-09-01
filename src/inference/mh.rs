@@ -585,7 +585,7 @@ mod tests {
             for _ in 0..20 {
                 let proposed = strat.propose(current, 0.3, &mut rng);
                 assert!(
-                    proposed >= 0.0 && proposed <= 1.0,
+                    (0.0..=1.0).contains(&proposed),
                     "ReflectionWalk violated bounds: {} -> {}",
                     current,
                     proposed
@@ -640,10 +640,11 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(12);
         let d = DiscreteWalkProposal;
         let u = d.propose(5u64, 1.0, &mut rng);
-        assert!(u >= 0);
+        // Note: u is u64, so this comparison is always true, but kept for documentation
+        let _ = u; // Just verify it's a valid u64
         let f = FlipProposal;
         let b = f.propose(true, 1.0, &mut rng);
-        assert!(b == true || b == false);
+        let _ = b; // Just checking that we got a valid bool
     }
 
     #[test]

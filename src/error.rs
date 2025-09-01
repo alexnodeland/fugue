@@ -152,6 +152,7 @@ impl Default for ErrorContext {
 
 /// Errors that can occur during probabilistic programming operations.
 #[derive(Debug, Clone)]
+#[allow(clippy::result_large_err)]
 pub enum FugueError {
     /// Invalid distribution parameters
     InvalidParameters {
@@ -381,6 +382,7 @@ impl FugueError {
 impl std::error::Error for FugueError {}
 
 /// Result type for fallible probabilistic operations.
+#[allow(clippy::result_large_err)]
 pub type FugueResult<T> = Result<T, FugueError>;
 
 // =============================================================================

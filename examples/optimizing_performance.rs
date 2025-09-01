@@ -78,7 +78,7 @@ fn main() {
     println!("   - Weighted log-sum-exp: {:.4}", weighted_result);
 
     // Safe logarithm handling
-    let safe_results: Vec<f64> = vec![1.0, 0.0, -1.0].iter().map(|&x| safe_ln(x)).collect();
+    let safe_results: Vec<f64> = [1.0, 0.0, -1.0].iter().map(|&x| safe_ln(x)).collect();
     println!("   - Safe ln results: {:?}", safe_results);
     // ANCHOR_END: numerical_stability
     println!();

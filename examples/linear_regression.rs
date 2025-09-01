@@ -463,13 +463,13 @@ fn regularized_regression_demo() {
         let samples = adaptive_mcmc_chain(&mut rng, model_fn, 300, 60);
 
         println!("   Coefficient estimates (true values in parentheses):");
-        for j in 0..p {
+        for (j, &true_coef) in true_coefs.iter().enumerate().take(p) {
             let coef_samples: Vec<f64> = samples
                 .iter()
                 .map(|(_, trace)| trace.get_f64(&addr!("beta", j)).unwrap())
                 .collect();
             let mean_coef = coef_samples.iter().sum::<f64>() / coef_samples.len() as f64;
-            println!("     β{}: {:6.3} ({:5.1})", j, mean_coef, true_coefs[j]);
+            println!("     β{}: {:6.3} ({:5.1})", j, mean_coef, true_coef);
         }
 
         // Compute prediction accuracy (simplified)
@@ -477,13 +477,13 @@ fn regularized_regression_demo() {
             .iter()
             .map(|x_i| {
                 let mut pred = 0.0;
-                for j in 0..p {
+                for (j, &x_val) in x_i.iter().enumerate().take(p) {
                     let coef_samples: Vec<f64> = samples
                         .iter()
                         .map(|(_, trace)| trace.get_f64(&addr!("beta", j)).unwrap())
                         .collect();
                     let mean_coef = coef_samples.iter().sum::<f64>() / coef_samples.len() as f64;
-                    pred += mean_coef * x_i[j];
+                    pred += mean_coef * x_val;
                 }
                 pred
             })

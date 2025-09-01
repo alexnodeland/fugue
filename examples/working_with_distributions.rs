@@ -122,10 +122,11 @@ fn main() {
     println!("--------------------------");
     // ANCHOR: distribution_composition
     // Storing different distributions together
-    let mut continuous_dists: Vec<Box<dyn Distribution<f64>>> = vec![];
-    continuous_dists.push(Normal::new(0.0, 1.0).unwrap().clone_box());
-    continuous_dists.push(Beta::new(2.0, 5.0).unwrap().clone_box());
-    continuous_dists.push(Uniform::new(-1.0, 1.0).unwrap().clone_box());
+    let continuous_dists: Vec<Box<dyn Distribution<f64>>> = vec![
+        Normal::new(0.0, 1.0).unwrap().clone_box(),
+        Beta::new(2.0, 5.0).unwrap().clone_box(),
+        Uniform::new(-1.0, 1.0).unwrap().clone_box(),
+    ];
 
     // Sample from each
     for (i, dist) in continuous_dists.iter().enumerate() {

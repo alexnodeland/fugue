@@ -596,7 +596,7 @@ mod tests {
         );
 
         let mut rng = StdRng::seed_from_u64(21);
-        let elbo = elbo_with_guide(&mut rng, &model_fn, &guide, 5);
+        let elbo = elbo_with_guide(&mut rng, model_fn, &guide, 5);
         assert!(elbo.is_finite());
     }
 

@@ -115,7 +115,7 @@
 //!
 //! ### Example Test Structure
 //! ```rust
-//! #[test]
+//! // #[test] - Example test structure (not executed in doctest)
 //! fn test_distribution_normal_public_interface() {
 //!     // Test constructor
 //!     let dist = Normal::new(0.0, 1.0).expect("Valid parameters");
@@ -154,13 +154,13 @@ fn test_api_contract_distribution_interfaces() {
     let bernoulli = Bernoulli::new(0.5).expect("Valid Bernoulli parameters");
     let sample_b = bernoulli.sample(&mut rng);
     let log_prob_b = bernoulli.log_prob(&sample_b);
-    assert!(sample_b == true || sample_b == false);
+    let _ = sample_b; // Just checking it's a valid bool
     assert!(log_prob_b.is_finite());
 
     let poisson = Poisson::new(2.0).expect("Valid Poisson parameters");
     let sample_p = poisson.sample(&mut rng);
     let log_prob_p = poisson.log_prob(&sample_p);
-    assert!(sample_p >= 0);
+    let _ = sample_p; // sample_p is u64, comparison with 0 is always true
     assert!(log_prob_p.is_finite());
 
     // Test error conditions return appropriate error types
@@ -256,12 +256,12 @@ fn test_public_exports_accessibility() {
     let _error_category = ErrorCategory::DistributionValidation;
 
     // Numerical utilities
-    let _lse = log_sum_exp(&vec![-1.0, -2.0]);
+    let _lse = log_sum_exp(&[-1.0, -2.0]);
     let _log1p = log1p_exp(0.5);
     let _safe = safe_ln(1.0);
 
     // All exports are accessible - test passes if it compiles
-    assert!(true);
+    // Placeholder assertion removed - was always true
 }
 
 #[test]
@@ -334,7 +334,7 @@ fn test_api_consistency_naming_conventions() {
     let _usize_res = trace.get_usize_result(&addr!("x"));
 
     // Naming is consistent - test passes if it compiles
-    assert!(true);
+    // Placeholder assertion removed - was always true
 }
 
 #[test]
@@ -381,7 +381,7 @@ fn test_ergonomics_type_inference() {
     let (result4, _) = runtime::handler::run(handler4, composed);
     let _: f64 = result4; // Should infer f64 through the composition
 
-    assert!(true);
+    // Placeholder assertion removed - was always true
 }
 
 #[test]
@@ -625,7 +625,7 @@ fn test_compatibility_api_stability() {
     let _error_category: ErrorCategory = ErrorCategory::DistributionValidation;
 
     // API stability confirmed - test passes if it compiles
-    assert!(true);
+    // Placeholder assertion removed - was always true
 }
 
 #[test]
@@ -717,12 +717,12 @@ fn test_api_contract_comprehensive_validation() {
     };
 
     // MCMC
-    let mcmc_samples = adaptive_mcmc_chain(&mut rng, &inference_model, 20, 5);
+    let mcmc_samples = adaptive_mcmc_chain(&mut rng, inference_model, 20, 5);
     assert_eq!(mcmc_samples.len(), 20);
 
     // SMC
     let smc_config = SMCConfig::default();
-    let smc_particles = adaptive_smc(&mut rng, 15, &inference_model, smc_config);
+    let smc_particles = adaptive_smc(&mut rng, 15, inference_model, smc_config);
     assert_eq!(smc_particles.len(), 15);
 
     // ABC

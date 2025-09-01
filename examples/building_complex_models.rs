@@ -2,7 +2,7 @@ use fugue::*;
 use rand::thread_rng;
 
 fn main() {
-    let mut rng = thread_rng();
+    let _rng = thread_rng();
 
     println!("=== Building Complex Models with Fugue ===\n");
 
@@ -10,7 +10,7 @@ fn main() {
     println!("-------------------------");
     // ANCHOR: basic_prob_macro
     // Simple do-notation style probabilistic program
-    let simple_model = prob!(
+    let _simple_model = prob!(
         let x <- sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
         let y <- sample(addr!("y"), Normal::new(x, 0.5).unwrap());
         let sum = x + y;  // Regular variable assignment
@@ -27,15 +27,15 @@ fn main() {
     println!("------------------------------------------");
     // ANCHOR: plate_notation_basic
     // Independent samples using plate notation
-    let vector_model = plate!(i in 0..5 => {
+    let _vector_model = plate!(i in 0..5 => {
         sample(addr!("sample", i), Normal::new(0.0, 1.0).unwrap())
     });
     println!("✅ Created vectorized model with {} samples", 5);
 
     // Plate with observations
-    let observations = vec![1.2, -0.5, 2.1, 0.8, -1.0];
+    let observations = [1.2, -0.5, 2.1, 0.8, -1.0];
     let n_obs = observations.len();
-    let observed_model = plate!(i in 0..n_obs => {
+    let _observed_model = plate!(i in 0..n_obs => {
         observe(addr!("obs", i), Normal::new(0.0, 1.0).unwrap(), observations[i])
     });
     println!("✅ Created observation model for {} data points", n_obs);
@@ -48,7 +48,7 @@ fn main() {
     println!("--------------------------------------------");
     // ANCHOR: hierarchical_scoping
     // Hierarchical model using scoped addresses
-    let hierarchical_model = prob!(
+    let _hierarchical_model = prob!(
         let global_mu <- sample(addr!("global_mu"), Normal::new(0.0, 10.0).unwrap());
         let group_mu <- sample(scoped_addr!("group", "mu", "{}", 0),
                               Normal::new(global_mu, 1.0).unwrap());
@@ -69,7 +69,7 @@ fn main() {
     }
 
     // Compose multiple components
-    let composition_model = prob! {
+    let _composition_model = prob! {
         let param1 <- create_normal_component("param1", 0.0, 1.0);
         let param2 <- create_normal_component("param2", 2.0, 0.5);
         let combined = param1 * param2;
@@ -85,7 +85,7 @@ fn main() {
     println!("-------------------------");
     // ANCHOR: sequential_dependencies
     // Sequential model with dependencies
-    let sequential_model = prob! {
+    let _sequential_model = prob! {
         let states <- plate!(t in 0..3 => {
             sample(addr!("x", t), Normal::new(0.0, 1.0).unwrap())
                 .bind(move |x_t| {
@@ -106,7 +106,7 @@ fn main() {
     println!("----------------");
     // ANCHOR: mixture_models
     // Mixture model with component selection
-    let mixture_model = prob! {
+    let _mixture_model = prob! {
         let component <- sample(addr!("component"), Bernoulli::new(0.3).unwrap());
         let mu = if component { -2.0 } else { 2.0 };
         let x <- sample(addr!("x"), Normal::new(mu, 1.0).unwrap());
@@ -122,7 +122,7 @@ fn main() {
     println!("-----------------------------");
     // ANCHOR: address_management
     // Complex addressing for large models
-    let neural_layer_model = plate!(layer in 0..3 => {
+    let _neural_layer_model = plate!(layer in 0..3 => {
         let layer_size = match layer {
             0 => 4,
             1 => 8,
@@ -147,17 +147,17 @@ fn main() {
     println!("----------------------------");
     // ANCHOR: bayesian_regression
     // Complete Bayesian linear regression
-    let x_data = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-    let y_data = vec![2.1, 3.9, 6.2, 8.1, 9.8];
+    let x_data = [1.0, 2.0, 3.0, 4.0, 5.0];
+    let y_data = [2.1, 3.9, 6.2, 8.1, 9.8];
     let n = x_data.len();
 
-    let regression_model = prob! {
+    let _regression_model = prob! {
         let intercept <- sample(addr!("intercept"), Normal::new(0.0, 10.0).unwrap());
         let slope <- sample(addr!("slope"), Normal::new(0.0, 10.0).unwrap());
         let precision <- sample(addr!("precision"), Gamma::new(1.0, 1.0).unwrap());
         let sigma = (1.0 / precision).sqrt();
 
-        let likelihood <- plate!(i in 0..n => {
+        let _likelihood <- plate!(i in 0..n => {
             let predicted = intercept + slope * x_data[i];
             observe(addr!("y", i), Normal::new(predicted, sigma).unwrap(), y_data[i])
         });
@@ -174,9 +174,9 @@ fn main() {
     println!("-----------------------");
     // ANCHOR: multilevel_hierarchy
     // Simplified hierarchy to avoid nested macro issues
-    let multilevel_model = prob!(
+    let _multilevel_model = prob!(
         let pop_mean <- sample(addr!("pop_mean"), Normal::new(0.0, 10.0).unwrap());
-        let pop_precision <- sample(addr!("pop_precision"), Gamma::new(2.0, 0.5).unwrap());
+        let _pop_precision <- sample(addr!("pop_precision"), Gamma::new(2.0, 0.5).unwrap());
         let group_mean <- sample(scoped_addr!("group", "mean", "{}", 0),
                                 Normal::new(pop_mean, 1.0).unwrap());
         pure((pop_mean, group_mean))

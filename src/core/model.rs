@@ -674,7 +674,7 @@ mod tests {
 
     #[test]
     fn sequence_and_traverse_vec() {
-        let models: Vec<Model<i32>> = (0..5).map(|i| pure(i)).collect();
+        let models: Vec<Model<i32>> = (0..5).map(pure).collect();
         let seq = sequence_vec(models);
         let (vals, t) = run(
             PriorHandler {

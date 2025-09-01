@@ -476,7 +476,7 @@ fn memory_optimization_demo() {
     println!("🏭 Batch Processing with Memory Pool:");
 
     // Simulate batch inference with trace reuse
-    let observations = vec![1.0, 1.2, 0.8, 1.5, 0.9];
+    let observations = [1.0, 1.2, 0.8, 1.5, 0.9];
     let mut results = Vec::new();
 
     // Use copy-on-write traces for efficiency

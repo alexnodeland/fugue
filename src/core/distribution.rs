@@ -1231,7 +1231,7 @@ mod tests {
 
         let u = Uniform::new(-1.0, 2.0).unwrap();
         let y = u.sample(&mut rng);
-        assert!(y >= -1.0 && y < 2.0);
+        assert!((-1.0..2.0).contains(&y));
 
         let b = Bernoulli::new(0.7).unwrap();
         let _z = b.sample(&mut rng);

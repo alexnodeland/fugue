@@ -49,7 +49,7 @@ fn bench_diminishing_adaptation(c: &mut Criterion) {
                 b.iter_batched(
                     || DiminishingAdaptation::new(0.234, 0.7), // Optimal scaling target
                     |mut adapter| {
-                        let addresses = vec![
+                        let addresses = [
                             addr!("param1"),
                             addr!("param2"),
                             addr!("param3"),

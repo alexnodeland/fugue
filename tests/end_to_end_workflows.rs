@@ -185,7 +185,7 @@ fn test_parameter_estimation_gaussian_mean() {
     // Complete workflow for Gaussian mean estimation
 
     // 1. Model definition: Bayesian inference for unknown mean
-    let observed_data = vec![1.2, 1.8, 2.1, 1.9, 2.3];
+    let observed_data = [1.2, 1.8, 2.1, 1.9, 2.3];
     let model_fn = || {
         // Prior on mean
         sample(addr!("mu"), Normal::new(0.0, 2.0).unwrap()).bind(move |mu| {
@@ -231,8 +231,8 @@ fn test_regression_linear_model() {
     // Complete linear regression workflow
 
     // 1. Synthetic data generation (y = 2*x + 1 + noise)
-    let _x_data = vec![0.0, 1.0, 2.0, 3.0, 4.0];
-    let _y_data = vec![1.1, 2.9, 5.2, 7.1, 8.8]; // Approximately 2*x + 1
+    let _x_data = [0.0, 1.0, 2.0, 3.0, 4.0];
+    let _y_data = [1.1, 2.9, 5.2, 7.1, 8.8]; // Approximately 2*x + 1
 
     // 2. Bayesian linear regression model
     let model_fn = || {
@@ -330,7 +330,7 @@ fn test_model_selection_comparison() {
     // Model selection workflow comparing simple vs complex models
 
     // Data that clearly favors a simple model
-    let data = vec![1.0, 1.1, 0.9, 1.2, 0.8, 1.0, 1.1];
+    let data = [1.0, 1.1, 0.9, 1.2, 0.8, 1.0, 1.1];
 
     // Model 1: Simple constant model
     let simple_model_fn = || {
@@ -416,7 +416,7 @@ fn test_computational_algorithm_comparison() {
     };
 
     // 1. MCMC approach
-    let mcmc_samples = adaptive_mcmc_chain(&mut rng, &model_fn, 100, 20);
+    let mcmc_samples = adaptive_mcmc_chain(&mut rng, model_fn, 100, 20);
     let mcmc_estimates: Vec<f64> = mcmc_samples.iter().map(|(theta, _)| *theta).collect();
     let mcmc_mean = mcmc_estimates.iter().sum::<f64>() / mcmc_estimates.len() as f64;
 
@@ -426,7 +426,7 @@ fn test_computational_algorithm_comparison() {
         ess_threshold: 0.5,
         rejuvenation_steps: 0,
     };
-    let particles = adaptive_smc(&mut rng, 100, &model_fn, smc_config);
+    let particles = adaptive_smc(&mut rng, 100, model_fn, smc_config);
 
     // Compute weighted mean from particles
     let total_weight: f64 = particles.iter().map(|p| p.log_weight.exp()).sum();
@@ -583,7 +583,7 @@ fn test_clustering_gaussian_mixture() {
     // Complete Gaussian mixture model workflow
 
     // 1. Synthetic mixture data (2 components)
-    let _data = vec![
+    let _data = [
         -1.2, -0.8, -1.1, -0.9, -1.0, // Component 1 (mean ≈ -1.0)
         1.1, 1.3, 0.9, 1.2, 1.0,
     ]; // Component 2 (mean ≈ 1.0)
@@ -653,7 +653,7 @@ fn test_validation_posterior_predictive_checks() {
     // Complete posterior predictive checking workflow
 
     // 1. Observed data
-    let observed_data = vec![2.1, 1.8, 2.3, 1.9, 2.0, 2.2, 1.7, 2.4];
+    let observed_data = [2.1, 1.8, 2.3, 1.9, 2.0, 2.2, 1.7, 2.4];
     let data_mean = observed_data.iter().sum::<f64>() / observed_data.len() as f64;
 
     // 2. Model for the data
@@ -749,8 +749,8 @@ fn test_validation_cross_validation() {
     // Complete cross-validation workflow
 
     // 1. Full dataset (simple regression)
-    let x_full = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
-    let y_full = vec![2.1, 4.2, 5.8, 8.1, 10.2, 11.9]; // Approximately y = 2*x
+    let x_full = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+    let y_full = [2.1, 4.2, 5.8, 8.1, 10.2, 11.9]; // Approximately y = 2*x
 
     // 2. Leave-one-out cross-validation
     let mut predictions = Vec::new();
@@ -882,7 +882,7 @@ fn test_hierarchical_variance_estimation() {
     // Complete hierarchical variance estimation workflow
 
     // 1. Hierarchical data structure (groups with different variances)
-    let group_data = vec![
+    let group_data = [
         vec![1.0, 1.2, 0.8, 1.1], // Group 1: low variance
         vec![2.0, 2.5, 1.5, 2.2], // Group 2: medium variance
         vec![3.0, 4.0, 2.0, 3.5], // Group 3: high variance
@@ -948,6 +948,8 @@ fn test_hierarchical_variance_estimation() {
     let samples = adaptive_mcmc_chain(&mut rng, model_fn, 100, 20);
 
     // 4. Extract hierarchical estimates
+    #[allow(clippy::type_complexity)]
+    // This complex type is needed for hierarchical parameter testing
     let hierarchical_params: Vec<(f64, f64, Vec<(f64, f64)>)> =
         samples.iter().map(|(params, _)| params.clone()).collect();
 
@@ -960,7 +962,7 @@ fn test_hierarchical_variance_estimation() {
 
     // Group-specific parameters
     let mut group_mean_ests = vec![0.0; 3];
-    let mut group_sigma_ests = vec![0.0; 3];
+    let mut group_sigma_ests = [0.0; 3];
 
     for g in 0..3 {
         let group_means: Vec<f64> = hierarchical_params
@@ -993,7 +995,7 @@ fn test_hierarchical_variance_estimation() {
 
     // Group means should be ordered approximately: group 1 < group 2 < group 3
     // Make assertion more robust for small sample MCMC variability
-    if !(group_mean_ests[0] < group_mean_ests[2]) {
+    if group_mean_ests[0] >= group_mean_ests[2] {
         println!("WARNING: Group ordering not maintained - group_mean_ests[0]={:.3} >= group_mean_ests[2]={:.3}", 
                  group_mean_ests[0], group_mean_ests[2]);
         println!("This can happen with hierarchical models due to shrinkage and MCMC variability");

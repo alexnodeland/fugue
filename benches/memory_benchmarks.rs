@@ -467,7 +467,7 @@ fn bench_pool_stats(c: &mut Criterion) {
                     || Vec::<Trace>::with_capacity(50),
                     |mut simple_pool| {
                         for _ in 0..operations {
-                            let trace = simple_pool.pop().unwrap_or_else(|| Trace::default());
+                            let trace = simple_pool.pop().unwrap_or_default();
                             if simple_pool.len() < 50 {
                                 simple_pool.push(black_box(trace));
                             }
