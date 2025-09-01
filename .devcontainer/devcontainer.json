@@ -15,7 +15,6 @@
           "rust-lang.rust-analyzer",
           "serayuzgur.crates",
           "tamasfe.even-better-toml",
-          "tamasfe.even-better-toml",
           "tamago324.marksman",
           "DavidAnson.vscode-markdownlint",
           "yzhang.markdown-all-in-one",
@@ -36,10 +35,12 @@
     "containerEnv": {
       "CARGO_TERM_COLOR": "always"
     },
+    // Cache mounts removed due to Docker compatibility issues
+    // Use named volumes instead for better compatibility
     "mounts": [
-      "type=cache,target=/usr/local/cargo/registry",
-      "type=cache,target=/usr/local/cargo/git",
-      "type=cache,target=/workspaces/${localWorkspaceFolderBasename}/target"
+      "source=cargo-registry,target=/usr/local/cargo/registry,type=volume",
+      "source=cargo-git,target=/usr/local/cargo/git,type=volume",
+      "source=cargo-target,target=/workspaces/${localWorkspaceFolderBasename}/target,type=volume"
     ],
     "forwardPorts": [3000],
     "portsAttributes": {
