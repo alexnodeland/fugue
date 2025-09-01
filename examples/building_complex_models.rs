@@ -198,13 +198,13 @@ mod tests {
     #[test]
     fn test_model_composition() {
         // Test that models construct without errors
-        let simple = prob! {
+        let _simple = prob! {
             let x <- sample(addr!("test_x"), Normal::new(0.0, 1.0).unwrap());
             pure(x)
         };
 
         // Test plate notation
-        let plate_model = plate!(i in 0..3 => {
+        let _plate_model = plate!(i in 0..3 => {
             sample(addr!("plate_test", i), Normal::new(0.0, 1.0).unwrap())
         });
 
@@ -217,7 +217,7 @@ mod tests {
         assert!(addr2.0.contains("42"));
 
         // Test hierarchical model construction
-        let hierarchical = prob! {
+        let _hierarchical = prob! {
             let global <- sample(addr!("global"), Normal::new(0.0, 1.0).unwrap());
             let locals <- plate!(i in 0..2 => {
                 sample(scoped_addr!("local", "param", "{}", i),

@@ -434,16 +434,9 @@ impl TracePool {
 ///
 /// // Run model with pooled handler
 /// let (result, trace) = runtime::handler::run(
-///     PooledPriorHandler {
-///         rng: &mut rng,
-///         trace_builder: TraceBuilder::new(),
-///         pool: &mut pool,
-///     },
+///     PooledPriorHandler::new(&mut rng, &mut pool),
 ///     sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
 /// );
-///
-/// // Return trace to pool for reuse
-/// pool.return_trace(trace);
 ///
 /// // Subsequent runs will reuse pooled traces (zero allocations)
 /// assert!(result.is_finite());
@@ -452,6 +445,20 @@ pub struct PooledPriorHandler<'a, R: rand::RngCore> {
     pub rng: &'a mut R,
     pub trace_builder: TraceBuilder,
     pub pool: &'a mut TracePool,
+    pub pooled_trace: Option<Trace>,
+}
+
+impl<'a, R: rand::RngCore> PooledPriorHandler<'a, R> {
+    /// Create a new PooledPriorHandler that gets a trace from the pool.
+    pub fn new(rng: &'a mut R, pool: &'a mut TracePool) -> Self {
+        let pooled_trace = Some(pool.get());
+        Self {
+            rng,
+            trace_builder: TraceBuilder::new(),
+            pool,
+            pooled_trace,
+        }
+    }
 }
 
 impl<'a, R: rand::RngCore> crate::runtime::handler::Handler for PooledPriorHandler<'a, R> {
@@ -507,8 +514,22 @@ impl<'a, R: rand::RngCore> crate::runtime::handler::Handler for PooledPriorHandl
         self.trace_builder.add_factor(logw);
     }
 
-    fn finish(self) -> Trace {
-        self.trace_builder.build()
+    fn finish(mut self) -> Trace {
+        // Use the pooled trace as the base, or create a new one if none available
+        let mut trace = if let Some(pooled_trace) = self.pooled_trace.take() {
+            pooled_trace
+        } else {
+            Trace::default()
+        };
+        
+        // Populate the trace with data from the trace builder
+        let built_trace = self.trace_builder.build();
+        trace.choices = built_trace.choices;
+        trace.log_prior = built_trace.log_prior;
+        trace.log_likelihood = built_trace.log_likelihood;
+        trace.log_factors = built_trace.log_factors;
+        
+        trace
     }
 }
 
@@ -765,11 +786,7 @@ mod pooled_tests {
         let mut pool = TracePool::new(4);
         let mut rng = StdRng::seed_from_u64(40);
         let (_val, trace) = run(
-            PooledPriorHandler {
-                rng: &mut rng,
-                trace_builder: TraceBuilder::new(),
-                pool: &mut pool,
-            },
+            PooledPriorHandler::new(&mut rng, &mut pool),
             sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
                 .and_then(|x| observe(addr!("y"), Normal::new(x, 1.0).unwrap(), 0.3)),
         );

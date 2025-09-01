@@ -494,7 +494,7 @@ mod tests {
             pure((x, y))
         );
 
-        let (result, trace) = runtime::handler::run(
+        let (_result, trace) = runtime::handler::run(
             PriorHandler {
                 rng: &mut rng,
                 trace: Trace::default(),

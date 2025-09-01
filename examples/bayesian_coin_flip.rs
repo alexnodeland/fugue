@@ -380,7 +380,7 @@ mod tests {
         assert!(trace.total_log_weight().is_finite());
 
         // Should have observation sites for each data point
-        for i in 0..test_data.len() {
+        for _i in 0..test_data.len() {
             // Observations don't create choices, but affect likelihood
             assert!(trace.log_likelihood.is_finite());
         }
