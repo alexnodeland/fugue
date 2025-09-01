@@ -516,19 +516,15 @@ impl<'a, R: rand::RngCore> crate::runtime::handler::Handler for PooledPriorHandl
 
     fn finish(mut self) -> Trace {
         // Use the pooled trace as the base, or create a new one if none available
-        let mut trace = if let Some(pooled_trace) = self.pooled_trace.take() {
-            pooled_trace
-        } else {
-            Trace::default()
-        };
-        
+        let mut trace = self.pooled_trace.take().unwrap_or_default();
+
         // Populate the trace with data from the trace builder
         let built_trace = self.trace_builder.build();
         trace.choices = built_trace.choices;
         trace.log_prior = built_trace.log_prior;
         trace.log_likelihood = built_trace.log_likelihood;
         trace.log_factors = built_trace.log_factors;
-        
+
         trace
     }
 }
