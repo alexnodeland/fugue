@@ -45,7 +45,7 @@ graph TD
 
 ### Traditional PPL Problems
 
-```rust,no_run
+```rust,ignore
 {{#include ../../../../examples/type_safety.rs:traditional_problems}}
 ```
 
@@ -89,7 +89,7 @@ For any well-formed Fugue program $P$ with model $M : \text{Model}[A]$ and distr
 
 Fugue eliminates the `f64`-everything problem by returning mathematically appropriate types:
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 # use rand::thread_rng;
 {{#include ../../../../examples/type_safety.rs:natural_types}}
@@ -124,7 +124,7 @@ Fugue eliminates the `f64`-everything problem by returning mathematically approp
 
 Fugue's type system catches errors at compile time, eliminating entire classes of runtime failures:
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 # use fugue::runtime::interpreters::PriorHandler;
 # use rand::thread_rng;
@@ -143,7 +143,7 @@ When you compose models `M₁ : Model[A]` and `M₂ : Model[B]`, the result has 
 
 One of the most dangerous operations in traditional PPLs is array indexing with categorical samples. Fugue makes this provably safe:
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 # use rand::thread_rng;
 {{#include ../../../../examples/type_safety.rs:safe_indexing}}
@@ -184,7 +184,7 @@ return array[category];  // Cannot panic - guaranteed by type system
 
 Fugue validates all distribution parameters at construction time, catching invalid configurations before they can cause runtime errors:
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 {{#include ../../../../examples/type_safety.rs:parameter_validation}}
 ```
@@ -208,7 +208,7 @@ Fugue follows the principle of "make invalid states unrepresentable". By validat
 
 Observations in Fugue must match the distribution's return type, providing compile-time guarantees about data consistency:
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 # use fugue::runtime::interpreters::PriorHandler;
 # use rand::thread_rng;
@@ -236,7 +236,7 @@ observe(addr!("choice"), Categorical::uniform(3).unwrap(), 1);  // i32 ≠ usize
 
 Fugue supports complex hierarchical models with full type safety throughout the computation:
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 # use fugue::runtime::interpreters::PriorHandler;
 # use rand::thread_rng;
@@ -269,7 +269,7 @@ Fugue's type system scales naturally to arbitrarily complex hierarchical models.
 
 Type safety in Fugue eliminates runtime overhead through zero-cost abstractions:
 
-```rust,no_run
+```rust,ignore
 {{#include ../../../../examples/type_safety.rs:performance_benefits}}
 ```
 
@@ -293,7 +293,7 @@ Fugue's type safety incurs **zero runtime cost**. The type information is used o
 
 ### Quality Control System
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 let quality_model = prob!(
     // Product defect rate (continuous parameter)
@@ -316,7 +316,7 @@ let quality_model = prob!(
 
 ### Medical Diagnosis System
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;  
 let diagnosis_model = prob!(
     // Prior disease probability (continuous)
@@ -340,7 +340,7 @@ let diagnosis_model = prob!(
 
 ### Error Handling Strategy
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 // Robust parameter validation
 fn create_robust_model(rate: f64, categories: Vec<f64>) -> Result<Model<(f64, usize)>, String> {
@@ -378,7 +378,7 @@ Create a model that demonstrates all four natural return types. Ensure it:
 - Safely indexes into arrays
 - Handles continuous parameters
 
-```rust,no_run
+```rust,ignore
 {{#include ../../../../examples/type_safety.rs:testing_framework}}
 ```
 

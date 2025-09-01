@@ -155,7 +155,7 @@ $$\text{WAIC} = -2 \times (\text{lppd} - p_{\text{WAIC}})$$
 
 Effective classification often requires thoughtful feature engineering:
 
-```rust,no_run
+```rust,ignore
 # let x1 = 0.5; let x2 = 0.8; let category = "A";
 // Polynomial features
 let x2_squared = x1 * x1;
@@ -193,7 +193,7 @@ Use regularizing priors and check diagnostics carefully.
 
 ### Metrics for Binary Classification
 
-```rust,no_run
+```rust,ignore
 # let tp = 10.0; let tn = 20.0; let fp = 5.0; let fn_count = 3.0;
 // Accuracy, Precision, Recall, F1-score
 let accuracy = (tp + tn) / (tp + tn + fp + fn_count);

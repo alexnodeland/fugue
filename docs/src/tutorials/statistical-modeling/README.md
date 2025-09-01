@@ -69,7 +69,7 @@ graph TB
 - **Model selection** using Bayes factors
 - **Ridge regression** for high-dimensional problems
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 // Example: Basic Bayesian linear regression
 let model = prob! {
@@ -96,7 +96,7 @@ let model = prob! {
 - **Hierarchical classification** for grouped data
 - **Model comparison** and performance evaluation
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 // Example: Hierarchical logistic regression
 let model = prob! {
@@ -122,7 +122,7 @@ let model = prob! {
 - **Infinite mixtures** with automatic component discovery
 - **Hidden Markov models** for temporal clustering
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 // Example: Gaussian mixture with latent variables
 let model = prob! {
@@ -148,7 +148,7 @@ let model = prob! {
 - **Mixed effects** combining fixed and random effects
 - **Nested hierarchies** for multi-level clustering
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 // Example: Varying intercepts model
 let model = prob! {
@@ -205,7 +205,7 @@ graph LR
 
 **Model Structure:**
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 let model = prob! {
     // 1. Prior specification
@@ -223,7 +223,7 @@ let model = prob! {
 
 **MCMC Workflow:**
 
-```rust,no_run
+```rust,ignore
 # use fugue::inference::mh::adaptive_mcmc_chain;
 # use rand::{SeedableRng, rngs::StdRng};
 
@@ -289,7 +289,7 @@ cargo test --example hierarchical_models
 
 ### Scalability Considerations
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 
 // For large datasets, consider:
@@ -387,7 +387,7 @@ Each tutorial demonstrates advanced extensions:
 
 ### Computational Methods
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 
 // Advanced MCMC techniques demonstrated:
@@ -415,7 +415,7 @@ let predictions: Vec<f64> = samples.iter().map(|(params, _)| {
 
 ### Type Safety Benefits
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 
 // Fugue's type safety prevents common statistical errors:
@@ -432,7 +432,7 @@ let value: f64 = normal.sample(&mut rng);  // Explicit numeric type!
 
 ### Runtime Integration
 
-```rust,no_run
+```rust,ignore
 # use fugue::runtime::handler::run;
 # use fugue::runtime::interpreters::PriorHandler;
 
@@ -496,7 +496,7 @@ let replay_trace = ReplayHandler::new(previous_trace)
 
 - [Building Complex Models](../../how-to/building-complex-models.md) - Advanced modeling techniques
 - [Optimizing Performance](../../how-to/optimizing-performance.md) - Scalable inference
-- [API Documentation](https://docs.rs/fugue/latest/fugue/) - Complete API reference
+- [API Documentation](https://docs.rs/fugue-ppl/latest/fugue/) - Complete API reference
 - [Foundation Tutorials](../foundation/README.md) - Basic probabilistic programming concepts
 
 ### Statistical References

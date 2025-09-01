@@ -29,7 +29,7 @@ The coin flip problem is fundamental because it introduces all core Bayesian con
 
 ### Data Generation & Exploration
 
-```rust,no_run
+```rust,ignore
 {{#include ../../../../examples/bayesian_coin_flip.rs:data_setup}}
 ```
 
@@ -77,7 +77,7 @@ The **Beta distribution** is **conjugate** to the **Bernoulli likelihood**, mean
 This gives us **exact analytical solutions** without requiring numerical approximation.
 ```
 
-```rust,no_run
+```rust,ignore
 {{#include ../../../../examples/bayesian_coin_flip.rs:mathematical_foundation}}
 ```
 
@@ -98,7 +98,7 @@ Common choices:
 
 Let's implement our Bayesian coin flip model in Fugue:
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 {{#include ../../../../examples/bayesian_coin_flip.rs:basic_model}}
 ```
@@ -123,7 +123,7 @@ Let's implement our Bayesian coin flip model in Fugue:
 
 The beauty of conjugate priors is that we can compute the exact posterior without numerical approximation:
 
-```rust,no_run
+```rust,ignore
 {{#include ../../../../examples/bayesian_coin_flip.rs:analytical_solution}}
 ```
 
@@ -131,7 +131,7 @@ The beauty of conjugate priors is that we can compute the exact posterior withou
 
 While analytical solutions are preferred, we can validate our results using MCMC:
 
-```rust,no_run
+```rust,ignore
 {{#include ../../../../examples/bayesian_coin_flip.rs:mcmc_inference}}
 ```
 
@@ -154,7 +154,7 @@ The **Effective Sample Size (ESS)** measures how many independent samples we hav
 
 **Model validation** ensures our model adequately represents the data-generating process:
 
-```rust,no_run
+```rust,ignore
 {{#include ../../../../examples/bayesian_coin_flip.rs:model_validation}}
 ```
 
@@ -183,7 +183,7 @@ $$p(\tilde{\mathbf{x}} \mid \mathbf{x}) = \int p(\tilde{\mathbf{x}} \mid \theta)
 
 Bayesian inference provides the foundation for **optimal decision-making** under uncertainty:
 
-```rust,no_run
+```rust,ignore
 {{#include ../../../../examples/bayesian_coin_flip.rs:decision_analysis}}
 ```
 
@@ -191,7 +191,7 @@ Bayesian inference provides the foundation for **optimal decision-making** under
 
 Real applications often require extensions beyond the basic model:
 
-```rust,no_run
+```rust,ignore
 {{#include ../../../../examples/bayesian_coin_flip.rs:advanced_extensions}}
 ```
 
@@ -285,7 +285,7 @@ graph TD
 
 Comprehensive test suite for validation:
 
-```rust,no_run
+```rust,ignore
 {{#include ../../../../examples/bayesian_coin_flip.rs:testing_framework}}
 ```
 

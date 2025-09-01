@@ -12,7 +12,7 @@ create-missing = true
 [output.html]
 default-theme = "dark"
 git-repository-url = "https://github.com/alexnodeland/fugue"
-site-url = "/fugue/"
+site-url = "/fugue-ppl/"
 additional-css = ["./mdbook-admonish.css"]
 additional-js = ["mermaid.min.js", "mermaid-init.js"]
 
@@ -24,10 +24,11 @@ level = 0
 enable = true
 page-break = true
 
-[output.linkcheck]
-follow-web-links = false
-traverse-parent-directories = true
-warning-policy = "warn"
+# Linkcheck disabled due to issues with LaTeX math syntax
+# [output.linkcheck]
+# follow-web-links = false
+# traverse-parent-directories = true
+# warning-policy = "warn"
 
 [preprocessor.admonish]
 command = "mdbook-admonish"

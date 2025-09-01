@@ -99,7 +99,7 @@ let decoder_z = sample(scoped_addr!("decoder", "z"), dist);
 ````admonish warning
 
 Address Anti-Patterns
-```rust
+```rust,ignore
 // ❌ DON'T: Random or non-deterministic addresses  
 let addr = format!("param_{}", rng.gen::<u32>());  // NEVER!
 

@@ -34,7 +34,7 @@ Add Fugue to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-fugue = "0.1.0"
+fugue-ppl = "0.1.0"
 rand = "0.8"  # For random number generation
 ```
 
@@ -44,14 +44,14 @@ Add Fugue to your existing `Cargo.toml`:
 
 ```toml
 [dependencies]
-fugue = "0.1.0"
+fugue-ppl = "0.1.0"
 rand = "0.8"
 ```
 
 Or use `cargo add`:
 
 ```bash
-cargo add fugue rand
+cargo add fugue-ppl rand
 ```
 
 ## Verification: "Hello, Probabilistic World!"
@@ -166,8 +166,8 @@ Fugue comes with comprehensive examples to explore:
 
 ```bash
 # Clone the repository to access examples
-git clone https://github.com/your-org/fugue
-cd fugue
+git clone https://github.com/your-org/fugue-ppl
+cd fugue-ppl
 
 # List available examples
 ls examples/
@@ -213,9 +213,9 @@ ls examples/
 
 If you encounter issues:
 
-1. Check the [GitHub Issues](https://github.com/alexandernodeland/fugue/issues)
-2. Review the [examples](https://github.com/alexandernodeland/fugue/tree/main/examples) for working code
-3. Read the [API documentation](https://docs.rs/fugue)
+1. Check the [GitHub Issues](https://github.com/alexandernodeland/fugue-ppl/issues)
+2. Review the [examples](https://github.com/alexandernodeland/fugue-ppl/tree/main/examples) for working code
+3. Read the [API documentation](https://docs.rs/fugue-ppl)
 
 ## Next Steps
 

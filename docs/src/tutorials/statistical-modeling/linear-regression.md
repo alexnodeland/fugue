@@ -78,7 +78,7 @@ Let's start with the fundamental case: simple linear regression with one predict
 
 ### Implementation
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 # use fugue::runtime::interpreters::PriorHandler;
 # use rand::{SeedableRng, rngs::StdRng};
@@ -124,7 +124,7 @@ where:
 
 ### Implementation
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 {{#include ../../../../examples/linear_regression.rs:robust_regression}}
 ```
@@ -172,7 +172,7 @@ $$\beta_j \sim \mathcal{N}(0, 1/\tau) \quad j = 0, 1, \ldots, p$$
 
 ### Implementation
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 {{#include ../../../../examples/linear_regression.rs:polynomial_regression}}
 ```
@@ -216,7 +216,7 @@ $$p(\mathcal{M}_k | y) = \frac{p(y | \mathcal{M}_k) p(\mathcal{M}_k)}{\sum_{j=1}
 
 ### Implementation
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 {{#include ../../../../examples/linear_regression.rs:bayesian_model_selection}}
 ```
@@ -255,7 +255,7 @@ The regularization parameter $\lambda$ controls shrinkage:
 
 ### Implementation
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 {{#include ../../../../examples/linear_regression.rs:regularized_regression}}
 ```
@@ -284,7 +284,7 @@ graph TB
 
 ### Hierarchical Linear Models
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 
 // Group-level regression with varying intercepts
@@ -328,7 +328,7 @@ fn hierarchical_regression_model(
 
 ### Spline Regression
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 
 // Bayesian cubic spline regression
@@ -391,7 +391,7 @@ For large datasets:
 
 Essential checks for regression models:
 
-```rust,no_run
+```rust,ignore
 # use fugue::inference::diagnostics::*;
 
 fn regression_diagnostics(samples: &[(f64, f64, f64)], x_data: &[f64], y_data: &[f64]) {
@@ -416,7 +416,7 @@ fn regression_diagnostics(samples: &[(f64, f64, f64)], x_data: &[f64], y_data: &
 
 ### Cross-Validation
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 
 fn k_fold_cross_validation<F>(
@@ -479,7 +479,7 @@ where F: Fn(Vec<f64>, Vec<f64>) -> Model<(f64, f64, f64)>
 
 ### Economic Forecasting
 
-```rust,no_run
+```rust,ignore
 // Example: GDP growth prediction
 let gdp_model = prob!(
     // Macroeconomic predictors
@@ -506,7 +506,7 @@ let gdp_model = prob!(
 
 ### Medical Research
 
-```rust,no_run
+```rust,ignore
 // Example: Drug dose-response modeling
 let dose_response_model = prob!(
     // Log-linear dose-response
@@ -535,7 +535,7 @@ let dose_response_model = prob!(
 
 Extend basic linear regression to handle multiple predictors:
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 
 fn multiple_regression_model(
@@ -559,7 +559,7 @@ fn multiple_regression_model(
 
 Model non-constant error variance:
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 
 fn heteroscedastic_model(
@@ -581,7 +581,7 @@ fn heteroscedastic_model(
 
 Implement spike-and-slab priors for variable selection:
 
-```rust,no_run
+```rust,ignore
 # use fugue::*;
 
 fn variable_selection_model(

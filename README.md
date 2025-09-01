@@ -1,7 +1,7 @@
 # Fugue
 
-[![Crates.io](https://img.shields.io/crates/v/fugue.svg)](https://crates.io/crates/fugue)
-[![Documentation](https://docs.rs/fugue/badge.svg)](https://docs.rs/fugue)
+[![Crates.io](https://img.shields.io/crates/v/fugue-ppl.svg)](https://crates.io/crates/fugue-ppl)
+[![Documentation](https://docs.rs/fugue-ppl/badge.svg)](https://docs.rs/fugue-ppl)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![CI](https://github.com/alexnodeland/fugue/actions/workflows/ci-develop.yml/badge.svg)](https://github.com/alexnodeland/fugue/actions/workflows/ci-develop.yml)
 [![codecov](https://codecov.io/gh/alexnodeland/fugue/branch/develop/graph/badge.svg?token=BDJ5OB6GOB)](https://codecov.io/gh/alexnodeland/fugue)
@@ -9,7 +9,7 @@
 
 A **production-ready**, **monadic probabilistic programming library** for Rust. Write elegant probabilistic programs by composing `Model` values in direct style; execute them with pluggable interpreters and state-of-the-art inference algorithms.
 
-> Supported Rust: 1.70+ • Platforms: Linux / macOS / Windows • Crate: [`fugue` on crates.io](https://crates.io/crates/fugue)
+> Supported Rust: 1.70+ • Platforms: Linux / macOS / Windows • Crate: [`fugue-ppl` on crates.io](https://crates.io/crates/fugue-ppl)
 
 ## Features
 
@@ -32,13 +32,13 @@ A **production-ready**, **monadic probabilistic programming library** for Rust. 
 
 ```toml
 [dependencies]
-fugue = "0.1.0"
+fugue-ppl = "0.1.0"
 ```
 
 ### Quickstart
 
 ```bash
-cargo add fugue
+cargo add fugue-ppl
 ```
 
 ## Example
