@@ -9,13 +9,7 @@ keywords = ["probabilistic-programming", "ppl", "monad", "effects", "traces"]
 categories = ["science", "mathematics"]
 documentation = "https://docs.rs/fugue-ppl"
 repository = "https://github.com/alexandernodeland/fugue-ppl"
-include = [
-    "src/**/*",
-    "docs/api/**/*",
-    "Cargo.toml",
-    "README.md",
-    "LICENSE"
-]
+
 
 [lib]
 name = "fugue"

@@ -1,4 +1,4 @@
-#![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/api/core/model.md"))]
+#![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/docs/core/model.md"))]
 use crate::core::address::Address;
 use crate::core::distribution::{Distribution, LogF64};
 

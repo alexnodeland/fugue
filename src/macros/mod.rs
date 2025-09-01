@@ -1,4 +1,4 @@
-#![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/api/macros/README.md"))]
+#![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/docs/macros/README.md"))]
 
 /// Probabilistic programming macro, used to define probabilistic programs with do-notation.
 ///
