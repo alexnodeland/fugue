@@ -28,10 +28,6 @@
     - [Classification](./tutorials/statistical-modeling/classification.md)
     - [Mixture Models](./tutorials/statistical-modeling/mixture-models.md)
     - [Hierarchical Models](./tutorials/statistical-modeling/hierarchical-models.md)
-  - [Advanced Applications](./tutorials/advanced-applications/README.md)
-    - [Time Series & Forecasting](./tutorials/advanced-applications/time-series-forecasting.md)
-    - [Model Comparison & Selection](./tutorials/advanced-applications/model-comparison-selection.md)
-    - [Advanced Inference](./tutorials/advanced-applications/advanced-inference.md)
 
 ---
 
