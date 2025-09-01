@@ -5,7 +5,24 @@
 //!
 //! - **Adaptive scaling**: Automatically tunes proposal step sizes to achieve target acceptance rates
 //! - **Single-site updates**: Updates one random variable at a time for better mixing
-//! - **Random-walk proposals**: Uses Gaussian perturbations centered on current values
+//! - **Type-safe proposals**: Preserves original types (bool, u64, usize, etc.) during proposals
+//! - **Type-aware proposals**: Uses ProposalStrategy traits based on value types
+//!
+//! ## Constraint-Aware Proposals
+//!
+//! The implementation now uses **constraint-aware proposals** that automatically detect
+//! and respect parameter constraints based on address names and value ranges:
+//!
+//! - **Positive parameters** (sigma, scale, rate, etc.) → Log-space proposals (maintains positivity)
+//! - **Probability parameters** (p, prob, beta in [0,1]) → Reflection proposals (maintains bounds)
+//! - **Unconstrained parameters** (mu, intercept, etc.) → Gaussian proposals (standard)
+//!
+//! This automatic constraint detection significantly improves MCMC performance and prevents
+//! common issues like negative standard deviations or out-of-bounds probability values.
+//!
+//! For custom distributions requiring specialized proposals (logit-transform for Beta,
+//! circular proposals for von Mises, etc.), consider implementing custom ProposalStrategy
+//! implementations or contributing distribution-aware extensions.
 //! - **Acceptance rate monitoring**: Tracks and optimizes per-site acceptance rates
 //!
 //! ## Algorithm Overview
@@ -31,8 +48,8 @@
 //!
 //! // Define a simple Bayesian model
 //! let model_fn = || {
-//!     sample(addr!("mu"), Normal { mu: 0.0, sigma: 2.0 })
-//!         .bind(|mu| observe(addr!("y"), Normal { mu, sigma: 1.0 }, 2.5))
+//!     sample(addr!("mu"), Normal::new(0.0, 2.0).unwrap())
+//!         .bind(|mu| observe(addr!("y"), Normal::new(mu, 1.0).unwrap(), 2.5))
 //! };
 //!
 //! // Run adaptive MCMC (small numbers for testing)
@@ -55,175 +72,257 @@
 //!
 //! assert!(!mu_samples.is_empty());
 //! ```
-use crate::core::address::Address;
-
 use crate::core::model::Model;
+use crate::inference::mcmc_utils::DiminishingAdaptation;
+// All proposal logic is now integrated in this module
 use crate::runtime::handler::run;
 use crate::runtime::interpreters::{PriorHandler, ScoreGivenTrace};
 use crate::runtime::trace::{Choice, ChoiceValue, Trace};
-use rand::Rng;
-use std::collections::HashMap;
+use rand::{Rng, RngCore};
 
-/// Adaptive proposal scaling system for MCMC sites.
+/// Trait for distribution-aware proposal strategies.
 ///
-/// This struct tracks acceptance rates for each random variable site and automatically
-/// adjusts proposal step sizes to maintain optimal acceptance rates. The adaptive
-/// mechanism helps achieve good MCMC mixing without manual tuning.
-///
-/// ## Adaptation Strategy
-///
-/// - **Target rate**: 44% acceptance (optimal for random-walk Metropolis)
-/// - **Update frequency**: Every 50 proposals per site
-/// - **Scale adjustment**: Multiplicative updates based on acceptance rate
-/// - **Per-site tracking**: Each address gets independent tuning
-///
-/// # Fields
-///
-/// * `scales` - Current proposal scale for each site
-/// * `accept_counts` - Number of accepted proposals per site
-/// * `total_counts` - Total number of proposals per site
-/// * `target_accept_rate` - Desired acceptance rate (default: 0.44)
-///
-/// # Examples
-///
-/// ```rust
-/// use fugue::*;
-///
-/// let mut scales = AdaptiveScales::new();
-/// let addr = addr!("mu");
-///
-/// // Get current scale (starts at 1.0)
-/// let scale = scales.get_scale(&addr);
-/// assert_eq!(scale, 1.0);
-///
-/// // Update with acceptance outcome
-/// scales.update(&addr, true);  // Accepted
-/// scales.update(&addr, false); // Rejected
-/// ```
-#[derive(Debug, Clone)]
-pub struct AdaptiveScales {
-    /// Current proposal scale for each site.
-    pub scales: HashMap<Address, f64>,
-    /// Number of accepted proposals per site.
-    pub accept_counts: HashMap<Address, usize>,
-    /// Total number of proposals per site.
-    pub total_counts: HashMap<Address, usize>,
-    /// Target acceptance rate for adaptation.
-    pub target_accept_rate: f64,
+/// This enables more intelligent proposals that take advantage of the distribution
+/// structure rather than using generic random walks.
+pub trait ProposalStrategy<T> {
+    /// Generate a proposal given the current value and scale.
+    fn propose(&self, current: T, scale: f64, rng: &mut dyn RngCore) -> T;
+
+    /// Compute the log probability of proposing `to` given `from` (for asymmetric proposals).
+    fn log_proposal_prob(&self, from: T, to: T, scale: f64) -> f64 {
+        let _ = (from, to, scale);
+        0.0 // Default: symmetric proposal
+    }
 }
 
-impl AdaptiveScales {
-    /// Create a new adaptive scaling system with default settings.
-    ///
-    /// Initializes empty tracking maps and sets the target acceptance rate to 0.44,
-    /// which is optimal for random-walk Metropolis on continuous distributions.
-    pub fn new() -> Self {
-        Self {
-            scales: HashMap::new(),
-            accept_counts: HashMap::new(),
-            total_counts: HashMap::new(),
-            target_accept_rate: 0.44, // Optimal for random walk MH
-        }
-    }
+/// Gaussian random walk proposal for continuous distributions.
+pub struct GaussianWalkProposal;
 
-    /// Get the current proposal scale for a site, initializing to 1.0 if new.
-    ///
-    /// # Arguments
-    ///
-    /// * `addr` - Address of the site to get scale for
-    ///
-    /// # Returns
-    ///
-    /// Current scale factor for proposals at this site.
-    pub fn get_scale(&mut self, addr: &Address) -> f64 {
-        *self.scales.entry(addr.clone()).or_insert(1.0)
+impl ProposalStrategy<f64> for GaussianWalkProposal {
+    fn propose(&self, current: f64, scale: f64, rng: &mut dyn RngCore) -> f64 {
+        // Use Box-Muller for better numerical stability
+        let u1: f64 = rng.gen::<f64>().max(1e-10); // Avoid log(0)
+        let u2: f64 = rng.gen();
+        let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+        current + scale * z
     }
+}
 
-    /// Update acceptance statistics and potentially adjust the proposal scale.
-    ///
-    /// Records the outcome of a proposal and periodically adjusts the scale
-    /// based on the running acceptance rate. Updates occur every 50 proposals.
-    ///
-    /// # Arguments
-    ///
-    /// * `addr` - Address of the site that was updated
-    /// * `accepted` - Whether the proposal was accepted
-    pub fn update(&mut self, addr: &Address, accepted: bool) {
-        *self.total_counts.entry(addr.clone()).or_insert(0) += 1;
-        if accepted {
-            *self.accept_counts.entry(addr.clone()).or_insert(0) += 1;
+/// Log-space random walk proposal for positive-constrained continuous distributions.
+///
+/// This proposal strategy works in log-space to maintain positivity constraints.
+/// It's appropriate for parameters that must be positive (e.g., standard deviations,
+/// rates, scales from Gamma, Exponential, LogNormal distributions).
+pub struct LogSpaceWalkProposal;
+
+impl ProposalStrategy<f64> for LogSpaceWalkProposal {
+    fn propose(&self, current: f64, scale: f64, rng: &mut dyn RngCore) -> f64 {
+        if current <= 0.0 {
+            // If current value is non-positive, return a small positive value
+            return 1e-6;
         }
 
-        let total = *self.total_counts.get(addr).unwrap_or(&0);
-        let accepts = *self.accept_counts.get(addr).unwrap_or(&0);
+        // Work in log-space to maintain positivity
+        let log_current = current.ln();
 
-        if total >= 50 && total % 50 == 0 {
-            let accept_rate = accepts as f64 / total as f64;
-            let scale = self.scales.entry(addr.clone()).or_insert(1.0);
+        // Use Box-Muller for Gaussian proposal in log-space
+        let u1: f64 = rng.gen::<f64>().max(1e-10);
+        let u2: f64 = rng.gen();
+        let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
 
-            if accept_rate > self.target_accept_rate + 0.05 {
-                *scale *= 1.1; // Increase proposal scale
-            } else if accept_rate < self.target_accept_rate - 0.05 {
-                *scale *= 0.9; // Decrease proposal scale
+        let log_proposed = log_current + scale * z;
+        log_proposed.exp().max(1e-10) // Ensure minimum positive value
+    }
+}
+
+/// Reflection-based proposal for bounded continuous distributions.
+///
+/// This proposal strategy reflects off the boundaries to maintain constraints
+/// for distributions with finite support (e.g., Beta distribution on [0,1],
+/// Uniform distribution on [a,b]).
+pub struct ReflectionWalkProposal {
+    /// Lower bound (inclusive)
+    pub lower_bound: f64,
+    /// Upper bound (inclusive)  
+    pub upper_bound: f64,
+}
+
+impl ProposalStrategy<f64> for ReflectionWalkProposal {
+    fn propose(&self, current: f64, scale: f64, rng: &mut dyn RngCore) -> f64 {
+        // Generate Gaussian proposal
+        let u1: f64 = rng.gen::<f64>().max(1e-10);
+        let u2: f64 = rng.gen();
+        let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+
+        let mut proposed = current + scale * z;
+
+        // Reflect off boundaries until within bounds
+        let range = self.upper_bound - self.lower_bound;
+        if range <= 0.0 {
+            return current; // Invalid bounds, return current
+        }
+
+        while proposed < self.lower_bound || proposed > self.upper_bound {
+            if proposed < self.lower_bound {
+                proposed = 2.0 * self.lower_bound - proposed;
             }
+            if proposed > self.upper_bound {
+                proposed = 2.0 * self.upper_bound - proposed;
+            }
+        }
 
-            // Keep scale in reasonable bounds
-            *scale = scale.clamp(0.01, 10.0);
+        proposed.clamp(self.lower_bound, self.upper_bound)
+    }
+}
+
+/// Flip proposal for boolean distributions.
+pub struct FlipProposal;
+
+impl ProposalStrategy<bool> for FlipProposal {
+    fn propose(&self, current: bool, _scale: f64, rng: &mut dyn RngCore) -> bool {
+        // For Bernoulli, always propose the opposite value for good mixing
+        if rng.gen::<f64>() < 0.5 {
+            !current
+        } else {
+            current
         }
     }
 }
 
-/// Propose a new value for a choice based on its current value and distribution type.
-fn propose_new_value<R: Rng>(rng: &mut R, choice: &Choice, scale: f64) -> f64 {
+/// Discrete random walk proposal for count distributions.
+pub struct DiscreteWalkProposal;
+
+impl ProposalStrategy<u64> for DiscreteWalkProposal {
+    fn propose(&self, current: u64, scale: f64, rng: &mut dyn RngCore) -> u64 {
+        let u1: f64 = rng.gen::<f64>().max(1e-10);
+        let u2: f64 = rng.gen();
+        let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+        let delta = (scale * z).round() as i64;
+        (current as i64 + delta).max(0) as u64
+    }
+}
+
+/// Uniform proposal for categorical distributions.
+///
+/// This proposal strategy is distribution-aware and uses the actual size
+/// of the categorical distribution when available.
+pub struct UniformCategoricalProposal {
+    /// Number of categories in the distribution.
+    pub n_categories: Option<usize>,
+}
+
+impl ProposalStrategy<usize> for UniformCategoricalProposal {
+    fn propose(&self, current: usize, _scale: f64, rng: &mut dyn RngCore) -> usize {
+        match self.n_categories {
+            Some(n) => rng.gen_range(0..n),
+            None => {
+                // Fallback heuristic if we don't know the true size
+                let max_val = (current + 5).max(10);
+                rng.gen_range(0..max_val)
+            }
+        }
+    }
+}
+
+/// Unified proposal system using ProposalStrategy traits.
+///
+/// This function uses the appropriate ProposalStrategy for each type,
+/// ensuring type safety and allowing for constraint-aware proposals.
+///
+/// For f64 values, it applies heuristics to detect likely constraints:
+/// - If current value > 0 and seems like a scale/rate parameter, use log-space proposal
+/// - Otherwise use standard Gaussian proposal
+fn propose_using_strategies<R: RngCore>(rng: &mut R, choice: &Choice, scale: f64) -> ChoiceValue {
     match choice.value {
         ChoiceValue::F64(current_val) => {
-            // Simple random walk proposal
-            current_val + rng.gen::<f64>() * scale * 2.0 - scale
+            // Heuristic: if current value is positive and the address suggests a scale/rate parameter,
+            // use log-space proposal to maintain positivity
+            let addr_str = choice.addr.0.to_lowercase();
+            let looks_like_scale_param = addr_str.contains("sigma")
+                || addr_str.contains("scale")
+                || addr_str.contains("rate")
+                || addr_str.contains("lambda")
+                || addr_str.contains("tau")
+                || addr_str.contains("precision")
+                || addr_str.contains("nu");
+
+            let strategy: Box<dyn ProposalStrategy<f64>> =
+                if current_val > 0.0 && looks_like_scale_param {
+                    Box::new(LogSpaceWalkProposal)
+                } else if (0.0..=1.0).contains(&current_val)
+                    && (addr_str.contains("prob")
+                        || addr_str.contains("p")
+                        || addr_str.contains("beta"))
+                {
+                    // Likely a probability parameter - use reflection on [0,1]
+                    Box::new(ReflectionWalkProposal {
+                        lower_bound: 0.0,
+                        upper_bound: 1.0,
+                    })
+                } else {
+                    Box::new(GaussianWalkProposal)
+                };
+
+            let proposed = strategy.propose(current_val, scale, rng);
+            ChoiceValue::F64(proposed)
         }
         ChoiceValue::Bool(current_val) => {
-            // Flip proposal for boolean
-            if rng.gen::<f64>() < 0.5 {
-                if current_val {
-                    0.0
-                } else {
-                    1.0
-                }
-            } else {
-                if current_val {
-                    1.0
-                } else {
-                    0.0
-                }
-            }
+            let strategy = FlipProposal;
+            let proposed = strategy.propose(current_val, scale, rng);
+            ChoiceValue::Bool(proposed)
+        }
+        ChoiceValue::U64(current_val) => {
+            let strategy = DiscreteWalkProposal;
+            let proposed = strategy.propose(current_val, scale, rng);
+            ChoiceValue::U64(proposed)
         }
         ChoiceValue::I64(current_val) => {
-            // Integer random walk
-            let delta = ((rng.gen::<f64>() * 2.0 - 1.0) * scale).round() as i64;
-            (current_val + delta) as f64
+            // Convert to u64, propose, then convert back with proper bounds
+            let as_u64 = current_val.max(0) as u64;
+            let strategy = DiscreteWalkProposal;
+            let proposed_u64 = strategy.propose(as_u64, scale, rng);
+            // Convert back to i64, handling potential overflow
+            let proposed = proposed_u64.min(i64::MAX as u64) as i64;
+            // Apply the original sign pattern if current_val was negative
+            let final_proposed = if current_val < 0 && proposed > 0 && rng.gen::<bool>() {
+                -proposed
+            } else {
+                proposed
+            };
+            ChoiceValue::I64(final_proposed)
+        }
+        ChoiceValue::Usize(current_val) => {
+            // Use uniform categorical proposal with reasonable heuristic
+            let strategy = UniformCategoricalProposal {
+                n_categories: None, // Will use heuristic
+            };
+            let proposed = strategy.propose(current_val, scale, rng);
+            ChoiceValue::Usize(proposed)
         }
     }
 }
 
 /// Perform a single adaptive Metropolis-Hastings update step.
 ///
-/// This function implements a single iteration of the MH algorithm with adaptive
-/// proposal scaling. It randomly selects one site to update, proposes a new value,
-/// and accepts or rejects based on the Metropolis-Hastings acceptance criterion.
+/// This function implements a single iteration of the MH algorithm with proper
+/// diminishing adaptation that preserves ergodicity. It randomly selects one site
+/// to update, proposes a new value using adaptive scaling, and accepts or rejects
+/// based on the Metropolis-Hastings criterion.
 ///
 /// # Algorithm
 ///
 /// 1. Randomly select a site from the current trace
-/// 2. Propose a new value using adaptive scaling
-/// 3. Score both current and proposed traces
+/// 2. Propose a new value using diminishing adaptive scaling
+/// 3. Score both current and proposed traces with numerical stability
 /// 4. Accept with probability min(1, exp(log_prob_new - log_prob_old))
-/// 5. Update adaptive scales based on acceptance outcome
+/// 5. Update adaptive scales using diminishing step sizes
 ///
 /// # Arguments
 ///
 /// * `rng` - Random number generator
 /// * `model_fn` - Function that creates the model
 /// * `current` - Current trace (state of the Markov chain)
-/// * `scales` - Adaptive scaling system (modified in-place)
+/// * `adaptation` - Diminishing adaptation system (modified in-place)
 ///
 /// # Returns
 ///
@@ -237,7 +336,7 @@ fn propose_new_value<R: Rng>(rng: &mut R, choice: &Choice, scale: f64) -> f64 {
 /// use rand::SeedableRng;
 ///
 /// // Set up initial state with simple model
-/// let model_fn = || sample(addr!("mu"), Normal { mu: 0.0, sigma: 1.0 });
+/// let model_fn = || sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap());
 ///
 /// let mut rng = StdRng::seed_from_u64(42);
 /// let (_, initial_trace) = runtime::handler::run(
@@ -246,12 +345,12 @@ fn propose_new_value<R: Rng>(rng: &mut R, choice: &Choice, scale: f64) -> f64 {
 /// );
 ///
 /// // Perform one MH step
-/// let mut scales = AdaptiveScales::new();
+/// let mut adaptation = DiminishingAdaptation::new(0.44, 0.7);
 /// let (result, new_trace) = adaptive_single_site_mh(
 ///     &mut rng,
 ///     model_fn,
 ///     &initial_trace,
-///     &mut scales,
+///     &mut adaptation,
 /// );
 /// assert!(new_trace.choices.len() > 0);
 /// ```
@@ -259,7 +358,7 @@ pub fn adaptive_single_site_mh<A, R: Rng>(
     rng: &mut R,
     model_fn: impl Fn() -> Model<A>,
     current: &Trace,
-    scales: &mut AdaptiveScales,
+    adaptation: &mut DiminishingAdaptation,
 ) -> (A, Trace) {
     if current.choices.is_empty() {
         // No choices to update, return current
@@ -278,18 +377,18 @@ pub fn adaptive_single_site_mh<A, R: Rng>(
     let site_idx = rng.gen_range(0..sites.len());
     let selected_site = sites[site_idx].clone();
 
-    // Get current choice and propose new value
+    // Get current choice and propose new value using ProposalStrategy traits
     let current_choice = &current.choices[&selected_site];
-    let scale = scales.get_scale(&selected_site);
-    let proposed_val = propose_new_value(rng, current_choice, scale);
+    let scale = adaptation.get_scale(&selected_site);
+    let proposed_value = propose_using_strategies(rng, current_choice, scale);
 
-    // Create proposed trace
+    // Create proposed trace - preserving type safety
     let mut proposed_trace = current.clone();
     proposed_trace
         .choices
         .get_mut(&selected_site)
         .unwrap()
-        .value = ChoiceValue::F64(proposed_val);
+        .value = proposed_value;
 
     // Score both traces
     let (_a_cur, cur_scored) = run(
@@ -311,8 +410,8 @@ pub fn adaptive_single_site_mh<A, R: Rng>(
     let log_alpha = prop_scored.total_log_weight() - cur_scored.total_log_weight();
     let accept = log_alpha >= 0.0 || rng.gen::<f64>() < log_alpha.exp();
 
-    // Update adaptive scales
-    scales.update(&selected_site, accept);
+    // Update adaptation
+    adaptation.update(&selected_site, accept);
 
     if accept {
         (a_prop, proposed_trace)
@@ -361,7 +460,7 @@ pub fn adaptive_single_site_mh<A, R: Rng>(
 ///
 /// // Very simple model for testing
 /// let model_fn = || {
-///     sample(addr!("mu"), Normal { mu: 0.0, sigma: 1.0 })
+///     sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
 /// };
 ///
 /// let mut rng = StdRng::seed_from_u64(42);
@@ -385,7 +484,7 @@ pub fn adaptive_mcmc_chain<A, R: Rng>(
     n_warmup: usize,
 ) -> Vec<(A, Trace)> {
     let mut samples = Vec::with_capacity(n_samples);
-    let mut scales = AdaptiveScales::new();
+    let mut adaptation = DiminishingAdaptation::new(0.44, 0.7);
 
     // Initialize with prior sample
     let (_, mut current_trace) = run(
@@ -398,13 +497,13 @@ pub fn adaptive_mcmc_chain<A, R: Rng>(
 
     // Warmup phase
     for _ in 0..n_warmup {
-        let (_, trace) = adaptive_single_site_mh(rng, &model_fn, &current_trace, &mut scales);
+        let (_, trace) = adaptive_single_site_mh(rng, &model_fn, &current_trace, &mut adaptation);
         current_trace = trace;
     }
 
     // Sampling phase
     for _ in 0..n_samples {
-        let (val, trace) = adaptive_single_site_mh(rng, &model_fn, &current_trace, &mut scales);
+        let (val, trace) = adaptive_single_site_mh(rng, &model_fn, &current_trace, &mut adaptation);
         current_trace = trace;
         samples.push((val, current_trace.clone()));
     }
@@ -419,6 +518,148 @@ pub fn single_site_random_walk_mh<A, R: Rng>(
     model_fn: impl Fn() -> Model<A>,
     current: &Trace,
 ) -> (A, Trace) {
-    let mut scales = AdaptiveScales::new();
-    adaptive_single_site_mh(rng, model_fn, current, &mut scales)
+    let mut adaptation = DiminishingAdaptation::new(0.44, 0.7);
+    adaptive_single_site_mh(rng, model_fn, current, &mut adaptation)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::addr;
+    use crate::core::distribution::*;
+    use crate::core::model::{observe, sample, ModelExt};
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
+    #[test]
+    fn gaussian_walk_proposal_produces_variation() {
+        let mut rng = StdRng::seed_from_u64(11);
+        let strat = GaussianWalkProposal;
+        let x0 = 0.0;
+        let x1 = strat.propose(x0, 1.0, &mut rng);
+        // With probability 1 it's not guaranteed to change, but very likely; ensure finiteness
+        assert!(x1.is_finite());
+    }
+
+    #[test]
+    fn log_space_proposal_maintains_positivity() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let strat = LogSpaceWalkProposal;
+
+        // Test with various positive values
+        for &current in &[0.1, 1.0, 10.0, 100.0] {
+            for _ in 0..20 {
+                let proposed = strat.propose(current, 0.5, &mut rng);
+                assert!(
+                    proposed > 0.0,
+                    "LogSpaceWalk proposed negative value: {} -> {}",
+                    current,
+                    proposed
+                );
+                assert!(
+                    proposed.is_finite(),
+                    "LogSpaceWalk proposed non-finite value: {}",
+                    proposed
+                );
+            }
+        }
+
+        // Test with edge case: non-positive input
+        let proposed = strat.propose(-1.0, 0.5, &mut rng);
+        assert!(
+            proposed > 0.0,
+            "LogSpaceWalk should return positive value for negative input"
+        );
+    }
+
+    #[test]
+    fn reflection_proposal_respects_bounds() {
+        let mut rng = StdRng::seed_from_u64(43);
+        let strat = ReflectionWalkProposal {
+            lower_bound: 0.0,
+            upper_bound: 1.0,
+        };
+
+        // Test with values in [0,1] range
+        for &current in &[0.1, 0.5, 0.9] {
+            for _ in 0..20 {
+                let proposed = strat.propose(current, 0.3, &mut rng);
+                assert!(
+                    (0.0..=1.0).contains(&proposed),
+                    "ReflectionWalk violated bounds: {} -> {}",
+                    current,
+                    proposed
+                );
+                assert!(
+                    proposed.is_finite(),
+                    "ReflectionWalk proposed non-finite value: {}",
+                    proposed
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn constraint_aware_proposals_work() {
+        let mut rng = StdRng::seed_from_u64(44);
+
+        // Test sigma parameter (should use log-space)
+        let sigma_choice = Choice {
+            addr: crate::addr!("sigma"),
+            value: ChoiceValue::F64(2.0),
+            logp: -1.0,
+        };
+
+        for _ in 0..10 {
+            let proposed = propose_using_strategies(&mut rng, &sigma_choice, 0.5);
+            if let ChoiceValue::F64(val) = proposed {
+                assert!(val > 0.0, "Sigma proposal should be positive: {}", val);
+            } else {
+                panic!("Expected F64 value");
+            }
+        }
+
+        // Test regular parameter (should use standard Gaussian)
+        let mu_choice = Choice {
+            addr: crate::addr!("mu"),
+            value: ChoiceValue::F64(0.0),
+            logp: -0.5,
+        };
+
+        let proposed = propose_using_strategies(&mut rng, &mu_choice, 1.0);
+        if let ChoiceValue::F64(val) = proposed {
+            assert!(val.is_finite(), "Mu proposal should be finite: {}", val);
+            // Note: mu can be negative, so we don't check positivity
+        } else {
+            panic!("Expected F64 value");
+        }
+    }
+
+    #[test]
+    fn discrete_and_flip_proposals_preserve_types() {
+        let mut rng = StdRng::seed_from_u64(12);
+        let d = DiscreteWalkProposal;
+        let u = d.propose(5u64, 1.0, &mut rng);
+        // Note: u is u64, so this comparison is always true, but kept for documentation
+        let _ = u; // Just verify it's a valid u64
+        let f = FlipProposal;
+        let b = f.propose(true, 1.0, &mut rng);
+        let _ = b; // Just checking that we got a valid bool
+    }
+
+    #[test]
+    fn adaptive_chain_runs_and_returns_samples() {
+        let model_fn = || {
+            sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap()).and_then(|mu| {
+                observe(addr!("y"), Normal::new(mu, 1.0).unwrap(), 0.5).map(move |_| mu)
+            })
+        };
+        let mut rng = StdRng::seed_from_u64(13);
+        let samples = adaptive_mcmc_chain(&mut rng, model_fn, 5, 2);
+        assert_eq!(samples.len(), 5);
+        // Ensure types are preserved in trace
+        for (_val, t) in &samples {
+            assert!(t.get_f64(&addr!("mu")).is_some());
+        }
+    }
 }

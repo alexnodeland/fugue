@@ -1,4 +1,5 @@
-//! Runtime components: handler traits, built-in interpreters, and traces.
+#![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/docs/runtime/README.md"))]
 pub mod handler;
 pub mod interpreters;
+pub mod memory;
 pub mod trace;

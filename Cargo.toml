@@ -1,14 +1,18 @@
 [package]
-name = "fugue"
-version = "0.2.0"
+name = "fugue-ppl"
+version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Monadic-style PPL with effects/handlers, traces, and pluggable inference."
+description = "Production-ready monadic PPL with numerically stable inference, comprehensive diagnostics, and memory optimization."
 readme = "README.md"
-keywords = ["probabilistic-programming", "ppl", "monad", "effects", "traces"]
+keywords = ["probability-monad", "ppl", "monad", "effects", "traces"]
 categories = ["science", "mathematics"]
-documentation = "https://docs.rs/.../fugue"
-repository = "https://github.com/alexandernodeland/fugue"
+documentation = "https://docs.rs/fugue-ppl"
+repository = "https://github.com/alexandernodeland/fugue-ppl"
+
+
+[lib]
+name = "fugue"
 
 [package.metadata.docs.rs]
 # Enable all features for documentation
@@ -16,11 +20,33 @@ all-features = true
 # Use nightly for better documentation features
 rustdoc-args = ["--cfg", "docsrs"]
 
+
 [dependencies]
+# Core dependencies
 rand = "0.8"
 rand_distr = "0.4"
 libm = "0.2"
 
-[dev-dependencies]
+[dev-dependencies]  
+# CLI dependencies
 clap = { version = "4", features = ["derive"] }
+# Testing dependencies  
 proptest = "1.0"
+cargo-llvm-cov = "0.6.18"
+# Benchmarking dependencies
+criterion = { version = "0.5", features = ["html_reports"] }
+# Documentation Dependencies
+mdbook = "0.4.52"
+mdbook-mermaid = "0.15.0"
+mdbook-katex = "0.9.4"
+mdbook-admonish = "1.20.0"
+mdbook-linkcheck = "0.7.7"
+mdbook-toc = "0.14.2"
+
+[[bench]]
+name = "memory_benchmarks"
+harness = false
+
+[[bench]]
+name = "mcmc_benchmarks"
+harness = false

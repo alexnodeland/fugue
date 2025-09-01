@@ -1,2 +1,9 @@
 target/
 .scratch/
+coverage/
+*.profraw
+*.profdata
+tarpaulin-report.html
+cobertura.xml
+lcov.info
+.env

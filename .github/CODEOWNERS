@@ -1,0 +1,11 @@
+# Docs reviewers
+/docs/                      @alexnodeland
+/examples/                  @alexnodeland
+# Crate API reviewers
+/src/                       @alexnodeland
+/tests/                     @alexnodeland
+/benches/                   @alexnodeland
+# CI and meta
+/.github/                   @alexnodeland
+/.devcontainer/             @alexnodeland
+/.vscode/                   @alexnodeland

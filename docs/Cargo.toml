@@ -1,0 +1,10 @@
+[package]
+name = "fugue-docs-tests"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# The package is named fugue-ppl but the library is still called fugue
+fugue = { package = "fugue-ppl", path = ".." }
+rand = "0.8"
+rand_distr = "0.4"

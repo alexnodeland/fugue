@@ -1,109 +1,56 @@
-//! Generic handler interface and model execution engine.
-//!
-//! This module provides the core abstraction for interpreting probabilistic models.
-//! The `Handler` trait defines how to process the three fundamental effects in
-//! probabilistic programming: sampling, observation, and factoring. Different
-//! handler implementations enable different execution modes (prior sampling,
-//! conditioning, scoring, etc.).
-//!
-//! ## Handler Pattern
-//!
-//! Handlers implement the algebraic effects pattern, where each effect
-//! (`sample`, `observe`, `factor`) is handled by a specific method. This design
-//! enables:
-//! - **Modularity**: Different handlers for different purposes
-//! - **Composability**: Handlers can be combined and extended
-//! - **Testability**: Effects can be mocked and controlled
-//!
-//! ## Execution Model
-//!
-//! The `run` function acts as the interpreter, walking through a `Model` and
-//! dispatching effects to the handler. It returns both the model's final value
-//! and the accumulated execution trace.
-//!
-//! # Examples
-//!
-//! ```rust
-//! use fugue::*;
-//! use rand::rngs::StdRng;
-//! use rand::SeedableRng;
-//!
-//! // Run a model with prior sampling
-//! let model = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 });
-//! let mut rng = StdRng::seed_from_u64(42);
-//! let (value, trace) = runtime::handler::run(
-//!     PriorHandler {
-//!         rng: &mut rng,
-//!         trace: Trace::default(),
-//!     },
-//!     model,
-//! );
-//! println!("Sampled value: {}, log-weight: {}", value, trace.total_log_weight());
-//! ```
+#![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/docs/runtime/handler.md"))]
+
 use crate::core::address::Address;
-use crate::core::distribution::DistributionF64;
+use crate::core::distribution::Distribution;
 use crate::core::model::Model;
 use crate::runtime::trace::Trace;
-/// Trait for handling probabilistic effects during model execution.
+
+/// Core trait for interpreting probabilistic model effects.
 ///
-/// Handlers define the interpretation of the three fundamental effects in probabilistic
-/// programming. Different handler implementations enable different execution modes:
-/// - Prior sampling (draw fresh random values)
-/// - Replay (use values from an existing trace)
-/// - Scoring (compute log-probability of a fixed trace)
+/// Handlers define how to interpret the three fundamental effects in probabilistic programming:
+/// sampling, observation, and factoring. Different implementations enable different execution modes.
 ///
-/// # Required Methods
-///
-/// - [`on_sample`](Self::on_sample): Handle sampling from a distribution
-/// - [`on_observe`](Self::on_observe): Handle conditioning on observed data
-/// - [`on_factor`](Self::on_factor): Handle arbitrary log-weight contributions
-/// - [`finish`](Self::finish): Finalize and return the accumulated trace
-///
-/// # Examples
-///
+/// Example:
 /// ```rust
-/// use fugue::*;
-/// use rand::rngs::StdRng;
-/// use rand::SeedableRng;
+/// # use fugue::*;
+/// # use fugue::runtime::interpreters::PriorHandler;
+/// # use rand::rngs::StdRng;
+/// # use rand::SeedableRng;
 ///
 /// // Use a built-in handler
 /// let mut rng = StdRng::seed_from_u64(42);
 /// let handler = PriorHandler {
 ///     rng: &mut rng,
-///     trace: Trace::default(),
+///     trace: Trace::default()
 /// };
-///
-/// let model = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 });
+/// let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
 /// let (result, trace) = runtime::handler::run(handler, model);
 /// ```
 pub trait Handler {
-    /// Handle a sampling operation.
-    ///
-    /// This method is called when the model encounters a `sample` operation.
-    /// The handler decides what value to return and may record the choice in a trace.
-    ///
-    /// # Arguments
-    ///
-    /// * `addr` - Address identifying the sampling site
-    /// * `dist` - Distribution to sample from
-    ///
-    /// # Returns
-    ///
-    /// The value to use for this sampling site.
-    fn on_sample(&mut self, addr: &Address, dist: &dyn DistributionF64) -> f64;
-    
-    /// Handle an observation operation.
-    ///
-    /// This method is called when the model encounters an `observe` operation.
-    /// The handler typically adds the log-probability of the observation to the trace.
-    ///
-    /// # Arguments
-    ///
-    /// * `addr` - Address identifying the observation site
-    /// * `dist` - Distribution that generated the observed value
-    /// * `value` - The observed value
-    fn on_observe(&mut self, addr: &Address, dist: &dyn DistributionF64, value: f64);
-    
+    /// Handle an f64 sampling operation (continuous distributions).
+    fn on_sample_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>) -> f64;
+
+    /// Handle a bool sampling operation (Bernoulli).
+    fn on_sample_bool(&mut self, addr: &Address, dist: &dyn Distribution<bool>) -> bool;
+
+    /// Handle a u64 sampling operation (Poisson, Binomial).
+    fn on_sample_u64(&mut self, addr: &Address, dist: &dyn Distribution<u64>) -> u64;
+
+    /// Handle a usize sampling operation (Categorical).
+    fn on_sample_usize(&mut self, addr: &Address, dist: &dyn Distribution<usize>) -> usize;
+
+    /// Handle an f64 observation operation.
+    fn on_observe_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>, value: f64);
+
+    /// Handle a bool observation operation.
+    fn on_observe_bool(&mut self, addr: &Address, dist: &dyn Distribution<bool>, value: bool);
+
+    /// Handle a u64 observation operation.
+    fn on_observe_u64(&mut self, addr: &Address, dist: &dyn Distribution<u64>, value: u64);
+
+    /// Handle a usize observation operation.
+    fn on_observe_usize(&mut self, addr: &Address, dist: &dyn Distribution<usize>, value: usize);
+
     /// Handle a factor operation.
     ///
     /// This method is called when the model encounters a `factor` operation.
@@ -113,7 +60,7 @@ pub trait Handler {
     ///
     /// * `logw` - Log-weight to add to the model's total weight
     fn on_factor(&mut self, logw: f64);
-    
+
     /// Finalize the handler and return the accumulated trace.
     ///
     /// This method is called after model execution completes to retrieve
@@ -123,67 +70,89 @@ pub trait Handler {
         Self: Sized;
 }
 
-/// Execute a probabilistic model using the given handler.
+/// Execute a probabilistic model using the provided handler.
 ///
-/// This is the core execution engine for probabilistic models. It interprets
-/// a `Model<A>` by dispatching effects to the provided handler and returns
-/// both the model's final result and the accumulated execution trace.
+/// This is the core execution engine for probabilistic models. It walks through
+/// the model structure and dispatches effects to the handler, returning both
+/// the model's final result and the accumulated execution trace.
 ///
-/// The execution proceeds by pattern matching on the model structure:
-/// - `Pure` values are returned directly
-/// - `SampleF` operations are handled by calling `handler.on_sample`
-/// - `ObserveF` operations are handled by calling `handler.on_observe`
-/// - `FactorF` operations are handled by calling `handler.on_factor`
-///
-/// # Arguments
-///
-/// * `h` - Handler that defines how to interpret effects
-/// * `m` - Model to execute
-///
-/// # Returns
-///
-/// A tuple containing:
-/// - The final result of type `A` produced by the model
-/// - The execution trace recording all choices and weights
-///
-/// # Examples
-///
+/// Example:
 /// ```rust
-/// use fugue::*;
-/// use rand::rngs::StdRng;
-/// use rand::SeedableRng;
+/// # use fugue::*;
+/// # use fugue::runtime::interpreters::PriorHandler;
+/// # use rand::rngs::StdRng;
+/// # use rand::SeedableRng;
 ///
-/// // Execute a simple model
-/// let model = sample(addr!("x"), Normal { mu: 0.0, sigma: 1.0 })
-///     .map(|x| x * 2.0);
+/// // Create a simple model
+/// let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+///     .bind(|x| observe(addr!("y"), Normal::new(x, 0.1).unwrap(), 1.2))
+///     .map(|_| "completed");
 ///
-/// let mut rng = StdRng::seed_from_u64(42);
-/// let handler = PriorHandler {
-///     rng: &mut rng,
-///     trace: Trace::default(),
-/// };
-///
-/// let (result, trace) = runtime::handler::run(handler, model);
-/// println!("Result: {}, Log-weight: {}", result, trace.total_log_weight());
+/// let mut rng = StdRng::seed_from_u64(123);
+/// let (result, trace) = runtime::handler::run(
+///     PriorHandler { rng: &mut rng, trace: Trace::default() },
+///     model
+/// );
+/// assert_eq!(result, "completed");
+/// assert!(trace.total_log_weight().is_finite());
 /// ```
 pub fn run<A>(mut h: impl Handler, m: Model<A>) -> (A, Trace) {
     fn go<A>(h: &mut impl Handler, m: Model<A>) -> A {
         match m {
             Model::Pure(a) => a,
-            Model::SampleF { addr, dist, k } => {
-                let x = h.on_sample(&addr, &*dist);
+            Model::SampleF64 { addr, dist, k } => {
+                let x = h.on_sample_f64(&addr, &*dist);
                 go(h, k(x))
             }
-            Model::ObserveF {
+            Model::SampleBool { addr, dist, k } => {
+                let x = h.on_sample_bool(&addr, &*dist);
+                go(h, k(x))
+            }
+            Model::SampleU64 { addr, dist, k } => {
+                let x = h.on_sample_u64(&addr, &*dist);
+                go(h, k(x))
+            }
+            Model::SampleUsize { addr, dist, k } => {
+                let x = h.on_sample_usize(&addr, &*dist);
+                go(h, k(x))
+            }
+            Model::ObserveF64 {
                 addr,
                 dist,
                 value,
                 k,
             } => {
-                h.on_observe(&addr, &*dist, value);
+                h.on_observe_f64(&addr, &*dist, value);
                 go(h, k(()))
             }
-            Model::FactorF { logw, k } => {
+            Model::ObserveBool {
+                addr,
+                dist,
+                value,
+                k,
+            } => {
+                h.on_observe_bool(&addr, &*dist, value);
+                go(h, k(()))
+            }
+            Model::ObserveU64 {
+                addr,
+                dist,
+                value,
+                k,
+            } => {
+                h.on_observe_u64(&addr, &*dist, value);
+                go(h, k(()))
+            }
+            Model::ObserveUsize {
+                addr,
+                dist,
+                value,
+                k,
+            } => {
+                h.on_observe_usize(&addr, &*dist, value);
+                go(h, k(()))
+            }
+            Model::Factor { logw, k } => {
                 h.on_factor(logw);
                 go(h, k(()))
             }
@@ -192,4 +161,42 @@ pub fn run<A>(mut h: impl Handler, m: Model<A>) -> (A, Trace) {
     let a = go(&mut h, m);
     let t = h.finish();
     (a, t)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::addr;
+    use crate::core::distribution::*;
+    use crate::core::model::ModelExt;
+    use crate::runtime::interpreters::PriorHandler;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
+    #[test]
+    fn run_accumulates_logs_for_sample_observe_factor() {
+        // Model: sample x ~ Normal(0,1); observe y ~ Normal(x,1) with value 0.5; factor(-1.0)
+        let model = crate::core::model::sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+            .and_then(|x| {
+                crate::core::model::observe(addr!("y"), Normal::new(x, 1.0).unwrap(), 0.5)
+            })
+            .and_then(|_| crate::core::model::factor(-1.0));
+
+        let mut rng = StdRng::seed_from_u64(123);
+        let (_a, trace) = crate::runtime::handler::run(
+            PriorHandler {
+                rng: &mut rng,
+                trace: Trace::default(),
+            },
+            model,
+        );
+
+        // Should have a sample recorded and finite prior
+        assert!(trace.choices.contains_key(&addr!("x")));
+        assert!(trace.log_prior.is_finite());
+        // Observation contributes to likelihood
+        assert!(trace.log_likelihood.is_finite());
+        // Factor contributes exact -1.0
+        assert!((trace.log_factors + 1.0).abs() < 1e-12);
+    }
 }
