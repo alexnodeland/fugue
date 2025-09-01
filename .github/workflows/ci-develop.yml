@@ -22,10 +22,6 @@ jobs:
         with:
           workspaces: . -> target
 
-      - name: Install mdBook + plugins
-        run: |
-          cargo install mdbook mdbook-linkcheck mdbook-admonish mdbook-mermaid || true
-
       - name: Format (check)
         run: cargo fmt --all -- --check
 
@@ -39,6 +35,9 @@ jobs:
         run: cargo test --doc
 
       # Temporarily disabled until mdBook doctest dependency issues are resolved
+      # - name: Install mdBook + plugins
+      # run: |
+      #   cargo install mdbook mdbook-linkcheck mdbook-admonish mdbook-mermaid || true
       # - name: mdBook tests (docs/)
       #   if: hashFiles('docs/**/*.md') != ''
       #   run: mdbook test docs
