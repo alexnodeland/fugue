@@ -37,11 +37,7 @@ let make_model = || {
 // Run inference with pooled handler (zero allocations after warm-up)
 for iteration in 0..1000 {
     let (_, trace) = runtime::handler::run(
-        PooledPriorHandler {
-            rng: &mut rng,
-            trace_builder: TraceBuilder::new(),
-            pool: &mut pool,
-        },
+        PooledPriorHandler::new(&mut rng, &mut pool),
         make_model()
     );
     

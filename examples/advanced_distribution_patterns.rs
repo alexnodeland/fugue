@@ -193,7 +193,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(42);
 
         // Test Beta-Bernoulli conjugacy
-        let prior = Beta::new(1.0, 1.0).unwrap(); // Uniform prior
+        let _prior = Beta::new(1.0, 1.0).unwrap(); // Uniform prior
         let p = 0.7; // True parameter
 
         // Simulate data
@@ -208,7 +208,7 @@ mod tests {
         }
 
         // Posterior should concentrate around true value
-        let posterior =
+        let _posterior =
             Beta::new(1.0 + successes as f64, 1.0 + (trials - successes) as f64).unwrap();
         let posterior_mean = (1.0 + successes as f64) / (2.0 + trials as f64);
 

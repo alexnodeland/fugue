@@ -610,11 +610,7 @@ fn test_memory_management_coverage() {
 
     // Test PooledPriorHandler integration
     let model = sample(addr!("test"), Normal::new(0.0, 1.0).unwrap());
-    let pooled_handler = runtime::memory::PooledPriorHandler {
-        rng: &mut rng,
-        trace_builder: runtime::memory::TraceBuilder::new(),
-        pool: &mut pool,
-    };
+    let pooled_handler = runtime::memory::PooledPriorHandler::new(&mut rng, &mut pool);
 
     let (result, final_trace) = runtime::handler::run(pooled_handler, model);
     assert!(result.is_finite());

@@ -151,7 +151,8 @@ fn _varying_slopes_model(
 
 // ANCHOR: mixed_effects_model
 // Full hierarchical model: both intercepts and slopes vary by group
-fn _mixed_effects_model(
+#[allow(dead_code)]
+fn mixed_effects_model(
     x_data: Vec<f64>,
     y_data: Vec<f64>,
     group_ids: Vec<usize>,

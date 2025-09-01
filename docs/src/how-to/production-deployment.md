@@ -263,15 +263,11 @@ $$t = \frac{\bar{X}_A - \bar{X}_B}{\sqrt{\frac{s_A^2}{n_A} + \frac{s_B^2}{n_B}}}
 ### Memory Management
 
 ```rust,ignore
-use fugue::runtime::memory::{TracePool, PooledPriorHandler, TraceBuilder};
+use fugue::runtime::memory::{TracePool, PooledPriorHandler};
 
 // Production memory management
 let mut pool = TracePool::new(1000);
-let handler = PooledPriorHandler {
-    rng: &mut rng,
-    trace_builder: TraceBuilder::new(),
-    pool: &mut pool,
-};
+let handler = PooledPriorHandler::new(&mut rng, &mut pool);
 ```
 
 ### Batch Processing
@@ -286,11 +282,7 @@ struct BatchProcessor {
 impl BatchProcessor {
     fn process_batch(&mut self, requests: Vec<InferenceRequest>) -> Vec<InferenceResult> {
         requests.into_iter().map(|req| {
-            let handler = PooledPriorHandler {
-                rng: &mut req.rng,
-                trace_builder: TraceBuilder::new(),
-                pool: &mut self.pool,
-            };
+            let handler = PooledPriorHandler::new(&mut req.rng, &mut self.pool);
             self.run_single_inference(handler, req.model)
         }).collect()
     }
@@ -582,7 +574,7 @@ fn log_inference_request(
 // Do: Reuse pools across requests
 let mut pool = TracePool::new(100);
 for request in requests {
-    let handler = PooledPriorHandler { pool: &mut pool, .. };
+    let handler = PooledPriorHandler::new(&mut request.rng, &mut pool);
     process_request(handler, request);
 }
 ```

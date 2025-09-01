@@ -30,15 +30,12 @@ fn main() {
     let start = Instant::now();
     for _iteration in 0..1000 {
         // Use pooled handler for efficient memory reuse
-        let (_result, _trace) = runtime::handler::run(
-            PooledPriorHandler {
-                rng: &mut rng,
-                trace_builder: TraceBuilder::new(),
-                pool: &mut pool,
-            },
+        let (_result, trace) = runtime::handler::run(
+            PooledPriorHandler::new(&mut rng, &mut pool),
             make_model(),
         );
-        // Trace automatically returned to pool
+        // Return trace to pool for reuse
+        pool.return_trace(trace);
     }
     let pooled_time = start.elapsed();
 
@@ -273,14 +270,12 @@ fn main() {
     let mut batch_results = Vec::with_capacity(batch_size);
 
     for _batch in 0..batch_size {
-        let (result, _trace) = runtime::handler::run(
-            PooledPriorHandler {
-                rng: &mut rng,
-                trace_builder: TraceBuilder::new(),
-                pool: &mut batch_pool,
-            },
+        let (result, trace) = runtime::handler::run(
+            PooledPriorHandler::new(&mut rng, &mut batch_pool),
             make_model(),
         );
+        // Return trace to pool for reuse
+        batch_pool.return_trace(trace);
         batch_results.push(result);
     }
 
@@ -335,21 +330,18 @@ mod tests {
         let mut pool = TracePool::new(10);
         let mut rng = thread_rng();
 
-        // Test pool reuse
+        // Test pool reuse with PooledPriorHandler
         for _i in 0..20 {
-            let (_, _trace) = runtime::handler::run(
-                PooledPriorHandler {
-                    rng: &mut rng,
-                    trace_builder: TraceBuilder::new(),
-                    pool: &mut pool,
-                },
+            let (_, trace) = runtime::handler::run(
+                PooledPriorHandler::new(&mut rng, &mut pool),
                 sample(addr!("test"), Normal::new(0.0, 1.0).unwrap()),
             );
+            // Return trace to pool for reuse
+            pool.return_trace(trace);
         }
 
         let stats = pool.stats();
-        assert!(stats.hit_ratio() > 50.0, "Pool should have good hit ratio");
-        // Pool capacity is not directly exposed, but we can verify basic functionality
+        assert!(stats.hit_ratio() > 50.0, "Pool should have good hit ratio, got {:.1}%", stats.hit_ratio());
         assert!(stats.hits + stats.misses > 0, "Pool should have been used");
     }
 

@@ -1,6 +1,6 @@
 use fugue::runtime::handler::Handler;
 use fugue::runtime::interpreters::PriorHandler;
-use fugue::runtime::memory::{PooledPriorHandler, TraceBuilder, TracePool};
+use fugue::runtime::memory::{PooledPriorHandler, TracePool};
 use fugue::runtime::trace::{ChoiceValue, Trace};
 use fugue::*;
 use rand::thread_rng;
@@ -292,11 +292,7 @@ impl ConfigurableModelRunner {
         let model = self.create_model(); // Create model before borrowing
         let result = if self.config.environment == "production" {
             // Use safe, fault-tolerant execution in production
-            let base_handler = PooledPriorHandler {
-                rng: &mut rng,
-                trace_builder: TraceBuilder::new(),
-                pool: &mut self.pool,
-            };
+            let base_handler = PooledPriorHandler::new(&mut rng, &mut self.pool);
             let robust_handler =
                 RobustProductionHandler::new(base_handler, self.config.error_threshold);
 
@@ -707,17 +703,16 @@ impl InputValidator {
 
     fn sanitize_address_component(component: &str) -> Result<String, String> {
         // Prevent injection attacks in address components
-        let sanitized = component
-            .chars()
-            .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
-            .collect::<String>();
+        if component.chars().any(|c| !(c.is_alphanumeric() || c == '_' || c == '-')) {
+            return Err("Address component contains invalid characters".to_string());
+        }
 
-        if sanitized.len() > 50 {
+        if component.len() > 50 {
             Err("Address component too long".to_string())
-        } else if sanitized.is_empty() {
+        } else if component.is_empty() {
             Err("Address component cannot be empty".to_string())
         } else {
-            Ok(sanitized)
+            Ok(component.to_string())
         }
     }
 }
@@ -1151,7 +1146,7 @@ mod tests {
         // Record some metrics
         metrics.record_inference_time(Duration::from_millis(50));
         metrics.record_inference_time(Duration::from_millis(75));
-        metrics.increment_error_count();
+        metrics._increment_error_count();
 
         let stats = metrics.get_stats();
 
