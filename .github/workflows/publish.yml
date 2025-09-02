@@ -19,8 +19,11 @@ jobs:
 
       - name: Check if version is already published
         run: |
-          PACKAGE_NAME=$(cargo metadata --format-version=1 | jq -r '.packages[0].name')
-          PACKAGE_VERSION=$(cargo metadata --format-version=1 | jq -r '.packages[0].version')
+          # Get the workspace package info (not dependencies)
+          WORKSPACE_ROOT=$(cargo metadata --format-version=1 | jq -r '.workspace_root')
+          PACKAGE_NAME=$(cargo metadata --format-version=1 | jq -r --arg root "$WORKSPACE_ROOT" '.packages[] | select(.manifest_path | startswith($root)) | .name')
+          PACKAGE_VERSION=$(cargo metadata --format-version=1 | jq -r --arg root "$WORKSPACE_ROOT" '.packages[] | select(.manifest_path | startswith($root)) | .version')
+          
           echo "Checking if $PACKAGE_NAME version $PACKAGE_VERSION exists on crates.io..."
           
           # Check if the crate exists at all
@@ -39,16 +42,6 @@ jobs:
             fi
           else
             echo "Failed to check crates.io (HTTP $HTTP_STATUS). Proceeding with publish attempt."
-          fi
-
-      - name: Check if version is already published
-        run: |
-          PACKAGE_NAME=$(cargo metadata --format-version=1 | jq -r '.packages[0].name')
-          PACKAGE_VERSION=$(cargo metadata --format-version=1 | jq -r '.packages[0].version')
-          EXISTS=$(curl -s https://crates.io/api/v1/crates/$PACKAGE_NAME | jq -r ".versions[] | select(.num == \"$PACKAGE_VERSION\")")
-          if [ -n "$EXISTS" ]; then
-            echo "Version $PACKAGE_VERSION of $PACKAGE_NAME already exists on crates.io. Skipping publish."
-            exit 0
           fi
 
       - name: Publish to crates.io
