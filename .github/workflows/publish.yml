@@ -20,6 +20,16 @@ jobs:
           toolchain: stable
           override: true
 
+      - name: Check if version is already published
+        run: |
+          PACKAGE_NAME=$(cargo metadata --format-version=1 | jq -r '.packages[0].name')
+          PACKAGE_VERSION=$(cargo metadata --format-version=1 | jq -r '.packages[0].version')
+          EXISTS=$(curl -s https://crates.io/api/v1/crates/$PACKAGE_NAME | jq -r ".versions[] | select(.num == \"$PACKAGE_VERSION\")")
+          if [ -n "$EXISTS" ]; then
+            echo "Version $PACKAGE_VERSION of $PACKAGE_NAME already exists on crates.io. Skipping publish."
+            exit 0
+          fi
+
       - name: Publish to crates.io
         run: cargo publish
         env:
