@@ -24,27 +24,20 @@ jobs:
           PACKAGE_NAME=$(cargo metadata --format-version=1 | jq -r --arg root "$WORKSPACE_ROOT" '.packages[] | select(.manifest_path | startswith($root)) | .name')
           PACKAGE_VERSION=$(cargo metadata --format-version=1 | jq -r --arg root "$WORKSPACE_ROOT" '.packages[] | select(.manifest_path | startswith($root)) | .version')
           
-          echo "Checking if $PACKAGE_NAME version $PACKAGE_VERSION exists on crates.io..."
+          echo "Checking if $PACKAGE_NAME version $PACKAGE_VERSION can be published..."
           
-          # Check if the crate exists at all
-          HTTP_STATUS=$(curl -s -o /tmp/crate_response.json -w "%{http_code}" https://crates.io/api/v1/crates/$PACKAGE_NAME)
+          # Use cargo publish --dry-run to check if we can publish this version
+          # This is the most reliable method as it uses the same logic as actual publish
+          DRY_RUN_OUTPUT=$(cargo publish --dry-run --allow-dirty 2>&1)
           
-          if [ "$HTTP_STATUS" = "404" ]; then
-            echo "Package $PACKAGE_NAME does not exist on crates.io. Proceeding with publish."
-          elif [ "$HTTP_STATUS" = "200" ]; then
-            # Package exists, check if this specific version exists
-            EXISTS=$(jq -r ".versions[]? | select(.num == \"$PACKAGE_VERSION\") | .num" /tmp/crate_response.json)
-            if [ -n "$EXISTS" ]; then
-              echo "Version $PACKAGE_VERSION of $PACKAGE_NAME already exists on crates.io. Skipping publish."
-              exit 0
-            else
-              echo "Version $PACKAGE_VERSION of $PACKAGE_NAME does not exist. Proceeding with publish."
-            fi
+          if echo "$DRY_RUN_OUTPUT" | grep -q "already exists on crates.io index"; then
+            echo "Version $PACKAGE_VERSION of $PACKAGE_NAME already exists on crates.io. Skipping publish."
+            exit 0
           else
-            echo "Failed to check crates.io (HTTP $HTTP_STATUS). Proceeding with publish attempt."
+            echo "Version $PACKAGE_VERSION of $PACKAGE_NAME can be published. Proceeding with publish."
           fi
 
       - name: Publish to crates.io
-        run: cargo publish
+        run: cargo publish --allow-dirty
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
