@@ -12,13 +12,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Check if version is already published
+        run: |
+          PACKAGE_NAME=$(cargo metadata --format-version=1 | jq -r '.packages[0].name')
+          PACKAGE_VERSION=$(cargo metadata --format-version=1 | jq -r '.packages[0].version')
+          echo "Checking if $PACKAGE_NAME version $PACKAGE_VERSION exists on crates.io..."
+          
+          # Check if the crate exists at all
+          HTTP_STATUS=$(curl -s -o /tmp/crate_response.json -w "%{http_code}" https://crates.io/api/v1/crates/$PACKAGE_NAME)
+          
+          if [ "$HTTP_STATUS" = "404" ]; then
+            echo "Package $PACKAGE_NAME does not exist on crates.io. Proceeding with publish."
+          elif [ "$HTTP_STATUS" = "200" ]; then
+            # Package exists, check if this specific version exists
+            EXISTS=$(jq -r ".versions[]? | select(.num == \"$PACKAGE_VERSION\") | .num" /tmp/crate_response.json)
+            if [ -n "$EXISTS" ]; then
+              echo "Version $PACKAGE_VERSION of $PACKAGE_NAME already exists on crates.io. Skipping publish."
+              exit 0
+            else
+              echo "Version $PACKAGE_VERSION of $PACKAGE_NAME does not exist. Proceeding with publish."
+            fi
+          else
+            echo "Failed to check crates.io (HTTP $HTTP_STATUS). Proceeding with publish attempt."
+          fi
 
       - name: Check if version is already published
         run: |
