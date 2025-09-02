@@ -1,11 +1,13 @@
 # 🎼 Fugue
 
+[![Rust](https://img.shields.io/badge/rust-1.70%2B-blue.svg)](https://www.rust-lang.org)
 [![Crates.io](https://img.shields.io/crates/v/fugue-ppl.svg)](https://crates.io/crates/fugue-ppl)
-[![Documentation](https://docs.rs/fugue-ppl/badge.svg)](https://docs.rs/fugue-ppl)
+[![Dev Docs](https://docs.rs/fugue-ppl/badge.svg)](https://docs.rs/fugue-ppl)
+[![User Docs](https://img.shields.io/badge/guides-fugue.run-blue)](https://fugue.run)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![CI](https://github.com/alexnodeland/fugue/actions/workflows/ci-develop.yml/badge.svg)](https://github.com/alexnodeland/fugue/actions/workflows/ci-develop.yml)
 [![codecov](https://codecov.io/gh/alexnodeland/fugue/branch/develop/graph/badge.svg?token=BDJ5OB6GOB)](https://codecov.io/gh/alexnodeland/fugue)
-[![Rust](https://img.shields.io/badge/rust-1.70%2B-blue.svg)](https://www.rust-lang.org)
+
 
 A **production-ready**, **monadic probabilistic programming library** for Rust. Write elegant probabilistic programs by composing `Model` values in direct style; execute them with pluggable interpreters and state-of-the-art inference algorithms.
 
@@ -65,7 +67,7 @@ let mu_values: Vec<f64> = samples.iter()
 
 ## 📚 Documentation
 
-- **[User Guide](https://alexnodeland.github.io/fugue/)** - Comprehensive tutorials and examples
+- **[User Guide](https://fugue.run/)** - Comprehensive tutorials and examples
 - **[API Reference](https://docs.rs/fugue-ppl/latest/fugue/)** - Complete API documentation
 - **Examples** - See `examples/` directory
 
