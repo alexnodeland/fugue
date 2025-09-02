@@ -103,11 +103,11 @@ Licensed under the [MIT License](LICENSE).
 If you use Fugue in your research, please cite:
 
 ```bibtex
-@software{fugue2024,
-  title = {Fugue: Production-Ready Monadic Probabilistic Programming for Rust},
+@software{fugue2025,
+  title = {Fugue: Monadic Probabilistic Programming for Rust},
   author = {Alexander Nodeland},
   url = {https://github.com/alexnodeland/fugue},
-  version = {0.3.0},
-  year = {2024}
+  version = {0.1.0},
+  year = {2025}
 }
 ```
