@@ -46,6 +46,20 @@ fugue/
 
 ## Development Guidelines
 
+### Mandatory Testing Practice
+**Always run tests after making changes.** This is critical for a probabilistic programming library where subtle changes can have significant statistical implications.
+
+```bash
+# Always run before committing changes
+make all
+
+# For quick feedback during development
+make test
+
+# Check test coverage
+make coverage
+```
+
 ### Code Style
 - Follow standard Rust conventions (rustfmt, clippy)
 - Prefer explicit error handling over panics
@@ -91,24 +105,33 @@ fugue/
 - Standard library only for core functionality
 
 ### Development Tools
-- `cargo test`: Run test suite
-- `cargo clippy`: Linting  
-- `cargo fmt`: Code formatting
-- `mdbook`: Documentation building
-- `cargo llvm-cov`: Coverage analysis
+- `make test`: Run test suite
+- `make lint`: Run clippy linter
+- `make fmt`: Format code
+- `make doc`: Generate and open documentation
+- `make mdbook`: Build mdbook documentation
+- `make coverage`: Generate coverage report
+- `make bench`: Run benchmarks
+- `make all`: Run all checks (format, lint, test, coverage)
 
 ## Getting Started
 
 ```bash
 # Build and test
-cargo test --all-features --workspace
+make test
 
 # Run examples
 cargo run --example basic_modeling
 
 # Generate documentation  
-cargo doc --all-features --no-deps --open
-mdbook build docs
+make docs-all
+
+# Format and lint
+make fmt
+make lint
+
+# Run all checks
+make all
 ```
 
 ## Critical Areas Requiring Domain Knowledge

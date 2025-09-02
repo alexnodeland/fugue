@@ -31,6 +31,23 @@ src/
 
 ## Core Design Principles
 
+### Testing-First Development
+**Run tests after every code change.** The probabilistic nature of this library means that seemingly minor changes can have significant impacts on correctness and numerical stability.
+
+```bash
+# Essential workflow after any source changes
+make test
+
+# Complete validation pipeline
+make all
+
+# Focus on unit tests during development
+cargo test --lib
+
+# Check for performance regressions
+make bench
+```
+
 ### Monadic Architecture
 - `Model<T>` as the central abstraction for probabilistic programs
 - Pure functional composition through `bind`, `map`, `pure`

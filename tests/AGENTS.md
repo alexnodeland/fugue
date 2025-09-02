@@ -17,6 +17,23 @@ tests/
 
 ## Testing Philosophy
 
+### Critical Testing Mandate
+**Run tests after every change.** Integration tests are the primary validation mechanism for ensuring the probabilistic programming library works correctly end-to-end.
+
+```bash
+# Always run after making any changes
+make test
+
+# For comprehensive validation
+make all
+
+# For coverage analysis
+make coverage
+
+# Integration tests only
+cargo test --test '*'
+```
+
 ### Integration Focus
 - Test **interactions** between modules, not isolated units
 - Validate **public API contracts** and behavior

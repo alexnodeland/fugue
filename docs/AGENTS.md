@@ -132,10 +132,10 @@ Use `safe_ln()` instead of `.ln()` for better error handling.
 make install-dev-tools
 
 # Build and serve locally
-mdbook serve docs
+make mdbook && mdbook serve docs
 
 # Build static site
-mdbook build docs
+make mdbook
 ```
 
 ### Integration with Examples
@@ -159,6 +159,20 @@ mdbook build docs
 - Keyboard navigation support
 
 ## Contributing to Documentation
+
+### Testing Documentation Changes
+**Always test documentation builds after making changes.** Broken documentation builds can block releases and frustrate users.
+
+```bash
+# Test documentation build before committing
+make docs-all
+
+# Check for broken links
+make mdbook && mdbook test docs
+
+# Full validation pipeline
+make all
+```
 
 ### Workflow
 1. Identify gaps in existing documentation
