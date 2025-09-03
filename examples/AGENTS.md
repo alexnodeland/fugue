@@ -6,7 +6,7 @@ The `examples/` directory contains comprehensive, real-world examples demonstrat
 
 ## Structure
 
-```
+```text
 examples/
 ├── advanced_distribution_patterns.rs  # Complex distribution composition
 ├── bayesian_coin_flip.rs              # Basic Bayesian inference
@@ -27,27 +27,35 @@ examples/
 ## Example Categories
 
 ### Learning Examples
+
 **Purpose**: Introduce concepts progressively for new users
+
 - `bayesian_coin_flip.rs` - Basic probabilistic modeling
 - `working_with_distributions.rs` - Distribution library overview
 - `type_safety.rs` - Type system benefits and safety
 
 ### Practical Applications  
+
 **Purpose**: Real-world modeling scenarios
+
 - `linear_regression.rs` - Bayesian linear regression
 - `classification.rs` - Probabilistic classification
 - `hierarchical_models.rs` - Multi-level data structures
 - `mixture_models.rs` - Clustering and density estimation
 
 ### Advanced Techniques
+
 **Purpose**: Sophisticated modeling and optimization patterns
+
 - `advanced_distribution_patterns.rs` - Complex distribution composition
 - `building_complex_models.rs` - Large-scale model architecture
 - `trace_manipulation.rs` - Advanced trace operations
 - `custom_handlers.rs` - Extending the interpreter system
 
 ### Production Guidance
+
 **Purpose**: Deployment and optimization for real systems
+
 - `production_deployment.rs` - Memory management, error handling
 - `optimizing_performance.rs` - Performance tuning strategies
 - `debugging_models.rs` - Troubleshooting and diagnostics
@@ -55,6 +63,7 @@ examples/
 ## Development Guidelines
 
 ### Mandatory Testing Practice
+
 **Always run examples after making changes.** Examples must remain functional as they serve as both documentation and validation.
 
 ```bash
@@ -77,6 +86,7 @@ make all
 ### Example Quality Standards
 
 #### Code Quality
+
 - **Self-contained**: Each example should be runnable independently
 - **Well-documented**: Extensive comments explaining concepts and code
 - **Production-ready**: Demonstrate best practices, not just minimal working code
@@ -84,12 +94,14 @@ make all
 - **Performance-aware**: Include memory and computational considerations
 
 #### Educational Value
+
 - **Progressive complexity**: Start simple, build to advanced concepts
 - **Concept focus**: Each example should have a clear learning objective
 - **Real-world relevance**: Use realistic data and scenarios where possible
 - **Cross-references**: Point to related examples and documentation
 
 #### Technical Requirements
+
 - **Reproducible results**: Use fixed random seeds where appropriate
 - **Numerical stability**: Demonstrate stable computational patterns
 - **Type safety**: Showcase the benefits of the type system
@@ -98,6 +110,7 @@ make all
 ## Example Development Patterns
 
 ### Basic Example Structure
+
 ```rust
 //! # Bayesian Coin Flip Example
 //! 
@@ -151,6 +164,7 @@ fn analyze_posterior_samples(samples: &[(f64, Trace)]) -> Result<(), Box<dyn std
 ```
 
 ### Production Example Patterns
+
 ```rust
 //! # Production Deployment Example
 //! 
@@ -183,6 +197,7 @@ fn production_inference_pipeline(
 ```
 
 ### Advanced Pattern Examples
+
 ```rust
 //! # Custom Handler Development
 //! 
@@ -210,6 +225,7 @@ impl<R: Rng> Handler for CustomHandler<R> {
 ## Testing Examples
 
 ### Validation Requirements
+
 **Every example must be tested.** Examples that don't run correctly mislead users and damage library credibility.
 
 ```bash
@@ -229,6 +245,7 @@ cargo check --examples --no-default-features
 ```
 
 ### Example Testing Patterns
+
 - **Output validation**: Verify results are reasonable and converged
 - **Performance benchmarking**: Ensure examples complete in reasonable time
 - **Memory usage**: Monitor memory consumption for large examples
@@ -237,12 +254,14 @@ cargo check --examples --no-default-features
 ## Integration with Documentation
 
 ### Cross-References
+
 - Examples should be referenced from mdbook documentation
 - Use `#include` directives to embed code sections in docs
 - Maintain bidirectional links between concepts and examples
 - Update documentation when example interfaces change
 
 ### Code Extraction for Docs
+
 ```markdown
 <!-- In documentation -->
 ```rust,ignore
@@ -254,6 +273,7 @@ This allows documentation to stay synchronized with working code.
 ## Common Example Pitfalls
 
 ### Reproducibility Issues
+
 ```rust
 // BAD: Non-deterministic examples
 let mut rng = StdRng::from_entropy(); // Results vary every run
@@ -263,6 +283,7 @@ let mut rng = StdRng::seed_from_u64(42); // Consistent results
 ```
 
 ### Poor Error Handling
+
 ```rust
 // BAD: Panicking on errors
 let dist = Normal::new(0.0, -1.0).unwrap(); // Can panic
@@ -272,6 +293,7 @@ let dist = Normal::new(0.0, sigma)?; // Returns Result
 ```
 
 ### Inadequate Sample Sizes
+
 ```rust
 // BAD: Too few samples for reliable inference
 let samples = mcmc_chain(&mut rng, model, 100, 50); // Unreliable
@@ -281,6 +303,7 @@ let samples = mcmc_chain(&mut rng, model, 5000, 2000); // Reliable
 ```
 
 ### Missing Context
+
 ```rust
 // BAD: Unexplained magic numbers
 let prior = Normal::new(0.0, 2.5)?; // Why 2.5?
@@ -293,18 +316,21 @@ let prior = Normal::new(0.0, 2.5)?;
 ## Performance Considerations
 
 ### Memory Management
+
 - Use `TracePool` for high-frequency inference
 - Consider streaming processing for large datasets
 - Monitor memory usage in long-running examples
 - Demonstrate memory cleanup patterns
 
 ### Computational Efficiency
+
 - Profile examples to identify bottlenecks
 - Show both simple and optimized versions where relevant
 - Use appropriate inference algorithms for problem scale
 - Demonstrate parallel processing where applicable
 
 ### Numerical Stability
+
 - Use log-space computations for probability calculations
 - Validate parameter ranges and handle edge cases
 - Show robust inference practices
@@ -313,18 +339,21 @@ let prior = Normal::new(0.0, 2.5)?;
 ## Getting Started with Examples
 
 ### For New Users
+
 1. Start with `bayesian_coin_flip.rs` for basic concepts
 2. Progress to `working_with_distributions.rs` for distribution usage
 3. Try `linear_regression.rs` for practical modeling
 4. Explore `type_safety.rs` for understanding the type system
 
 ### For Developers
+
 1. Study `custom_handlers.rs` for extension patterns
 2. Review `production_deployment.rs` for best practices
 3. Examine `optimizing_performance.rs` for efficiency techniques
 4. Use `debugging_models.rs` for troubleshooting approaches
 
 ### Running All Examples
+
 ```bash
 # Quick validation that all examples work
 make test

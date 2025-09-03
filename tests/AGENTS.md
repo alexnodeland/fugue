@@ -6,7 +6,7 @@ The `tests/` directory contains integration tests that validate the public API a
 
 ## Structure
 
-```
+```text
 tests/
 ├── end_to_end_workflows.rs    # Complete PPL workflows (MCMC, SMC, etc.)
 ├── inference_integration.rs   # Integration between inference and core
@@ -18,6 +18,7 @@ tests/
 ## Testing Philosophy
 
 ### Critical Testing Mandate
+
 **Run tests after every change.** Integration tests are the primary validation mechanism for ensuring the probabilistic programming library works correctly end-to-end.
 
 ```bash
@@ -35,12 +36,14 @@ cargo test --test '*'
 ```
 
 ### Integration Focus
+
 - Test **interactions** between modules, not isolated units
 - Validate **public API contracts** and behavior
 - Ensure **end-to-end workflows** work correctly
 - Verify **cross-module consistency**
 
 ### Probabilistic Testing Strategies
+
 1. **Deterministic Testing**: Use fixed seeds for reproducible results
 2. **Statistical Testing**: Validate distributional properties over multiple runs
 3. **Property-Based Testing**: Check mathematical invariants
@@ -49,9 +52,11 @@ cargo test --test '*'
 ## Test Categories
 
 ### End-to-End Workflows (`end_to_end_workflows.rs`)
+
 Complete probabilistic programming workflows from model definition to inference results.
 
 **Testing Patterns:**
+
 ```rust
 #[test]
 fn test_bayesian_regression_workflow() {
@@ -75,36 +80,44 @@ fn test_bayesian_regression_workflow() {
 ```
 
 ### Model Execution (`model_execution.rs`)
+
 Model composition, address management, and interpreter behavior.
 
 **Key Test Areas:**
+
 - Model composition with `bind`, `map`, `pure`
 - Address collision detection and scoping
 - Interpreter consistency across different handlers
 - Memory management and trace manipulation
 
 ### Inference Integration (`inference_integration.rs`)
+
 Integration between inference algorithms and core probabilistic programming primitives.
 
 **Testing Focus:**
+
 - MCMC proposal generation and acceptance
 - SMC particle resampling and weighting  
 - Variational inference gradient computation
 - ABC distance function evaluation
 
 ### Public API Coverage (`public_api_coverage.rs`)
+
 Systematic validation that all public APIs are exercised and behave correctly.
 
 **Coverage Areas:**
+
 - All public functions and methods
 - Error conditions and edge cases
 - API stability and backward compatibility
 - Documentation example validation
 
 ### Public API Validation (`public_api_validation.rs`)
+
 Contract testing for public API behavior and invariants.
 
 **Validation Patterns:**
+
 - Input validation and error handling
 - Return value contracts and types
 - Side effect verification
@@ -113,6 +126,7 @@ Contract testing for public API behavior and invariants.
 ## Testing Best Practices
 
 ### Reproducibility
+
 ```rust
 use rand::{rngs::StdRng, SeedableRng};
 
@@ -124,6 +138,7 @@ fn reproducible_test() {
 ```
 
 ### Statistical Validation
+
 ```rust
 #[test]
 fn test_normal_distribution_properties() {
@@ -143,6 +158,7 @@ fn test_normal_distribution_properties() {
 ```
 
 ### Error Condition Testing
+
 ```rust
 #[test]
 fn test_invalid_distribution_parameters() {
@@ -157,6 +173,7 @@ fn test_invalid_distribution_parameters() {
 ```
 
 ### Convergence Testing
+
 ```rust
 #[test]
 fn test_mcmc_convergence() {
@@ -176,6 +193,7 @@ fn test_mcmc_convergence() {
 ## Integration Test Patterns
 
 ### Model Composition Testing
+
 ```rust
 #[test]
 fn test_hierarchical_model_composition() {
@@ -200,6 +218,7 @@ fn test_hierarchical_model_composition() {
 ```
 
 ### Cross-Module Integration
+
 ```rust
 #[test]
 fn test_inference_runtime_integration() {
@@ -216,6 +235,7 @@ fn test_inference_runtime_integration() {
 ## Performance Testing
 
 ### Benchmark Integration
+
 ```rust
 #[test]
 fn test_performance_regression() {
@@ -231,6 +251,7 @@ fn test_performance_regression() {
 ```
 
 ### Memory Usage Testing
+
 ```rust
 #[test]
 fn test_memory_efficiency() {
@@ -252,6 +273,7 @@ fn test_memory_efficiency() {
 ## Common Testing Utilities
 
 ### Helper Functions
+
 ```rust
 fn extract_parameter_samples<T>(samples: &[(T, Trace)], addr: &Address) -> Vec<f64> {
     samples.iter()
@@ -267,6 +289,7 @@ fn assert_convergence(samples: &[f64], target_mean: f64, tolerance: f64) {
 ```
 
 ### Test Data Generation
+
 ```rust
 fn generate_test_data(n: usize, true_params: &[f64]) -> Vec<f64> {
     let mut rng = StdRng::seed_from_u64(42);
@@ -281,6 +304,7 @@ fn generate_test_data(n: usize, true_params: &[f64]) -> Vec<f64> {
 ## Running Tests
 
 ### Local Testing
+
 ```bash
 # Run all integration tests
 cargo test --test '*'
@@ -296,6 +320,7 @@ cargo test --test public_api_validation test_error_handling
 ```
 
 ### Performance Testing
+
 ```bash
 # Run with release optimizations
 cargo test --release --test end_to_end_workflows
@@ -307,18 +332,21 @@ valgrind --tool=massif cargo test --test memory_tests
 ## Troubleshooting
 
 ### Flaky Tests
+
 - Use fixed random seeds for reproducibility
 - Increase sample sizes for statistical tests
 - Add appropriate tolerances for floating-point comparisons
 - Consider statistical significance of test assertions
 
 ### Performance Issues
+
 - Profile tests to identify bottlenecks
 - Use release builds for performance-sensitive tests
 - Consider test parallelization impact
 - Monitor memory usage patterns
 
 ### Integration Failures
+
 - Verify module interfaces haven't changed
 - Check error handling paths
 - Validate test data assumptions

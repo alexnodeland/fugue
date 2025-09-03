@@ -5,6 +5,7 @@
 Fugue is a **production-ready, monadic probabilistic programming library** for Rust. It enables elegant probabilistic program composition through `Model` values executed with pluggable interpreters and state-of-the-art inference algorithms.
 
 ### Core Philosophy
+
 - **Monadic Design**: Compose probabilistic programs using pure functional abstractions
 - **Type Safety**: Natural return types for distributions (Bernoulli → `bool`, Poisson → `u64`)  
 - **Production Ready**: Numerically stable algorithms with comprehensive error handling
@@ -12,7 +13,7 @@ Fugue is a **production-ready, monadic probabilistic programming library** for R
 
 ## Architecture Overview
 
-```
+```text
 fugue/
 ├── src/           # Core library implementation
 │   ├── core/      # Fundamental PPL primitives (Model, Distribution, Address)
@@ -28,17 +29,20 @@ fugue/
 ## Key Concepts
 
 ### Model Composition
+
 - `Model<T>`: Core probabilistic program type
 - `sample()`: Draw from distributions  
 - `observe()`: Condition on data
 - `prob!` macro: Do-notation for monadic composition
 
 ### Address System
+
 - Every random choice has a unique, stable address
 - Format: `"name"`, `"name#index"`, `"scope::name"`, `"scope::name#index"`
 - Critical for reproducibility and inference targeting
 
 ### Interpreters/Handlers
+
 - `PriorHandler`: Forward sampling from priors
 - `ReplayHandler`: Replay with specific trace values
 - `ScoreGivenTrace`: Score traces for importance sampling
@@ -47,6 +51,7 @@ fugue/
 ## Development Guidelines
 
 ### Mandatory Testing Practice
+
 **Always run tests after making changes.** This is critical for a probabilistic programming library where subtle changes can have significant statistical implications.
 
 ```bash
@@ -61,18 +66,21 @@ make coverage
 ```
 
 ### Code Style
+
 - Follow standard Rust conventions (rustfmt, clippy)
 - Prefer explicit error handling over panics
 - Use type-safe abstractions over raw implementations
 - Document public APIs with examples
 
 ### Testing Patterns
+
 - Unit tests for individual components
 - Integration tests for end-to-end workflows  
 - Property-based testing for numerical stability
 - Benchmark critical performance paths
 
 ### Domain-Specific Considerations
+
 - **Numerical Stability**: Use log-space computations, guard against overflow/underflow
 - **Reproducibility**: Ensure deterministic execution given same random seed
 - **Memory Management**: Consider trace pooling for high-throughput applications
@@ -81,18 +89,21 @@ make coverage
 ## Common Tasks
 
 ### Adding New Distributions
+
 1. Implement `Distribution<T>` trait in `src/core/distribution.rs`
 2. Add validation logic and error handling
 3. Include comprehensive tests with edge cases
 4. Document mathematical properties and use cases
 
-### Implementing Inference Algorithms  
+### Implementing Inference Algorithms
+
 1. Design around existing `Handler` infrastructure
 2. Consider trace manipulation patterns
 3. Implement convergence diagnostics
 4. Provide both basic and production-ready variants
 
 ### Performance Optimization
+
 1. Profile with realistic workloads first
 2. Consider memory pooling for frequent allocations
 3. Use copy-on-write semantics where appropriate
@@ -101,10 +112,12 @@ make coverage
 ## Dependencies & Ecosystem
 
 ### Core Dependencies
+
 - `rand`: Random number generation and distributions
 - Standard library only for core functionality
 
 ### Development Tools
+
 - `make test`: Run test suite
 - `make lint`: Run clippy linter
 - `make fmt`: Format code

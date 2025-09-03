@@ -6,7 +6,7 @@ The `benches/` directory contains performance benchmarks for the Fugue probabili
 
 ## Structure
 
-```
+```text
 benches/
 ├── mcmc_benchmarks.rs    # MCMC algorithm performance
 └── memory_benchmarks.rs  # Memory usage and allocation patterns
@@ -15,14 +15,18 @@ benches/
 ## Benchmark Categories
 
 ### Algorithm Performance (`mcmc_benchmarks.rs`)
+
 **Purpose**: Measure and track performance of core inference algorithms
+
 - Sampling throughput (samples/second)
 - Convergence rates and efficiency
 - Scaling behavior with model complexity
 - Comparison between different MCMC variants
 
 ### Memory Efficiency (`memory_benchmarks.rs`)
+
 **Purpose**: Monitor memory usage patterns and optimization effectiveness
+
 - Trace allocation and pooling performance
 - Memory usage scaling with problem size
 - Copy-on-write trace efficiency
@@ -31,6 +35,7 @@ benches/
 ## Development Guidelines
 
 ### Mandatory Testing Practice
+
 **Always run benchmarks after performance-related changes.** Performance regressions in a probabilistic programming library can make real-world applications infeasible.
 
 ```bash
@@ -56,18 +61,21 @@ make all
 ### Benchmark Development Standards
 
 #### Measurement Reliability
+
 - **Statistical rigor**: Multiple runs with significance testing
 - **Stable environment**: Consistent hardware and OS conditions  
 - **Realistic workloads**: Benchmarks reflect actual usage patterns
 - **Baseline tracking**: Compare against known performance characteristics
 
 #### Code Quality
+
 - **Reproducible**: Fixed random seeds and deterministic setup
 - **Well-documented**: Clear purpose and interpretation guidance
 - **Parameterized**: Test across relevant problem sizes and configurations
 - **Isolated**: Minimize interference between benchmark runs
 
 #### Performance Awareness
+
 - **Meaningful metrics**: Focus on user-relevant performance indicators
 - **Scaling analysis**: Understand complexity characteristics
 - **Resource monitoring**: Track CPU, memory, and I/O usage
@@ -76,6 +84,7 @@ make all
 ## Benchmark Implementation Patterns
 
 ### Basic Benchmark Structure
+
 ```rust
 //! # MCMC Performance Benchmarks
 //! 
@@ -136,6 +145,7 @@ criterion_main!(mcmc_benches);
 ```
 
 ### Memory Benchmark Patterns
+
 ```rust
 //! # Memory Usage Benchmarks
 //! 
@@ -190,6 +200,7 @@ fn benchmark_memory_scaling(c: &mut Criterion) {
 ```
 
 ### Comparative Benchmarks
+
 ```rust
 //! # Algorithm Comparison Benchmarks
 //! 
@@ -232,18 +243,21 @@ fn benchmark_inference_algorithms(c: &mut Criterion) {
 ### Performance Metrics
 
 #### Throughput Measurements
+
 - **Samples per second**: Raw sampling performance
 - **Effective samples per second**: Quality-adjusted throughput
 - **Memory bandwidth**: Data movement efficiency
 - **CPU utilization**: Processor efficiency
 
 #### Scaling Characteristics
+
 - **Linear scaling**: Performance proportional to problem size
 - **Sublinear scaling**: Diminishing returns with size increase
 - **Memory scaling**: RAM usage growth patterns
 - **Parallel efficiency**: Multi-core utilization effectiveness
 
 #### Quality Metrics
+
 - **Convergence speed**: Time to reach target accuracy
 - **Sample efficiency**: Information per computational cost
 - **Numerical stability**: Precision maintenance under load
@@ -252,6 +266,7 @@ fn benchmark_inference_algorithms(c: &mut Criterion) {
 ### Regression Detection
 
 #### Automated Monitoring
+
 ```bash
 # Establish performance baseline
 cargo bench -- --save-baseline release-1.0
@@ -264,6 +279,7 @@ cargo bench -- --baseline release-1.0 --output-format json > bench_results.json
 ```
 
 #### Statistical Analysis
+
 - **Significance testing**: Detect meaningful performance changes
 - **Confidence intervals**: Quantify measurement uncertainty
 - **Trend analysis**: Identify gradual performance degradation
@@ -272,6 +288,7 @@ cargo bench -- --baseline release-1.0 --output-format json > bench_results.json
 ### Performance Optimization Workflow
 
 #### Profiling Integration
+
 ```bash
 # Profile benchmark execution
 cargo flamegraph --bench mcmc_benchmarks
@@ -285,6 +302,7 @@ valgrind --tool=cachegrind cargo bench --bench mcmc_benchmarks
 ```
 
 #### Optimization Validation
+
 1. **Baseline measurement**: Establish current performance
 2. **Hypothesis formation**: Identify optimization opportunities  
 3. **Implementation**: Apply performance improvements
@@ -296,12 +314,14 @@ valgrind --tool=cachegrind cargo bench --bench mcmc_benchmarks
 ### Benchmark Reliability
 
 #### Environment Control
+
 - **Consistent hardware**: Same machine for comparable results
 - **Thermal stability**: Allow warmup periods, monitor CPU temperature
 - **Background processes**: Minimize system interference
 - **Power management**: Disable CPU frequency scaling for consistency
 
 #### Statistical Rigor
+
 ```rust
 // Configure benchmark for statistical reliability
 fn configure_benchmark(c: &mut Criterion) {
@@ -316,6 +336,7 @@ fn configure_benchmark(c: &mut Criterion) {
 ### Continuous Integration
 
 #### Automated Benchmarking
+
 ```yaml
 # CI benchmark pipeline
 benchmark:
@@ -332,6 +353,7 @@ benchmark:
 ```
 
 #### Performance Tracking
+
 - **Trend monitoring**: Track performance over time
 - **Alert thresholds**: Notify on significant regressions
 - **Historical analysis**: Understand long-term performance evolution
@@ -340,6 +362,7 @@ benchmark:
 ## Common Benchmarking Pitfalls
 
 ### Measurement Issues
+
 ```rust
 // BAD: Compiler optimization eliminates work
 fn bad_benchmark(b: &mut Bencher) {
@@ -359,6 +382,7 @@ fn good_benchmark(b: &mut Bencher) {
 ```
 
 ### Statistical Invalidity
+
 ```rust
 // BAD: Non-deterministic benchmark
 fn unreliable_benchmark(b: &mut Bencher) {
@@ -378,6 +402,7 @@ fn reliable_benchmark(b: &mut Bencher) {
 ```
 
 ### Unrealistic Workloads
+
 ```rust
 // BAD: Trivial problem that doesn't reflect real usage
 fn toy_benchmark(b: &mut Bencher) {
@@ -399,6 +424,7 @@ fn realistic_benchmark(b: &mut Bencher) {
 ## Performance Analysis Tools
 
 ### Profiling Integration
+
 ```bash
 # CPU profiling with flame graphs
 cargo flamegraph --bench mcmc_benchmarks -- --bench
@@ -412,6 +438,7 @@ perf report
 ```
 
 ### Benchmark Reporting
+
 ```bash
 # Generate detailed HTML reports
 cargo bench -- --output-format html
@@ -421,6 +448,7 @@ cargo bench -- --baseline main --save-baseline feature-branch
 ```
 
 ### Custom Metrics
+
 ```rust
 // Track custom performance metrics
 fn benchmark_with_custom_metrics(c: &mut Criterion) {
@@ -445,6 +473,7 @@ fn benchmark_with_custom_metrics(c: &mut Criterion) {
 ## Running Benchmarks
 
 ### Local Development
+
 ```bash
 # Quick benchmark run
 make bench
@@ -460,6 +489,7 @@ cargo flamegraph --bench mcmc_benchmarks -- inference_throughput
 ```
 
 ### Performance Validation
+
 ```bash
 # Ensure no regressions before release
 make all  # Includes benchmarks
