@@ -15,6 +15,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![CI](https://github.com/alexnodeland/fugue/actions/workflows/ci-develop.yml/badge.svg)](https://github.com/alexnodeland/fugue/actions/workflows/ci-develop.yml)
 [![codecov](https://codecov.io/gh/alexnodeland/fugue/branch/develop/graph/badge.svg?token=BDJ5OB6GOB)](https://codecov.io/gh/alexnodeland/fugue)
+[![Discord](https://img.shields.io/discord/1412802057437712426?logo=discord&label=discord)](https://discord.gg/QAcF7Nwr)
 
 **Supported Rust:** 1.70+ • **Platforms:** Linux / macOS / Windows • **Crate:** [`fugue-ppl` on crates.io](https://crates.io/crates/fugue-ppl)
 
