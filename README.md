@@ -1,4 +1,12 @@
+<div align="center">
+
 # 🎼 Fugue
+
+<img src="assets/fugue-logo.svg" alt="Fugue Logo" width="200" height="200">
+
+**A production-ready, monadic probabilistic programming library for Rust**
+
+*Write elegant probabilistic programs by composing `Model` values in direct style; execute them with pluggable interpreters and state-of-the-art inference algorithms.*
 
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-blue.svg)](https://www.rust-lang.org)
 [![Crates.io](https://img.shields.io/crates/v/fugue-ppl.svg)](https://crates.io/crates/fugue-ppl)
@@ -8,10 +16,9 @@
 [![CI](https://github.com/alexnodeland/fugue/actions/workflows/ci-develop.yml/badge.svg)](https://github.com/alexnodeland/fugue/actions/workflows/ci-develop.yml)
 [![codecov](https://codecov.io/gh/alexnodeland/fugue/branch/develop/graph/badge.svg?token=BDJ5OB6GOB)](https://codecov.io/gh/alexnodeland/fugue)
 
+**Supported Rust:** 1.70+ • **Platforms:** Linux / macOS / Windows • **Crate:** [`fugue-ppl` on crates.io](https://crates.io/crates/fugue-ppl)
 
-A **production-ready**, **monadic probabilistic programming library** for Rust. Write elegant probabilistic programs by composing `Model` values in direct style; execute them with pluggable interpreters and state-of-the-art inference algorithms.
-
-> Supported Rust: 1.70+ • Platforms: Linux / macOS / Windows • Crate: [`fugue-ppl` on crates.io](https://crates.io/crates/fugue-ppl)
+</div>
 
 ## ✨ Features
 
