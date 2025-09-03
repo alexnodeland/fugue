@@ -83,6 +83,7 @@ let mu_values: Vec<f64> = samples.iter()
 
 - **Issues & Bugs**: Use [GitHub Issues](https://github.com/alexnodeland/fugue/issues)
 - **Feature Requests**: Open an issue with the `enhancement` label
+- **Discord**: Join our [Discord server](https://discord.gg/QAcF7Nwr)
 
 ## 🗺️ Roadmap
 
