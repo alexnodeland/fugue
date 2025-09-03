@@ -109,14 +109,7 @@ make coverage
 3. Use copy-on-write semantics where appropriate
 4. Benchmark against baseline implementations
 
-## Dependencies & Ecosystem
-
-### Core Dependencies
-
-- `rand`: Random number generation and distributions
-- Standard library only for core functionality
-
-### Development Tools
+## Development Tools
 
 - `make test`: Run test suite
 - `make lint`: Run clippy linter
