@@ -37,25 +37,35 @@ jobs:
 
       - name: Install mdBook and plugins
         run: |
-          # Check if tools are already installed and up to date
-          install_if_missing() {
+          # Check if tools are installed with correct major.minor version
+          install_if_needed() {
             local tool=$1
-            local version=$2
-            if ! command -v $tool &> /dev/null || ! $tool --version | grep -q "$version"; then
-              cargo install $tool --vers "$version" --locked
+            local major_minor=$2
+            local cargo_version=$3
+            
+            if command -v $tool &> /dev/null; then
+              local current_version=$($tool --version | grep -oE 'v[0-9]+\.[0-9]+' | head -1)
+              if [[ "$current_version" =~ v$major_minor ]]; then
+                echo "$tool $current_version already installed and compatible, skipping"
+                return
+              else
+                echo "$tool $current_version found but incompatible, updating to $cargo_version"
+              fi
             else
-              echo "$tool $version already installed, skipping"
+              echo "Installing $tool $cargo_version"
             fi
+            
+            cargo install $tool --vers "$cargo_version" --locked --force
           }
           
           # Install mdBook with optimizations
-          install_if_missing mdbook "^0.4"
+          install_if_needed mdbook "0\.4" "^0.4"
           
           # Install plugins
-          install_if_missing mdbook-admonish "^1.18"
-          install_if_missing mdbook-mermaid "^0.14"
-          install_if_missing mdbook-toc "^0.14"
-          install_if_missing mdbook-katex "^0.9"
+          install_if_needed mdbook-admonish "1\." "^1.18"
+          install_if_needed mdbook-mermaid "0\.14" "^0.14"
+          install_if_needed mdbook-toc "0\.14" "^0.14"
+          install_if_needed mdbook-katex "0\.9" "^0.9"
           # Note: linkcheck skipped due to issues with LaTeX math syntax
 
       - name: Cache mdBook build
