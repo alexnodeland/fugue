@@ -16,6 +16,7 @@
 [![CI](https://github.com/alexnodeland/fugue/actions/workflows/ci-develop.yml/badge.svg)](https://github.com/alexnodeland/fugue/actions/workflows/ci-develop.yml)
 [![codecov](https://codecov.io/gh/alexnodeland/fugue/branch/develop/graph/badge.svg?token=BDJ5OB6GOB)](https://codecov.io/gh/alexnodeland/fugue)
 [![Downloads](https://img.shields.io/crates/d/fugue-ppl?logo=rust)](https://crates.io/crates/fugue-ppl)
+[![Zotero](https://img.shields.io/badge/Zotero-Fugue-red?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org/groups/6138134/fugue/library)
 [![Discord](https://img.shields.io/discord/1412802057437712426?logo=discord&label=discord)](https://discord.gg/QAcF7Nwr)
 
 **Supported Rust:** 1.70+ • **Platforms:** Linux / macOS / Windows • **Crate:** [`fugue-ppl` on crates.io](https://crates.io/crates/fugue-ppl)
@@ -79,6 +80,7 @@ let mu_values: Vec<f64> = samples.iter()
 - **[User Guide](https://fugue.run/)** - Comprehensive tutorials and examples
 - **[API Reference](https://docs.rs/fugue-ppl/latest/fugue/)** - Complete API documentation
 - **Examples** - See `examples/` directory
+- **[References](https://www.zotero.org/groups/6138134/fugue/library)** - Zotero library for Fugue
 
 ## 🤝 Community
 
@@ -123,3 +125,5 @@ If you use Fugue in your research, please cite:
   year = {2025}
 }
 ```
+
+Or refer to the "Internal" collection in [Zotero](https://www.zotero.org/groups/6138134/fugue/library) to generate a bibliography.
