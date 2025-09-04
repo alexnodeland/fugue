@@ -15,6 +15,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![CI](https://github.com/alexnodeland/fugue/actions/workflows/ci-develop.yml/badge.svg)](https://github.com/alexnodeland/fugue/actions/workflows/ci-develop.yml)
 [![codecov](https://codecov.io/gh/alexnodeland/fugue/branch/develop/graph/badge.svg?token=BDJ5OB6GOB)](https://codecov.io/gh/alexnodeland/fugue)
+[![Downloads](https://img.shields.io/crates/d/fugue-ppl?logo=rust)](https://crates.io/crates/fugue-ppl)
+[![Zotero](https://img.shields.io/badge/Zotero-Fugue-red?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org/groups/6138134/fugue/library)
+[![Discord](https://img.shields.io/discord/1412802057437712426?logo=discord&label=discord)](https://discord.gg/QAcF7Nwr)
 
 **Supported Rust:** 1.70+ • **Platforms:** Linux / macOS / Windows • **Crate:** [`fugue-ppl` on crates.io](https://crates.io/crates/fugue-ppl)
 
@@ -22,9 +25,9 @@
 
 ---
 
-```admonish info title="👋 Welcome to the Fugue User Guide"
+```admonish info title="👋 Welcome"
 
-Fugue is a production-ready, monadic probabilistic programming library for Rust. Check out these resources to get started:
+Check out these resources to get started:
 
 - [Getting Started](./getting-started/README.md) - Installation and first steps
 - [How-To Guides](./how-to/README.md) - Practical guides for common tasks
@@ -54,4 +57,5 @@ fugue-ppl = "0.1.0"
 
 - [GitHub Repository](https://github.com/alexnodeland/fugue)
 - [API Reference](https://docs.rs/fugue-ppl)
+- [Zotero](https://www.zotero.org/groups/6138134/fugue/library)
 ```

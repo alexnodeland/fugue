@@ -2,6 +2,14 @@
 
 Thank you for your interest in contributing to Fugue! This document provides guidelines for contributing to the project.
 
+## Community
+
+- **Discord**: Join our [Discord server](https://discord.gg/QAcF7Nwr)
+- **Issues & Bugs**: Open an [issue](https://github.com/alexnodeland/fugue/issues) with the `Bug Report` template.
+- **Feature Requests**: Open an [issue](https://github.com/alexnodeland/fugue/issues) with the `Feature Request` template.
+- **RFCs**: Open an [issue](https://github.com/alexnodeland/fugue/issues) with the `RFC` template.
+- **Zotero**: Joing our [Zotero group](https://www.zotero.org/groups/6138134/fugue)
+
 ## Quick Start
 
 ```bash
