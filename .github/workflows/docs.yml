@@ -30,26 +30,51 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-mdbook-${{ hashFiles('**/Cargo.lock') }}
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-mdbook-
+            ${{ runner.os }}-cargo-
 
       - name: Install mdBook and plugins
         run: |
+          # Check if tools are installed with correct major.minor version
+          install_if_needed() {
+            local tool=$1
+            local major_minor=$2
+            local cargo_version=$3
+            
+            if command -v $tool &> /dev/null; then
+              local current_version=$($tool --version | grep -oE 'v[0-9]+\.[0-9]+' | head -1)
+              if [[ "$current_version" =~ v$major_minor ]]; then
+                echo "$tool $current_version already installed and compatible, skipping"
+                return
+              else
+                echo "$tool $current_version found but incompatible, updating to $cargo_version"
+              fi
+            else
+              echo "Installing $tool $cargo_version"
+            fi
+            
+            cargo install $tool --vers "$cargo_version" --locked --force
+          }
+          
           # Install mdBook with optimizations
-          cargo install mdbook \
-            --no-default-features \
-            --features search \
-            --vers "^0.4" \
-            --locked \
-            --force
+          install_if_needed mdbook "0\.4" "^0.4"
           
           # Install plugins
-          cargo install mdbook-admonish --vers "^1.18" --locked --force
-          cargo install mdbook-mermaid --vers "^0.14" --locked --force
-          cargo install mdbook-toc --vers "^0.14" --locked --force
-          cargo install mdbook-katex --vers "^0.9" --locked --force
+          install_if_needed mdbook-admonish "1\." "^1.18"
+          install_if_needed mdbook-mermaid "0\.14" "^0.14"
+          install_if_needed mdbook-toc "0\.14" "^0.14"
+          install_if_needed mdbook-katex "0\.9" "^0.9"
           # Note: linkcheck skipped due to issues with LaTeX math syntax
+
+      - name: Cache mdBook build
+        uses: actions/cache@v4
+        with:
+          path: docs/book
+          key: ${{ runner.os }}-mdbook-${{ hashFiles('docs/**/*.md', 'docs/book.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-mdbook-
 
       - name: Build documentation (validates structure)
         run: |
@@ -71,6 +96,13 @@ jobs:
           # Test the library's rustdoc examples
           cargo test --doc
 
+      - name: Upload built documentation
+        uses: actions/upload-artifact@v4
+        with:
+          name: built-docs
+          path: docs/book
+          retention-days: 1
+
   # Job to build and deploy (only on main branch)
   build-deploy:
     runs-on: ubuntu-latest
@@ -85,44 +117,11 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Cargo registry and target
-        uses: actions/cache@v4
+      - name: Download built documentation
+        uses: actions/download-artifact@v4
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-mdbook-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-mdbook-
-
-      - name: Install mdBook and plugins
-        run: |
-          # Install mdBook with optimizations
-          cargo install mdbook \
-            --no-default-features \
-            --features search \
-            --vers "^0.4" \
-            --locked \
-            --force
-          
-          # Install plugins with version constraints
-          cargo install mdbook-admonish --vers "^1.18" --locked --force
-          cargo install mdbook-mermaid --vers "^0.14" --locked --force
-          cargo install mdbook-toc --vers "^0.14" --locked --force
-          cargo install mdbook-katex --vers "^0.9" --locked --force
-
-      - name: Build documentation
-        run: |
-          cd docs
-          mdbook build
+          name: built-docs
+          path: docs/book
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
