@@ -2,7 +2,7 @@
 
 # 🎼 Fugue User Guide
 
-<img src="fugue-logo.svg" alt="Fugue Logo" width="200" height="200">
+<img src="fugue-logo.svg" alt="Fugue Logo" width="300" height="300">
 
 **A production-ready, monadic probabilistic programming library for Rust**
 
