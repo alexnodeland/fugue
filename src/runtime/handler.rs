@@ -97,64 +97,66 @@ pub trait Handler {
 /// assert!(trace.total_log_weight().is_finite());
 /// ```
 pub fn run<A>(mut h: impl Handler, m: Model<A>) -> (A, Trace) {
-    fn go<A>(h: &mut impl Handler, m: Model<A>) -> A {
-        match m {
-            Model::Pure(a) => a,
-            Model::SampleF64 { addr, dist, k } => {
-                let x = h.on_sample_f64(&addr, &*dist);
-                go(h, k(x))
-            }
-            Model::SampleBool { addr, dist, k } => {
-                let x = h.on_sample_bool(&addr, &*dist);
-                go(h, k(x))
-            }
-            Model::SampleU64 { addr, dist, k } => {
-                let x = h.on_sample_u64(&addr, &*dist);
-                go(h, k(x))
-            }
-            Model::SampleUsize { addr, dist, k } => {
-                let x = h.on_sample_usize(&addr, &*dist);
-                go(h, k(x))
-            }
-            Model::ObserveF64 {
-                addr,
-                dist,
-                value,
-                k,
-            } => {
-                h.on_observe_f64(&addr, &*dist, value);
-                go(h, k(()))
-            }
-            Model::ObserveBool {
-                addr,
-                dist,
-                value,
-                k,
-            } => {
-                h.on_observe_bool(&addr, &*dist, value);
-                go(h, k(()))
-            }
-            Model::ObserveU64 {
-                addr,
-                dist,
-                value,
-                k,
-            } => {
-                h.on_observe_u64(&addr, &*dist, value);
-                go(h, k(()))
-            }
-            Model::ObserveUsize {
-                addr,
-                dist,
-                value,
-                k,
-            } => {
-                h.on_observe_usize(&addr, &*dist, value);
-                go(h, k(()))
-            }
-            Model::Factor { logw, k } => {
-                h.on_factor(logw);
-                go(h, k(()))
+    fn go<A>(h: &mut impl Handler, mut m: Model<A>) -> A {
+        loop {
+            match m {
+                Model::Pure(a) => return a,
+                Model::SampleF64 { addr, dist, k } => {
+                    let x = h.on_sample_f64(&addr, &*dist);
+                    m = k(x);
+                }
+                Model::SampleBool { addr, dist, k } => {
+                    let x = h.on_sample_bool(&addr, &*dist);
+                    m = k(x);
+                }
+                Model::SampleU64 { addr, dist, k } => {
+                    let x = h.on_sample_u64(&addr, &*dist);
+                    m = k(x);
+                }
+                Model::SampleUsize { addr, dist, k } => {
+                    let x = h.on_sample_usize(&addr, &*dist);
+                    m = k(x);
+                }
+                Model::ObserveF64 {
+                    addr,
+                    dist,
+                    value,
+                    k,
+                } => {
+                    h.on_observe_f64(&addr, &*dist, value);
+                    m = k(());
+                }
+                Model::ObserveBool {
+                    addr,
+                    dist,
+                    value,
+                    k,
+                } => {
+                    h.on_observe_bool(&addr, &*dist, value);
+                    m = k(());
+                }
+                Model::ObserveU64 {
+                    addr,
+                    dist,
+                    value,
+                    k,
+                } => {
+                    h.on_observe_u64(&addr, &*dist, value);
+                    m = k(());
+                }
+                Model::ObserveUsize {
+                    addr,
+                    dist,
+                    value,
+                    k,
+                } => {
+                    h.on_observe_usize(&addr, &*dist, value);
+                    m = k(());
+                }
+                Model::Factor { logw, k } => {
+                    h.on_factor(logw);
+                    m = k(());
+                }
             }
         }
     }
@@ -168,6 +170,7 @@ mod tests {
     use super::*;
     use crate::addr;
     use crate::core::distribution::*;
+    use crate::core::model::{observe, sequence_vec};
     use crate::core::model::ModelExt;
     use crate::runtime::interpreters::PriorHandler;
     use rand::rngs::StdRng;
@@ -198,5 +201,25 @@ mod tests {
         assert!(trace.log_likelihood.is_finite());
         // Factor contributes exact -1.0
         assert!((trace.log_factors + 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn run_handles_large_observe_sequence() {
+        let n = 100_000usize;
+        let models: Vec<Model<()>> = (0..n)
+            .map(|i| observe(addr!("obs", i), Bernoulli::new(0.5).unwrap(), true))
+            .collect();
+        let model = sequence_vec(models).map(|_| ());
+
+        let mut rng = StdRng::seed_from_u64(123);
+        let (_a, trace) = crate::runtime::handler::run(
+            PriorHandler {
+                rng: &mut rng,
+                trace: Trace::default(),
+            },
+            model,
+        );
+
+        assert!(trace.log_likelihood.is_finite());
     }
 }

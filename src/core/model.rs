@@ -536,12 +536,33 @@ pub fn zip<A: Send + 'static, B: Send + 'static>(ma: Model<A>, mb: Model<B>) -> 
 /// let results = sequence_vec(mixed_models);
 /// ```
 pub fn sequence_vec<A: Send + 'static>(models: Vec<Model<A>>) -> Model<Vec<A>> {
-    models.into_iter().fold(pure(Vec::new()), |acc, m| {
-        zip(acc, m).map(|(mut v, a)| {
-            v.push(a);
-            v
-        })
-    })
+    if models.is_empty() {
+        return pure(Vec::new());
+    }
+
+    let mut staged: Vec<Model<Vec<A>>> = models
+        .into_iter()
+        .map(|m| m.map(|a| vec![a]))
+        .collect();
+
+    while staged.len() > 1 {
+        let mut next = Vec::with_capacity((staged.len() + 1) / 2);
+        let mut iter = staged.into_iter();
+        while let Some(left) = iter.next() {
+            if let Some(right) = iter.next() {
+                let combined = zip(left, right).map(|(mut l, mut r)| {
+                    l.append(&mut r);
+                    l
+                });
+                next.push(combined);
+            } else {
+                next.push(left);
+            }
+        }
+        staged = next;
+    }
+
+    staged.pop().unwrap_or_else(|| pure(Vec::new()))
 }
 
 /// Apply a function, `f`, that produces models to each item in a vector, `items`, collecting the results.
