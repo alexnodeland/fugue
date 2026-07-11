@@ -55,12 +55,14 @@
 //! let ess = effective_sample_size(&particles);
 //! assert!(ess > 0.0);
 //! ```
+use crate::core::address::Address;
+use crate::core::distribution::{Distribution, Normal};
 use crate::core::model::Model;
+use crate::core::numerical::log_sum_exp;
 use crate::inference::mcmc_utils::DiminishingAdaptation;
-use crate::inference::mh::adaptive_single_site_mh;
 use crate::runtime::handler::run;
-use crate::runtime::interpreters::PriorHandler;
-use crate::runtime::trace::Trace;
+use crate::runtime::interpreters::{PriorHandler, ScoreGivenTrace};
+use crate::runtime::trace::{ChoiceValue, Trace};
 use rand::Rng;
 
 /// A weighted particle in the SMC population.
@@ -230,9 +232,28 @@ pub fn effective_sample_size(particles: &[Particle]) -> f64 {
     1.0 / sum_sq
 }
 
-/// Systematic resampling.
+/// Systematic resampling: return the resampled indices for a particle population.
 pub fn systematic_resample<R: Rng>(rng: &mut R, particles: &[Particle]) -> Vec<usize> {
-    let n = particles.len();
+    systematic_indices(rng, &particle_weights(particles))
+}
+
+/// Stratified resampling: return the resampled indices for a particle population.
+pub fn stratified_resample<R: Rng>(rng: &mut R, particles: &[Particle]) -> Vec<usize> {
+    stratified_indices(rng, &particle_weights(particles))
+}
+
+/// Multinomial resampling: return the resampled indices for a particle population.
+pub fn multinomial_resample<R: Rng>(rng: &mut R, particles: &[Particle]) -> Vec<usize> {
+    multinomial_indices(rng, &particle_weights(particles))
+}
+
+fn particle_weights(particles: &[Particle]) -> Vec<f64> {
+    particles.iter().map(|p| p.weight).collect()
+}
+
+/// Systematic resampling on a normalized weight vector.
+fn systematic_indices<R: Rng>(rng: &mut R, weights: &[f64]) -> Vec<usize> {
+    let n = weights.len();
     let mut indices = Vec::with_capacity(n);
     let u = rng.gen::<f64>() / n as f64;
 
@@ -242,7 +263,7 @@ pub fn systematic_resample<R: Rng>(rng: &mut R, particles: &[Particle]) -> Vec<u
     for j in 0..n {
         let threshold = u + j as f64 / n as f64;
         while cum_weight < threshold && i < n {
-            cum_weight += particles[i].weight;
+            cum_weight += weights[i];
             i += 1;
         }
         indices.push((i - 1).min(n - 1));
@@ -250,9 +271,9 @@ pub fn systematic_resample<R: Rng>(rng: &mut R, particles: &[Particle]) -> Vec<u
     indices
 }
 
-/// Stratified resampling.
-pub fn stratified_resample<R: Rng>(rng: &mut R, particles: &[Particle]) -> Vec<usize> {
-    let n = particles.len();
+/// Stratified resampling on a normalized weight vector.
+fn stratified_indices<R: Rng>(rng: &mut R, weights: &[f64]) -> Vec<usize> {
+    let n = weights.len();
     let mut indices = Vec::with_capacity(n);
 
     let mut cum_weight = 0.0;
@@ -262,7 +283,7 @@ pub fn stratified_resample<R: Rng>(rng: &mut R, particles: &[Particle]) -> Vec<u
         let u = rng.gen::<f64>();
         let threshold = (j as f64 + u) / n as f64;
         while cum_weight < threshold && i < n {
-            cum_weight += particles[i].weight;
+            cum_weight += weights[i];
             i += 1;
         }
         indices.push((i - 1).min(n - 1));
@@ -270,9 +291,9 @@ pub fn stratified_resample<R: Rng>(rng: &mut R, particles: &[Particle]) -> Vec<u
     indices
 }
 
-/// Multinomial resampling.
-pub fn multinomial_resample<R: Rng>(rng: &mut R, particles: &[Particle]) -> Vec<usize> {
-    let n = particles.len();
+/// Multinomial resampling on a normalized weight vector.
+fn multinomial_indices<R: Rng>(rng: &mut R, weights: &[f64]) -> Vec<usize> {
+    let n = weights.len();
     let mut indices = Vec::with_capacity(n);
 
     for _ in 0..n {
@@ -280,8 +301,8 @@ pub fn multinomial_resample<R: Rng>(rng: &mut R, particles: &[Particle]) -> Vec<
         let mut cum_weight = 0.0;
         let mut selected = n - 1;
 
-        for (i, p) in particles.iter().enumerate() {
-            cum_weight += p.weight;
+        for (i, &w) in weights.iter().enumerate() {
+            cum_weight += w;
             if u <= cum_weight {
                 selected = i;
                 break;
@@ -290,6 +311,15 @@ pub fn multinomial_resample<R: Rng>(rng: &mut R, particles: &[Particle]) -> Vec<
         indices.push(selected);
     }
     indices
+}
+
+/// Resample indices from a normalized weight vector using the chosen method.
+fn resample_indices<R: Rng>(rng: &mut R, weights: &[f64], method: ResamplingMethod) -> Vec<usize> {
+    match method {
+        ResamplingMethod::Multinomial => multinomial_indices(rng, weights),
+        ResamplingMethod::Systematic => systematic_indices(rng, weights),
+        ResamplingMethod::Stratified => stratified_indices(rng, weights),
+    }
 }
 
 /// Resample particles based on weights.
@@ -318,30 +348,71 @@ pub fn resample_particles<R: Rng>(
         .collect()
 }
 
-/// Run adaptive Sequential Monte Carlo with resampling and rejuvenation.
+/// Result of a likelihood-tempered Sequential Monte Carlo run.
 ///
-/// This is the main SMC algorithm that maintains a population of weighted particles
-/// and adaptively resamples when the effective sample size drops below a threshold.
-/// Optional rejuvenation steps help maintain particle diversity after resampling.
+/// In addition to the final weighted particle population, this carries the
+/// unbiased log marginal-likelihood (log-evidence) estimate accumulated across
+/// the tempering ladder — the key deliverable that motivates SMC over plain
+/// MCMC for model comparison (see finding FG-58).
 ///
-/// # Algorithm
+/// `SMCResult` dereferences to `Vec<Particle>`, so the population can be used
+/// directly with slice/iterator methods and with [`effective_sample_size`].
+#[derive(Clone, Debug)]
+pub struct SMCResult {
+    /// Final weighted particle population approximating the posterior (β = 1).
+    pub particles: Vec<Particle>,
+    /// Unbiased estimate of the log marginal likelihood log p(y).
+    pub log_evidence: f64,
+}
+
+impl std::ops::Deref for SMCResult {
+    type Target = Vec<Particle>;
+    fn deref(&self) -> &Self::Target {
+        &self.particles
+    }
+}
+
+/// The log incremental target factor of a particle: log p(y | θ) = log_likelihood + log_factors.
 ///
-/// 1. Initialize particles by sampling from the prior
-/// 2. Compute weights and effective sample size
-/// 3. If ESS < threshold × N: resample particles
-/// 4. Apply rejuvenation moves (MCMC) if configured
-/// 5. Return final particle population
+/// Under likelihood tempering the sequence of targets is
+/// π_β(θ) ∝ p(θ) · p(y | θ)^β, so the base prior draw contributes p(θ) and the
+/// tempered reweighting uses only this likelihood term. This is also the correct
+/// (prior-cancelled) importance weight of finding FG-03.
+fn particle_log_likelihood(trace: &Trace) -> f64 {
+    trace.log_likelihood + trace.log_factors
+}
+
+/// Run genuine likelihood-tempered Sequential Monte Carlo.
+///
+/// This targets the sequence of tempered distributions
+/// π_β(θ) ∝ p(θ) · p(y | θ)^β for β increasing 0 → 1, so π_0 is the prior and
+/// π_1 is the posterior. It performs:
+///
+/// 1. **Initialization** — draw `num_particles` particles from the prior (β = 0),
+///    with uniform weights.
+/// 2. **Adaptive tempering** — pick the next β by bisection so the reweighted ESS
+///    hits `ess_threshold · N` (Jasra et al. 2011); reweight by the incremental
+///    factor exp((β' − β)·log p(y | θ)).
+/// 3. **Evidence accumulation** — add the log-mean incremental weight of each step
+///    to an unbiased log-evidence accumulator (finding FG-58).
+/// 4. **Resample + rejuvenate** — when `rejuvenation_steps > 0`, systematically
+///    resample and apply π_β-invariant MH moves after each intermediate step to
+///    restore particle diversity.
+///
+/// The terminal β = 1 step returns the *weighted* particles (no terminal
+/// resample, per finding FG-43): resampling as the final operation would discard
+/// information and inflate Monte Carlo variance.
 ///
 /// # Arguments
 ///
 /// * `rng` - Random number generator
 /// * `num_particles` - Size of particle population to maintain
 /// * `model_fn` - Function that creates the model
-/// * `config` - SMC configuration (resampling method, thresholds, etc.)
+/// * `config` - SMC configuration (resampling method, ESS threshold, rejuvenation)
 ///
 /// # Returns
 ///
-/// Final population of weighted particles representing the posterior.
+/// An [`SMCResult`] with the final weighted particles and the log-evidence estimate.
 ///
 /// # Examples
 ///
@@ -367,10 +438,11 @@ pub fn resample_particles<R: Rng>(
 ///     rejuvenation_steps: 1,
 /// };
 ///
-/// let particles = adaptive_smc(&mut rng, 5, model_fn, config);
+/// let result = adaptive_smc(&mut rng, 5, model_fn, config);
+/// assert!(result.log_evidence.is_finite());
 ///
 /// // Analyze posterior
-/// let mu_estimates: Vec<f64> = particles.iter()
+/// let mu_estimates: Vec<f64> = result.iter()
 ///     .filter_map(|p| p.trace.choices.get(&addr!("mu")))
 ///     .filter_map(|choice| match choice.value {
 ///         ChoiceValue::F64(mu) => Some(mu),
@@ -385,35 +457,259 @@ pub fn adaptive_smc<A, R: Rng>(
     num_particles: usize,
     model_fn: impl Fn() -> Model<A>,
     config: SMCConfig,
-) -> Vec<Particle> {
-    let mut particles = smc_prior_particles(rng, num_particles, &model_fn);
+) -> SMCResult {
+    let n = num_particles;
+    if n == 0 {
+        return SMCResult {
+            particles: Vec::new(),
+            log_evidence: 0.0,
+        };
+    }
 
-    // Check if resampling is needed
-    let ess = effective_sample_size(&particles);
-    let ess_ratio = ess / num_particles as f64;
+    // Step 1: draw the initial population from the prior (β = 0, uniform weights).
+    let mut particles = smc_prior_particles(rng, n, &model_fn);
+    let mut logliks: Vec<f64> = particles
+        .iter()
+        .map(|p| particle_log_likelihood(&p.trace))
+        .collect();
+    // Normalized log-weights (invariant: sum of exp equals 1). Uniform at β = 0.
+    let mut log_w = vec![-(n as f64).ln(); n];
 
-    if ess_ratio < config.ess_threshold {
-        // Resample
-        particles = resample_particles(rng, &particles, config.resampling_method);
+    let mut beta = 0.0_f64;
+    let mut log_evidence = 0.0_f64;
+    // Target ESS for the adaptive β schedule.
+    let target_ess = (config.ess_threshold * n as f64).clamp(1.0, n as f64);
+    let mut adaptation = DiminishingAdaptation::new(0.44, 0.7);
 
-        // Optional rejuvenation with MCMC
-        if config.rejuvenation_steps > 0 {
-            let mut adaptation = DiminishingAdaptation::new(0.44, 0.7);
-            for particle in &mut particles {
-                for _ in 0..config.rejuvenation_steps {
-                    let (_, new_trace) =
-                        adaptive_single_site_mh(rng, &model_fn, &particle.trace, &mut adaptation);
-                    particle.trace = new_trace;
-                    particle.log_weight = particle.trace.total_log_weight();
+    if config.rejuvenation_steps == 0 {
+        // Without a rejuvenation move the particle positions never change, so a
+        // multi-step temper and a single 0→1 jump give identical weighted
+        // populations. Resampling here would only add variance (FG-43), so we do
+        // a single pure importance-sampling reweight: log Ẑ = log-mean-likelihood
+        // and weights ∝ exp(loglik). This is also the FG-03 prior-cancelled weight.
+        let combined: Vec<f64> = logliks.iter().map(|ll| -(n as f64).ln() + ll).collect();
+        log_evidence = log_sum_exp(&combined);
+        beta = 1.0;
+        log_w = combined;
+    } else {
+        // Genuine likelihood-tempered SMC. Because we resample (restart from
+        // uniform weights) at every intermediate step, each `next_beta` search
+        // begins from ESS = N > target and is guaranteed to make progress toward
+        // β = 1. A hard cap on the number of steps is a final safety net.
+        const MAX_STEPS: usize = 10_000;
+        let mut steps = 0;
+        while beta < 1.0 {
+            steps += 1;
+            let mut beta_new = next_beta(beta, &log_w, &logliks, target_ess);
+            if steps >= MAX_STEPS {
+                beta_new = 1.0;
+            }
+            let d_beta = beta_new - beta;
+
+            // Reweight by the incremental likelihood factor and accumulate
+            // evidence. Since `log_w` is uniform at the start of every step, this
+            // step's contribution is the log-mean incremental weight (FG-58).
+            let combined: Vec<f64> = log_w
+                .iter()
+                .zip(&logliks)
+                .map(|(lw, ll)| lw + d_beta * ll)
+                .collect();
+            let log_norm = log_sum_exp(&combined);
+            log_evidence += log_norm;
+
+            if log_norm.is_finite() {
+                for (lw, c) in log_w.iter_mut().zip(&combined) {
+                    *lw = c - log_norm;
+                }
+            } else {
+                for lw in log_w.iter_mut() {
+                    *lw = -(n as f64).ln();
                 }
             }
+            beta = beta_new;
 
-            // Renormalize after rejuvenation
-            normalize_particles(&mut particles);
+            // Resample + rejuvenate at intermediate steps only. The terminal
+            // β = 1 step returns the weighted particles (no terminal resample,
+            // FG-43).
+            if beta < 1.0 {
+                let weights: Vec<f64> = log_w.iter().map(|lw| lw.exp()).collect();
+                let indices = resample_indices(rng, &weights, config.resampling_method);
+                particles = indices.iter().map(|&i| particles[i].clone()).collect();
+                for lw in log_w.iter_mut() {
+                    *lw = -(n as f64).ln();
+                }
+
+                // π_β-invariant MH rejuvenation. Weights stay uniform (FG-13): an
+                // invariant move does not change them, so we do NOT reweight here.
+                for particle in particles.iter_mut() {
+                    for _ in 0..config.rejuvenation_steps {
+                        particle.trace = tempered_single_site_mh(
+                            rng,
+                            &model_fn,
+                            &particle.trace,
+                            beta,
+                            &mut adaptation,
+                        );
+                    }
+                }
+                logliks = particles
+                    .iter()
+                    .map(|p| particle_log_likelihood(&p.trace))
+                    .collect();
+            }
+        }
+    }
+    let _ = beta;
+
+    // Attach the final normalized weights to the particles.
+    let log_norm = log_sum_exp(&log_w);
+    for (p, &lw) in particles.iter_mut().zip(&log_w) {
+        if log_norm.is_finite() {
+            let normalized = lw - log_norm;
+            p.log_weight = normalized;
+            p.weight = normalized.exp();
+        } else {
+            p.log_weight = -(n as f64).ln();
+            p.weight = 1.0 / n as f64;
         }
     }
 
-    particles
+    SMCResult {
+        particles,
+        log_evidence,
+    }
+}
+
+/// Choose the next inverse-temperature β' ∈ (β, 1] by ESS bisection.
+///
+/// Finds the smallest β' such that reweighting the current (normalized) weights
+/// by exp((β' − β)·loglik) drops the ESS to `target_ess`. If reaching β' = 1
+/// already keeps ESS ≥ `target_ess`, the ladder terminates at 1.
+fn next_beta(beta: f64, log_w: &[f64], logliks: &[f64], target_ess: f64) -> f64 {
+    let ess_at = |b: f64| -> f64 {
+        let lv: Vec<f64> = log_w
+            .iter()
+            .zip(logliks)
+            .map(|(lw, ll)| lw + (b - beta) * ll)
+            .collect();
+        let lse1 = log_sum_exp(&lv);
+        let lv2: Vec<f64> = lv.iter().map(|x| 2.0 * x).collect();
+        let lse2 = log_sum_exp(&lv2);
+        if !lse1.is_finite() || !lse2.is_finite() {
+            return log_w.len() as f64;
+        }
+        (2.0 * lse1 - lse2).exp()
+    };
+
+    // If a full jump to β = 1 keeps ESS above target, we are done.
+    if ess_at(1.0) >= target_ess {
+        return 1.0;
+    }
+
+    // Bisection: ess_at is decreasing in b; find the crossing with target_ess.
+    let mut lo = beta;
+    let mut hi = 1.0;
+    for _ in 0..64 {
+        let mid = 0.5 * (lo + hi);
+        if ess_at(mid) < target_ess {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    // `hi` is on the low-ESS side, so ESS(hi) ≤ target. Guarantee strict progress.
+    hi.max(beta + 1e-9).min(1.0)
+}
+
+/// A single π_β-invariant single-site Metropolis-Hastings rejuvenation move.
+///
+/// Perturbs one randomly chosen continuous (f64) site with a symmetric Gaussian
+/// random walk and accepts against the tempered target π_β(θ) ∝ p(θ)·p(y|θ)^β.
+/// Because the proposal is symmetric there is no Hastings correction. The move is
+/// invariant for π_β, so applying it to a resampled (uniform-weight) population
+/// leaves the weights uniform.
+fn tempered_single_site_mh<A, R: Rng>(
+    rng: &mut R,
+    model_fn: &impl Fn() -> Model<A>,
+    current: &Trace,
+    beta: f64,
+    adaptation: &mut DiminishingAdaptation,
+) -> Trace {
+    // Collect continuous sites eligible for a Gaussian random-walk perturbation.
+    let f64_sites: Vec<Address> = current
+        .choices
+        .iter()
+        .filter(|(_, c)| matches!(c.value, ChoiceValue::F64(_)))
+        .map(|(a, _)| a.clone())
+        .collect();
+    if f64_sites.is_empty() {
+        // Nothing to move; doing nothing is trivially π_β-invariant.
+        return current.clone();
+    }
+
+    let site = f64_sites[rng.gen_range(0..f64_sites.len())].clone();
+    let scale = adaptation.get_scale(&site);
+    let cur_val = current.choices[&site].value.as_f64().unwrap();
+
+    // Symmetric Gaussian random walk on the selected coordinate.
+    let z = Normal::new(0.0, 1.0).unwrap().sample(rng);
+    let prop_val = cur_val + scale * z;
+
+    let mut proposed = current.clone();
+    proposed.choices.get_mut(&site).unwrap().value = ChoiceValue::F64(prop_val);
+
+    // Score current and proposed traces under the model.
+    let (_, cur_scored) = run(
+        ScoreGivenTrace {
+            base: current.clone(),
+            trace: Trace::default(),
+        },
+        model_fn(),
+    );
+    let (_, prop_scored) = run(
+        ScoreGivenTrace {
+            base: proposed,
+            trace: Trace::default(),
+        },
+        model_fn(),
+    );
+
+    // Tempered acceptance: Δlog_prior + β·Δloglik (symmetric proposal ⇒ no Hastings).
+    let log_alpha = (prop_scored.log_prior - cur_scored.log_prior)
+        + beta * (particle_log_likelihood(&prop_scored) - particle_log_likelihood(&cur_scored));
+    let accept = log_alpha >= 0.0 || rng.gen::<f64>() < log_alpha.exp();
+    adaptation.update(&site, accept);
+
+    if accept {
+        prop_scored
+    } else {
+        cur_scored
+    }
+}
+
+/// Apply π_β-invariant MH rejuvenation moves to a particle population in place.
+///
+/// This is the rejuvenation primitive used by [`adaptive_smc`]. It updates each
+/// particle's trace with `rejuvenation_steps` single-site MH moves that leave the
+/// tempered target π_β invariant. Crucially it does **not** touch particle weights:
+/// after resampling the weights are uniform, and an invariant MH move keeps them
+/// uniform — reweighting here would re-introduce the prior-squaring bias of
+/// findings FG-03/FG-13.
+pub fn rejuvenate_particles<A, R: Rng>(
+    rng: &mut R,
+    particles: &mut [Particle],
+    model_fn: impl Fn() -> Model<A>,
+    beta: f64,
+    rejuvenation_steps: usize,
+) {
+    let mut adaptation = DiminishingAdaptation::new(0.44, 0.7);
+    for particle in particles.iter_mut() {
+        for _ in 0..rejuvenation_steps {
+            particle.trace =
+                tempered_single_site_mh(rng, &model_fn, &particle.trace, beta, &mut adaptation);
+        }
+        // FG-13: weights are intentionally left unchanged.
+    }
 }
 
 /// Normalize particle weights using numerically stable log-sum-exp.
@@ -456,6 +752,15 @@ pub fn normalize_particles(particles: &mut [Particle]) {
     }
 }
 
+/// Draw an importance-weighted particle population from the prior.
+///
+/// Each particle is a full model execution sampled from the prior (β = 0). Its
+/// unnormalized log-weight is the log-likelihood only — `log_likelihood +
+/// log_factors` — because the proposal (the prior) exactly cancels the prior
+/// factor of the target: with q(θ) = p(θ) and target ∝ p(θ)·p(y|θ), the
+/// self-normalized importance weight is p(y|θ), not p(θ)·p(y|θ). Including the
+/// log-prior term double-counts (squares) the prior and biases every posterior
+/// estimate — this is finding FG-03.
 pub fn smc_prior_particles<A, R: Rng>(
     rng: &mut R,
     num_particles: usize,
@@ -470,10 +775,14 @@ pub fn smc_prior_particles<A, R: Rng>(
             },
             model_fn(),
         );
+        // FG-03: prior-proposed weight is the likelihood factor only (the prior
+        // cancels against the proposal). FG-59: compute the weight from a borrow,
+        // then move `t` into the particle instead of cloning the whole trace.
+        let log_weight = particle_log_likelihood(&t);
         particles.push(Particle {
-            trace: t.clone(),
+            trace: t,
             weight: 0.0, // Will be set by normalization
-            log_weight: t.total_log_weight(),
+            log_weight,
         });
     }
     normalize_particles(&mut particles);
