@@ -150,6 +150,24 @@ impl Normal {
         Ok(Normal { mu, sigma })
     }
 
+    /// Create the standard normal distribution `N(0, 1)`.
+    ///
+    /// FG-29: infallible constructor for the statically-valid `mu = 0`,
+    /// `sigma = 1` case, so common code does not need `new(...).unwrap()`.
+    ///
+    /// ```rust
+    /// # use fugue::*;
+    /// let z = Normal::standard();
+    /// assert_eq!(z.mu(), 0.0);
+    /// assert_eq!(z.sigma(), 1.0);
+    /// ```
+    pub fn standard() -> Self {
+        Normal {
+            mu: 0.0,
+            sigma: 1.0,
+        }
+    }
+
     /// Get the mean of the distribution.
     pub fn mu(&self) -> f64 {
         self.mu
@@ -173,13 +191,15 @@ impl Distribution<f64> for Normal {
             return f64::NEG_INFINITY;
         }
 
-        // Numerically stable computation
+        // Numerically stable computation.
+        //
+        // FG-08: the log-density is computed entirely in log-space
+        // (`-0.5·z² - ln(σ) - 0.5·ln(2π)`) and never evaluates `exp`, so it is
+        // finite for every finite `z`. The previous `|z| > 37` short-circuit
+        // returned `-inf` for perfectly finite densities (e.g. a tight-sigma
+        // likelihood with a moderate residual), silently collapsing whole
+        // models; it has been removed.
         let z = (x - self.mu) / self.sigma;
-
-        // Prevent overflow for extreme values (|z| > 37 gives exp(-z²/2) < machine epsilon)
-        if z.abs() > 37.0 {
-            return f64::NEG_INFINITY;
-        }
 
         // Use precomputed constant for better precision
         const LN_2PI: f64 = 1.837_877_066_409_345_6; // ln(2π)
@@ -246,6 +266,25 @@ impl Uniform {
             .with_context("high", format!("{}", high)));
         }
         Ok(Uniform { low, high })
+    }
+
+    /// Create the unit uniform distribution on `[0, 1)`.
+    ///
+    /// FG-29: infallible constructor for the statically-valid `low = 0`,
+    /// `high = 1` case (the canonical uninformative prior over a probability),
+    /// avoiding `new(0.0, 1.0).unwrap()`.
+    ///
+    /// ```rust
+    /// # use fugue::*;
+    /// let u = Uniform::unit();
+    /// assert_eq!(u.low(), 0.0);
+    /// assert_eq!(u.high(), 1.0);
+    /// ```
+    pub fn unit() -> Self {
+        Uniform {
+            low: 0.0,
+            high: 1.0,
+        }
     }
 
     /// Get the lower bound.
@@ -379,14 +418,14 @@ impl Distribution<f64> for LogNormal {
             return f64::NEG_INFINITY;
         }
 
-        // Numerically stable computation
+        // Numerically stable computation.
+        //
+        // FG-08: like Normal, this is pure log-space and finite for any finite
+        // standardized residual `z`; the old `|z| > 37` guard wrongly returned
+        // `-inf` for finite densities (e.g. tight-sigma multiplicative error
+        // models) and has been removed.
         let lx = x.ln();
         let z = (lx - self.mu) / self.sigma;
-
-        // Prevent overflow
-        if z.abs() > 37.0 {
-            return f64::NEG_INFINITY;
-        }
 
         // Stable computation: log_prob = -0.5*z² - ln(x) - ln(σ) - 0.5*ln(2π)
         const LN_2PI: f64 = 1.837_877_066_409_345_6; // ln(2π)
@@ -469,10 +508,10 @@ impl Distribution<f64> for Exponential {
         if *x < 0.0 {
             f64::NEG_INFINITY
         } else {
-            // Check for overflow: if rate * x > 700, exp(-rate*x) underflows
-            if self.rate * x > 700.0 {
-                return f64::NEG_INFINITY;
-            }
+            // FG-30: `ln(λ) - λx` is computed entirely in log-space and is
+            // finite for every finite `x` (`-λx` is just a subtraction, no
+            // `exp`). The previous `rate*x > 700` short-circuit returned `-inf`
+            // for finite tail log-densities and has been removed.
             self.rate.ln() - self.rate * x
         }
     }
@@ -526,6 +565,20 @@ impl Bernoulli {
             .with_context("expected", "[0.0, 1.0]"));
         }
         Ok(Bernoulli { p })
+    }
+
+    /// Create a fair Bernoulli distribution (`p = 0.5`).
+    ///
+    /// FG-29: infallible constructor for the statically-valid fair-coin case,
+    /// avoiding `new(0.5).unwrap()`.
+    ///
+    /// ```rust
+    /// # use fugue::*;
+    /// let coin = Bernoulli::fair();
+    /// assert_eq!(coin.p(), 0.5);
+    /// ```
+    pub fn fair() -> Self {
+        Bernoulli { p: 0.5 }
     }
 
     /// Get the success probability.
@@ -599,12 +652,30 @@ impl Distribution<bool> for Bernoulli {
 /// ```
 #[derive(Clone, Debug)]
 pub struct Categorical {
-    /// Probabilities for each category (should sum to 1.0).
+    /// Probabilities for each category (validated to sum to 1.0 in the constructor).
     probs: Vec<f64>,
+    /// Cached inclusive cumulative distribution: `cumulative[i] = Σ probs[0..=i]`.
+    ///
+    /// FG-53: computed once at construction so `sample` can binary-search the CDF
+    /// (O(log k)) and neither `sample` nor `log_prob` re-sums/re-validates the
+    /// full probability vector on the hot inference path.
+    cumulative: Vec<f64>,
 }
 impl Categorical {
-    /// Create a new Categorical distribution with validated parameters.
-    pub fn new(probs: Vec<f64>) -> crate::error::FugueResult<Self> {
+    /// Build the inclusive cumulative distribution from a validated probability slice.
+    fn compute_cumulative(probs: &[f64]) -> Vec<f64> {
+        let mut cumulative = Vec::with_capacity(probs.len());
+        let mut acc = 0.0;
+        for &p in probs {
+            acc += p;
+            cumulative.push(acc);
+        }
+        cumulative
+    }
+
+    /// Validate a probability vector against the Categorical invariants
+    /// (non-empty, every entry non-negative and finite, sum ≈ 1.0).
+    fn validate_probs(probs: &[f64]) -> crate::error::FugueResult<()> {
         if probs.is_empty() {
             return Err(crate::error::FugueError::invalid_parameters(
                 "Categorical",
@@ -639,7 +710,18 @@ impl Categorical {
             }
         }
 
-        Ok(Categorical { probs })
+        Ok(())
+    }
+
+    /// Create a new Categorical distribution with validated parameters.
+    ///
+    /// FG-53: the probability vector is validated exactly once here and the
+    /// cumulative distribution is cached; `sample`/`log_prob` then rely on the
+    /// established invariant instead of re-validating on every call.
+    pub fn new(probs: Vec<f64>) -> crate::error::FugueResult<Self> {
+        Self::validate_probs(&probs)?;
+        let cumulative = Self::compute_cumulative(&probs);
+        Ok(Categorical { probs, cumulative })
     }
 
     /// Create a uniform categorical distribution over k categories.
@@ -655,7 +737,18 @@ impl Categorical {
 
         let prob = 1.0 / k as f64;
         let probs = vec![prob; k];
-        Ok(Categorical { probs })
+        let cumulative = Self::compute_cumulative(&probs);
+        Ok(Categorical { probs, cumulative })
+    }
+
+    /// Re-check the constructor invariants on the cached probability vector.
+    ///
+    /// The public constructors ([`Categorical::new`]/[`Categorical::uniform`])
+    /// already guarantee these invariants, so this is only needed if a
+    /// `Categorical` is obtained through some future unchecked path (e.g.
+    /// deserialization) and the caller wants to reassert validity.
+    pub fn revalidate(&self) -> crate::error::FugueResult<()> {
+        Self::validate_probs(&self.probs)
     }
 
     /// Get the probability vector.
@@ -675,42 +768,24 @@ impl Categorical {
 }
 impl Distribution<usize> for Categorical {
     fn sample(&self, rng: &mut dyn RngCore) -> usize {
-        // Parameter validation
-        if self.probs.is_empty() {
-            return 0;
-        }
-
-        let prob_sum: f64 = self.probs.iter().sum();
-        if (prob_sum - 1.0).abs() > 1e-6 || self.probs.iter().any(|&p| p < 0.0 || !p.is_finite()) {
+        // FG-53: the probability vector was validated once at construction, so
+        // no per-call re-sum/re-scan is needed. Draw u ~ Uniform[0,1) and binary
+        // search the cached CDF for the first index i with cumulative[i] >= u —
+        // the exact same mapping the previous linear scan produced, in O(log k).
+        if self.cumulative.is_empty() {
             return 0;
         }
 
         use rand::Rng;
         let u: f64 = rng.gen();
-        let mut cum = 0.0;
-        for (i, &p) in self.probs.iter().enumerate() {
-            cum += p;
-            if u <= cum {
-                return i;
-            }
-        }
-        self.probs.len() - 1
+        let idx = self.cumulative.partition_point(|&c| c < u);
+        idx.min(self.probs.len() - 1)
     }
     fn log_prob(&self, x: &usize) -> LogF64 {
-        // Parameter validation
-        if self.probs.is_empty() || *x >= self.probs.len() {
-            return f64::NEG_INFINITY;
-        }
-
-        let prob_sum: f64 = self.probs.iter().sum();
-        if (prob_sum - 1.0).abs() > 1e-6 || self.probs.iter().any(|&p| p < 0.0 || !p.is_finite()) {
-            return f64::NEG_INFINITY;
-        }
-
-        if self.probs[*x] <= 0.0 {
-            f64::NEG_INFINITY
-        } else {
-            self.probs[*x].ln()
+        // FG-53: bounds-checked index into the validated probability vector.
+        match self.probs.get(*x) {
+            Some(&p) if p > 0.0 => p.ln(),
+            _ => f64::NEG_INFINITY,
         }
     }
     fn clone_box(&self) -> Box<dyn Distribution<usize>> {
@@ -723,10 +798,15 @@ impl Distribution<usize> for Categorical {
 /// Conjugate prior for Bernoulli/Binomial distributions.
 ///
 /// Mathematical Properties:
-/// - **Support**: (0, 1)
+/// - **Support**: (0, 1); the closed endpoints 0 and 1 are handled as limits
 /// - **PDF**: f(x) = (x^(α-1) × (1-x)^(β-1)) / B(α,β)
 /// - **Mean**: α / (α + β)
 /// - **Variance**: (αβ) / ((α+β)²(α+β+1))
+///
+/// Boundary semantics (matching `scipy.stats.beta.logpdf`): at `x = 0`,
+/// `log_prob` is `-∞` when `α > 1` (density → 0), `ln(β)` when `α == 1`, and
+/// `+∞` when `α < 1` (density diverges, e.g. the Jeffreys prior Beta(0.5, 0.5)).
+/// The endpoint `x = 1` is symmetric in `β`.
 ///
 /// Example:
 /// ```rust
@@ -776,6 +856,26 @@ impl Beta {
         Ok(Beta { alpha, beta })
     }
 
+    /// Create the uniform-prior Beta distribution `Beta(1, 1)`.
+    ///
+    /// FG-29: infallible constructor for the statically-valid `α = β = 1` case,
+    /// which is exactly the uniform distribution on `(0, 1)` and the standard
+    /// uninformative conjugate prior for a Bernoulli/Binomial probability;
+    /// avoids `new(1.0, 1.0).unwrap()`.
+    ///
+    /// ```rust
+    /// # use fugue::*;
+    /// let prior = Beta::uniform_prior();
+    /// assert_eq!(prior.alpha(), 1.0);
+    /// assert_eq!(prior.beta(), 1.0);
+    /// ```
+    pub fn uniform_prior() -> Self {
+        Beta {
+            alpha: 1.0,
+            beta: 1.0,
+        }
+    }
+
     /// Get the alpha parameter.
     pub fn alpha(&self) -> f64 {
         self.alpha
@@ -804,28 +904,52 @@ impl Distribution<f64> for Beta {
             return f64::NEG_INFINITY;
         }
 
-        // Support validation
-        if *x <= 0.0 || *x >= 1.0 {
+        let x = *x;
+
+        // Outside the closed support [0, 1] the density is 0.
+        if !(0.0..=1.0).contains(&x) {
             return f64::NEG_INFINITY;
         }
 
-        // Handle edge cases near boundaries
-        if *x < 1e-100 || *x > 1.0 - 1e-100 {
-            return f64::NEG_INFINITY;
-        }
-
-        // Numerically stable computation using log-gamma
-        // log Beta(x; α, β) = (α-1)ln(x) + (β-1)ln(1-x) - log B(α,β)
+        // log B(α, β), the (log) normalizing constant.
         let log_beta_fn = libm::lgamma(self.alpha) + libm::lgamma(self.beta)
             - libm::lgamma(self.alpha + self.beta);
 
+        // FG-27: boundary limits matching `scipy.stats.beta.logpdf`. The density
+        // behaves like x^(α-1) at 0 and (1-x)^(β-1) at 1, so at each endpoint:
+        //   - shape param > 1  ⇒ density → 0   ⇒ -inf
+        //   - shape param == 1 ⇒ density finite ⇒ the finite limit (-log B)
+        //   - shape param < 1  ⇒ density → ∞   ⇒ +inf
+        // The previous `1e-100`/`ln < -700` cutoffs returned -inf here even where
+        // the true log-density is a large *positive* number (e.g. Jeffreys prior
+        // Beta(0.5,0.5)), which is wrong in sign, not merely over-conservative.
+        if x == 0.0 {
+            return if self.alpha > 1.0 {
+                f64::NEG_INFINITY
+            } else if self.alpha < 1.0 {
+                f64::INFINITY
+            } else {
+                // α == 1: (α-1)·ln(x) = 0 and (β-1)·ln(1) = 0, so log_prob = -log B(1,β) = ln(β).
+                -log_beta_fn
+            };
+        }
+        if x == 1.0 {
+            return if self.beta > 1.0 {
+                f64::NEG_INFINITY
+            } else if self.beta < 1.0 {
+                f64::INFINITY
+            } else {
+                // β == 1: log_prob = -log B(α,1) = ln(α).
+                -log_beta_fn
+            };
+        }
+
+        // Interior x ∈ (0, 1): computed exactly with no ln guards. f64::ln
+        // handles subnormals fine, and for α<1 (or β<1) near a boundary the
+        // (α-1)·ln(x) term correctly diverges to +∞ rather than being clipped.
+        // log Beta(x; α, β) = (α-1)·ln(x) + (β-1)·ln(1-x) - log B(α, β)
         let ln_x = x.ln();
         let ln_1_minus_x = (1.0 - x).ln();
-
-        // Check for extreme log values
-        if ln_x < -700.0 || ln_1_minus_x < -700.0 {
-            return f64::NEG_INFINITY;
-        }
 
         (self.alpha - 1.0) * ln_x + (self.beta - 1.0) * ln_1_minus_x - log_beta_fn
     }
@@ -926,11 +1050,13 @@ impl Distribution<f64> for Gamma {
             return f64::NEG_INFINITY;
         }
 
-        // Check for overflow conditions
-        if self.rate * x > 700.0 || x.ln() * (self.shape - 1.0) < -700.0 {
-            return f64::NEG_INFINITY;
-        }
-
+        // FG-07: the formula below is pure log-space and never evaluates
+        // `exp`, so `-λx` and `(k-1)·ln(x)` are finite for every `x > 0`. The
+        // previous `rate*x > 700` / `ln(x)·(k-1) < -700` guards returned `-inf`
+        // across the entire high-density region (including the mode) of any
+        // Gamma with mean ≳ 700, silently zeroing large-shape posteriors. They
+        // have been removed; only the genuine `x <= 0` support check remains.
+        //
         // Numerically stable computation
         // log Gamma(x; k, λ) = k*ln(λ) + (k-1)*ln(x) - λ*x - ln Γ(k)
         let log_rate = self.rate.ln();
@@ -1009,10 +1135,27 @@ impl Distribution<u64> for Binomial {
         RDBinomial::new(self.n, self.p).unwrap().sample(rng)
     }
     fn log_prob(&self, x: &u64) -> LogF64 {
+        // Parameter validation (defensive; `new` already enforces p ∈ [0, 1]).
+        if !self.p.is_finite() || !(0.0..=1.0).contains(&self.p) {
+            return f64::NEG_INFINITY;
+        }
         let k = *x;
         if k > self.n {
             return f64::NEG_INFINITY;
         }
+
+        // FG-28: `new` accepts the degenerate boundaries p = 0 and p = 1, which
+        // are valid parameters. Evaluating the general formula there produces
+        // `0 * ln(0) = 0 * -inf = NaN`, which is materially worse than -inf
+        // because it poisons every downstream comparison. Handle them exactly:
+        // p = 0 puts all mass on k = 0, p = 1 puts all mass on k = n.
+        if self.p == 0.0 {
+            return if k == 0 { 0.0 } else { f64::NEG_INFINITY };
+        }
+        if self.p == 1.0 {
+            return if k == self.n { 0.0 } else { f64::NEG_INFINITY };
+        }
+
         // log Binomial(k; n, p) = log C(n,k) + k*ln(p) + (n-k)*ln(1-p)
         let log_binom_coeff = libm::lgamma(self.n as f64 + 1.0)
             - libm::lgamma(k as f64 + 1.0)
@@ -1243,6 +1386,143 @@ mod tests {
         assert_eq!(cu.len(), 4);
         for &p in cu.probs() {
             assert!((p - 0.25).abs() < 1e-12);
+        }
+    }
+
+    // Helper: assert closeness with 1e-9 tolerance.
+    fn close(a: f64, b: f64) {
+        assert!((a - b).abs() < 1e-9, "expected {b}, got {a}");
+    }
+
+    #[test]
+    fn fg06_interior_point_known_answers() {
+        // Interior-point closed-form checks (scipy-equivalent constants).
+        close(
+            Normal::new(0.0, 1.0).unwrap().log_prob(&0.0),
+            -0.9189385332046727,
+        );
+        close(
+            Normal::new(1.0, 2.0).unwrap().log_prob(&2.5),
+            -1.893335713764618,
+        );
+        close(
+            Uniform::new(-2.0, 2.0).unwrap().log_prob(&1.5),
+            -1.3862943611198906,
+        );
+        close(
+            LogNormal::new(0.0, 1.0).unwrap().log_prob(&2.0),
+            -1.8523122207237186,
+        );
+        close(
+            Exponential::new(2.0).unwrap().log_prob(&1.0),
+            -1.3068528194400546,
+        );
+        close(
+            Beta::new(2.0, 3.0).unwrap().log_prob(&0.5),
+            0.4054651081081637,
+        );
+        close(
+            Gamma::new(3.0, 2.0).unwrap().log_prob(&1.5),
+            -0.8027754226637804,
+        );
+        close(
+            Binomial::new(20, 0.3).unwrap().log_prob(&7),
+            -1.8062926549204255,
+        );
+        close(Poisson::new(3.0).unwrap().log_prob(&2), -1.4959226032237254);
+        close(
+            Categorical::new(vec![0.2, 0.3, 0.5]).unwrap().log_prob(&2),
+            -std::f64::consts::LN_2, // ln(0.5) = -ln(2)
+        );
+    }
+
+    #[test]
+    fn fg07_fg08_fg30_removed_overflow_guards_return_finite() {
+        // Each point was previously forced to -inf by a bogus overflow guard.
+        close(
+            Gamma::new(2.0, 1.0).unwrap().log_prob(&800.0),
+            -793.315388272332,
+        ); // FG-07
+        close(
+            Normal::new(0.0, 0.001).unwrap().log_prob(&0.05),
+            -1244.0111832542225,
+        ); // FG-08
+        close(
+            LogNormal::new(0.0, 0.001).unwrap().log_prob(&1.05),
+            -1184.3000332584572,
+        ); // FG-08
+        close(
+            Exponential::new(2.0).unwrap().log_prob(&400.0),
+            -799.3068528194401,
+        ); // FG-30
+    }
+
+    #[test]
+    fn fg27_beta_boundaries() {
+        // Subnormal interior no longer clipped to -inf.
+        close(
+            Beta::new(0.5, 0.5).unwrap().log_prob(&1e-100),
+            113.98452476385289,
+        );
+        // Endpoint limits.
+        close(
+            Beta::new(1.0, 5.0).unwrap().log_prob(&0.0),
+            1.6094379124341003,
+        ); // ln(5)
+        close(
+            Beta::new(3.0, 1.0).unwrap().log_prob(&1.0),
+            1.0986122886681098,
+        ); // ln(3)
+        assert_eq!(
+            Beta::new(2.0, 5.0).unwrap().log_prob(&0.0),
+            f64::NEG_INFINITY
+        );
+        assert_eq!(Beta::new(0.5, 3.0).unwrap().log_prob(&0.0), f64::INFINITY);
+    }
+
+    #[test]
+    fn fg28_binomial_degenerate_p_not_nan() {
+        let b0 = Binomial::new(5, 0.0).unwrap();
+        assert!(!b0.log_prob(&0).is_nan());
+        close(b0.log_prob(&0), 0.0);
+        assert_eq!(b0.log_prob(&1), f64::NEG_INFINITY);
+        let b1 = Binomial::new(5, 1.0).unwrap();
+        assert!(!b1.log_prob(&5).is_nan());
+        close(b1.log_prob(&5), 0.0);
+        assert_eq!(b1.log_prob(&3), f64::NEG_INFINITY);
+    }
+
+    #[test]
+    fn fg29_infallible_constructors() {
+        assert_eq!(
+            (Normal::standard().mu(), Normal::standard().sigma()),
+            (0.0, 1.0)
+        );
+        assert_eq!((Uniform::unit().low(), Uniform::unit().high()), (0.0, 1.0));
+        assert_eq!(
+            (Beta::uniform_prior().alpha(), Beta::uniform_prior().beta()),
+            (1.0, 1.0)
+        );
+        assert_eq!(Bernoulli::fair().p(), 0.5);
+    }
+
+    #[test]
+    fn fg53_categorical_cached_cdf_and_revalidate() {
+        let c = Categorical::new(vec![0.1, 0.2, 0.3, 0.4]).unwrap();
+        close(c.log_prob(&3), (0.4f64).ln());
+        assert_eq!(c.log_prob(&4), f64::NEG_INFINITY);
+        assert!(c.revalidate().is_ok());
+
+        // Seeded binary-search sampling stays in-range and roughly matches probs.
+        let mut rng = StdRng::seed_from_u64(7);
+        let mut counts = [0usize; 4];
+        let n = 40_000usize;
+        for _ in 0..n {
+            counts[c.sample(&mut rng)] += 1;
+        }
+        for (k, &p) in [0.1, 0.2, 0.3, 0.4].iter().enumerate() {
+            // ~1.1e-2 is > 7 std for the tightest bin at N = 40_000.
+            assert!((counts[k] as f64 / n as f64 - p).abs() < 1.1e-2);
         }
     }
 }
