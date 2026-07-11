@@ -111,50 +111,131 @@ fn fg42_name_heuristic_no_longer_traps_unbounded_parameter() {
     );
 }
 
-// FG-10: categorical/usize sites are proposed by resampling from the site's
-// prior, which makes acceptance reduce to the likelihood ratio and can never
-// miss the support. Three-category mixture-indicator model:
-//   z ~ Categorical([0.2, 0.3, 0.5]);  y=1.0 ~ Normal(means[z], 1.0), means=[0,1,2].
-// The exact posterior is P(z=k) ∝ prior[k]·N(1; means[k], 1). The 1/sqrt(2π)
-// cancels, leaving weights ∝ [0.2·e^{-1/2}, 0.3·1, 0.5·e^{-1/2}]
-//   = [0.12130614, 0.3, 0.30326535], sum 0.72457149
-//   → P = [0.167416, 0.414036, 0.418548]  (scipy: w=[0.2*exp(-0.5),0.3,0.5*exp(-0.5)]; w/ w.sum()).
-// The pre-fix asymmetric UniformCategoricalProposal over-weighted higher indices.
-#[test]
-fn fg10_categorical_prior_resample_recovers_posterior() {
-    let model_fn = || {
-        sample(addr!("z"), Categorical::new(vec![0.2, 0.3, 0.5]).unwrap()).and_then(|z| {
-            let means = [0.0, 1.0, 2.0];
-            observe(addr!("y"), Normal::new(means[z], 1.0).unwrap(), 1.0).map(move |_| z)
+/// Exact categorical posterior P(z=k) ∝ prior[k]·N(y; means[k], sigma) for a
+/// mixture-indicator model, normalized. The `1/(sigma·√2π)` factor cancels.
+fn exact_categorical_posterior(prior: &[f64], means: &[f64], y: f64, sigma: f64) -> Vec<f64> {
+    let w: Vec<f64> = prior
+        .iter()
+        .zip(means)
+        .map(|(&p, &m)| p * (-0.5 * ((y - m) / sigma).powi(2)).exp())
+        .collect();
+    let z: f64 = w.iter().sum();
+    w.iter().map(|&wi| wi / z).collect()
+}
+
+/// Run the mixture-indicator chain and return the empirical P(z=k) over `k=0..K`.
+fn run_categorical_chain(
+    prior: Vec<f64>,
+    means: Vec<f64>,
+    y: f64,
+    sigma: f64,
+    n_samples: usize,
+    n_warmup: usize,
+    seed: u64,
+) -> Vec<f64> {
+    let k = prior.len();
+    let model_fn = move || {
+        let means = means.clone();
+        sample(addr!("z"), Categorical::new(prior.clone()).unwrap()).and_then(move |z| {
+            // Guard out-of-support proposals with a -inf factor instead of indexing
+            // `means[z]`. The prior only ever draws z ∈ [0, K), so this branch is
+            // never taken by the (fixed) prior-resample proposal; it exists solely
+            // so the PRE-FIX asymmetric proposal — which could draw z ≥ K — is
+            // cleanly *rejected* (exposing the stationary bias) rather than
+            // panicking on an out-of-bounds index.
+            if z < means.len() {
+                observe(addr!("y"), Normal::new(means[z], sigma).unwrap(), y).map(move |_| z)
+            } else {
+                factor(f64::NEG_INFINITY).map(move |_| z)
+            }
         })
     };
-    let mut rng = StdRng::seed_from_u64(555);
-    let samples = adaptive_mcmc_chain(&mut rng, model_fn, 40_000, 5_000);
-
-    let mut counts = [0usize; 3];
+    let mut rng = StdRng::seed_from_u64(seed);
+    let samples = adaptive_mcmc_chain(&mut rng, model_fn, n_samples, n_warmup);
+    let mut counts = vec![0usize; k];
     for (_z, t) in &samples {
         if let Some(z) = t.get_usize(&addr!("z")) {
             counts[z] += 1;
         }
     }
     let n = samples.len() as f64;
-    let emp = [
-        counts[0] as f64 / n,
-        counts[1] as f64 / n,
-        counts[2] as f64 / n,
-    ];
-    let expected = [0.167416_f64, 0.414036, 0.418548];
-    for k in 0..3 {
-        // Tolerance 0.02: with 40k dependent draws the Monte Carlo error on each
-        // category probability is well under this, while the pre-fix bias on the
-        // top categories exceeded it.
+    counts.iter().map(|&c| c as f64 / n).collect()
+}
+
+// FG-10: categorical/usize sites are proposed by resampling from the site's
+// PRIOR (an independence proposal), so acceptance reduces to the likelihood ratio
+// with NO Hastings correction and every category is directly reachable. The
+// pre-fix `UniformCategoricalProposal { n_categories: None }` instead drew from
+// `[0, max(current+5, 10))` — a current-DEPENDENT range whose asymmetry was left
+// uncorrected, biasing the stationary law and systematically over-weighting high
+// indices.
+//
+// This regression uses K=8 categories (the pre-fix K=3 test could not expose the
+// bug — its whole support sits inside the flat `max_val=10` window, so the
+// asymmetry barely moved the three probabilities). Uniform prior, means 0..7,
+// observation y=6, sigma=1.5, so the true posterior places ~0.57 of its mass on
+// the high indices k∈{6,7} where the pre-fix bias is largest.
+//
+// Exact posterior (uniform prior cancels; weights ∝ exp(-0.5·((6-k)/1.5)^2),
+// normalized — reproducible in scipy):
+//   [0.000105, 0.001215, 0.008981, 0.042549, 0.129253, 0.251750, 0.314397, 0.251750]
+// The audit measured the pre-fix chain's L1 error ≈ 0.05 with per-category error
+// up to ~0.03 on k=5/7; our simulation of the exact pre-fix kernel reproduces
+// L1 ≈ 0.07 (per-cat 0.029 at k=7), so the tolerances below fail on the pre-fix
+// code and pass on the prior-resample fix (whose MC error here is < 0.006/cat).
+#[test]
+fn fg10_categorical_prior_resample_recovers_posterior() {
+    let prior = vec![1.0 / 8.0; 8];
+    let means: Vec<f64> = (0..8).map(|k| k as f64).collect();
+    let expected = exact_categorical_posterior(&prior, &means, 6.0, 1.5);
+    assert!((expected[6] + expected[7] - 0.5661).abs() < 1e-3);
+
+    let emp = run_categorical_chain(prior, means, 6.0, 1.5, 80_000, 8_000, 555);
+
+    let l1: f64 = emp.iter().zip(&expected).map(|(a, b)| (a - b).abs()).sum();
+    // Aggregate L1: fixed ≈ 0.012, pre-fix ≈ 0.07.
+    assert!(l1 < 0.03, "categorical posterior L1 error {l1:.4} too large");
+    for k in 0..8 {
+        // Per-category: fixed < 0.006, pre-fix up to 0.029 (k=5,7).
         assert!(
             (emp[k] - expected[k]).abs() < 0.02,
-            "P(z={k}) = {:.4}, expected {:.4}",
+            "P(z={k}) = {:.4}, expected {:.4} (L1={l1:.4})",
             emp[k],
             expected[k]
         );
     }
+}
+
+// FG-10 (reachability of top categories): with K=12 > the pre-fix heuristic
+// ceiling `max(current+5, 10)`, the old proposal could reach the top categories
+// only by slowly climbing through intermediate ones, so it grossly under- or
+// mis-weighted them; the audit flagged category k=11 as biased by ~0.02. The
+// prior-resample proposal draws directly from `[0, K)`, so every category —
+// including the last — is proposed in one step. Uniform prior over 12 categories,
+// means 0..11, y=10, sigma=1.5; the true posterior puts ~0.57 of its mass on
+// k∈{10,11}.
+//
+// Exact posterior (last four entries): k=8:0.129252, k=9:0.251748,
+// k=10:0.314395, k=11:0.251748.
+#[test]
+fn fg10_categorical_top_categories_reachable_for_large_k() {
+    let prior = vec![1.0 / 12.0; 12];
+    let means: Vec<f64> = (0..12).map(|k| k as f64).collect();
+    let expected = exact_categorical_posterior(&prior, &means, 10.0, 1.5);
+
+    let emp = run_categorical_chain(prior, means, 10.0, 1.5, 80_000, 8_000, 20260711);
+
+    // The top category (index 11, above the pre-fix flat window) must be recovered
+    // to within Monte Carlo error. Fixed ≈ 0.006; the pre-fix bias here is ≈ 0.02.
+    assert!(
+        (emp[11] - expected[11]).abs() < 0.015,
+        "P(z=11) = {:.4}, expected {:.4}: top category not properly reachable",
+        emp[11],
+        expected[11]
+    );
+    // And the whole high-index tail is unbiased.
+    let l1: f64 = emp.iter().zip(&expected).map(|(a, b)| (a - b).abs()).sum();
+    assert!(l1 < 0.03, "K=12 categorical posterior L1 error {l1:.4} too large");
 }
 
 // FG-41: the reflected discrete walk for count-valued (u64) latents must yield a

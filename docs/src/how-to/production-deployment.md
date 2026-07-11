@@ -78,7 +78,7 @@ Production models require flexible configuration for different environments:
 
 - **Environment-Specific Settings**: Different behavior for development/staging/production
 - **Model Parameter Configuration**: Tunable priors, noise levels, and thresholds
-- **Runtime Configuration**: Memory pool sizes, timeout limits, error thresholds
+- **Runtime Configuration**: Timeout limits, error thresholds, retry budgets
 - **Deployment Configuration**: Circuit breaker settings, logging levels, metrics enablement
 - **Type-Safe Defaults**: Sensible fallbacks for all configuration parameters
 
@@ -137,7 +137,7 @@ $$\text{EWMA}_t = \alpha X_t + (1-\alpha)\text{EWMA}_{t-1}$$
 
 - **Performance Metrics**: Inference time, throughput, operation counts
 - **Error Tracking**: Error rates, timeout counts, failure categorization
-- **System Health**: Uptime, resource utilization, memory pool efficiency
+- **System Health**: Uptime, resource utilization, allocation rate
 - **Prometheus Integration**: Standard metrics format for monitoring systems
 - **Real-Time Dashboards**: Live performance and health indicators
 
@@ -188,7 +188,7 @@ $$H_{t+k} = \alpha H_t + \beta \frac{dH}{dt}\bigg|_t + \gamma \frac{d^2H}{dt^2}\
 **Health Check Components:**
 
 - **Model Execution Health**: Verifies core functionality with simplified tests
-- **Memory Health**: Monitors pool efficiency and memory usage patterns
+- **Memory Health**: Monitors allocation rate and memory usage patterns
 - **Error Rate Analysis**: Tracks and categorizes different failure modes
 - **Performance Monitoring**: Identifies degradation before it impacts users
 - **Multi-Level Status**: Healthy/Degraded/Unhealthy with detailed diagnostics
@@ -260,14 +260,17 @@ $$t = \frac{\bar{X}_A - \bar{X}_B}{\sqrt{\frac{s_A^2}{n_A} + \frac{s_B^2}{n_B}}}
 
 ## Performance Optimization Patterns
 
-### Memory Management
+### Inference Execution
+
+Each inference run uses a handler over a fresh `Trace`. `PriorHandler` is the
+standard forward-execution handler:
 
 ```rust,ignore
-use fugue::runtime::memory::{TracePool, PooledPriorHandler};
+use fugue::runtime::interpreters::PriorHandler;
 
-// Production memory management
-let mut pool = TracePool::new(1000);
-let handler = PooledPriorHandler::new(&mut rng, &mut pool);
+// Standard per-run execution
+let handler = PriorHandler { rng: &mut rng, trace: Trace::default() };
+let (result, trace) = runtime::handler::run(handler, model);
 ```
 
 ### Batch Processing
@@ -275,14 +278,13 @@ let handler = PooledPriorHandler::new(&mut rng, &mut pool);
 ```rust,ignore
 // Process multiple inference requests efficiently
 struct BatchProcessor {
-    pool: TracePool,
     batch_size: usize,
 }
 
 impl BatchProcessor {
     fn process_batch(&mut self, requests: Vec<InferenceRequest>) -> Vec<InferenceResult> {
-        requests.into_iter().map(|req| {
-            let handler = PooledPriorHandler::new(&mut req.rng, &mut self.pool);
+        requests.into_iter().map(|mut req| {
+            let handler = PriorHandler { rng: &mut req.rng, trace: Trace::default() };
             self.run_single_inference(handler, req.model)
         }).collect()
     }
@@ -563,19 +565,21 @@ fn log_inference_request(
 
 ## Common Production Pitfalls
 
-### Memory Leaks
+### Redundant Per-Request Work
 
 ```rust,ignore
-// Avoid: Creating new pools repeatedly
-// for _ in 0..1000 {
-//     let pool = TracePool::new(100); // Memory leak!
+// Avoid: rebuilding immutable configuration on every request
+// for request in requests {
+//     let config = load_model_config(); // re-parsed every time!
+//     process_request(config, request);
 // }
 
-// Do: Reuse pools across requests
-let mut pool = TracePool::new(100);
-for request in requests {
-    let handler = PooledPriorHandler::new(&mut request.rng, &mut pool);
-    process_request(handler, request);
+// Do: build shared, immutable state once and reuse it. Each run still gets its
+// own fresh Trace via the handler.
+let config = load_model_config();
+for mut request in requests {
+    let handler = PriorHandler { rng: &mut request.rng, trace: Trace::default() };
+    process_request(&config, handler, request.model);
 }
 ```
 
@@ -614,7 +618,7 @@ let value = match risky_operation() {
 Successful production deployment combines **mathematical rigor** with **engineering excellence**:
 
 1. **Reliability Engineering**: Fault tolerance through statistical modeling and circuit breaker patterns
-2. **Performance Optimization**: Memory pooling, numerical stability, and batch processing
+2. **Performance Optimization**: Numerical stability and batch processing
 3. **Observability**: Multi-dimensional metrics with statistical process control
 4. **Deployment Strategies**: Risk-managed rollouts with statistical validation
 5. **Health Monitoring**: Predictive alerting and graceful degradation

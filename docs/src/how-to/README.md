@@ -50,14 +50,12 @@ These guides are designed to be **example-first** and **immediately actionable**
 
 **What you'll learn**:
 
-- Memory pooling with `TracePool` and `PooledPriorHandler`
 - Numerical stability with log-space computations
-- Efficient trace construction with `TraceBuilder`
-- Copy-on-write traces for MCMC optimization
+- Choosing an efficient inference algorithm for large-scale workloads
 - Batch processing patterns
 - Performance monitoring and measurement
 
-**Key patterns**: Memory optimization, numerical stability, batch processing
+**Key patterns**: Numerical stability, batch processing
 
 ---
 

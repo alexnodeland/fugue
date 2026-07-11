@@ -621,12 +621,40 @@ pub fn zip<A: Send + 'static, B: Send + 'static>(ma: Model<A>, mb: Model<B>) -> 
 /// let results = sequence_vec(mixed_models);
 /// ```
 pub fn sequence_vec<A: Send + 'static>(models: Vec<Model<A>>) -> Model<Vec<A>> {
-    models.into_iter().fold(pure(Vec::new()), |acc, m| {
-        zip(acc, m).map(|(mut v, a)| {
-            v.push(a);
-            v
-        })
-    })
+    // FG-19: assemble a model that THREADS the growing result `Vec` forward
+    // through a right-nested bind chain — `m0.bind(|a0| { acc.push(a0);
+    // m1.bind(|a1| { acc.push(a1); … pure(acc) }) })`. The interpreter's
+    // trampoline then advances exactly one site per O(1) step, so a large
+    // `plate!` / `sequence_vec` no longer overflows the stack.
+    //
+    // Two shapes are specifically AVOIDED here because both recurse once per
+    // element at *interpretation* time even though the trampoline itself is
+    // iterative:
+    //   * the old left fold `zip(zip(zip(pure, m0), m1), …)`, whose first
+    //     continuation is a left-associated tower; and
+    //   * a right fold that accumulates with `acc.map(push)`, which instead
+    //     defers a left-nested chain of `push` maps into the continuation.
+    // Threading the `Vec` through the bind (pushing eagerly inside each
+    // continuation, then tail-calling the next model) keeps every continuation
+    // O(1): it yields the next `Sample` node directly with no wrapper build-up.
+    //
+    // The chain is assembled iteratively (a plain `for` loop, O(1) build stack)
+    // by folding the models in reverse into a continuation `cont_k: Vec<A> ->
+    // Model<Vec<A>>` = "given the results of `m0..m_{k-1}`, finish the vector".
+    // `cont_0(vec![])` executes `m0` first, preserving input/address order with no
+    // terminal reverse.
+    let n = models.len();
+    let mut cont: Box<dyn FnOnce(Vec<A>) -> Model<Vec<A>> + Send> = Box::new(pure);
+    for m in models.into_iter().rev() {
+        let next = cont;
+        cont = Box::new(move |mut acc: Vec<A>| {
+            m.bind(move |a| {
+                acc.push(a);
+                next(acc)
+            })
+        });
+    }
+    cont(Vec::with_capacity(n))
 }
 
 /// Apply a function, `f`, that produces models to each item in a vector, `items`, collecting the results.

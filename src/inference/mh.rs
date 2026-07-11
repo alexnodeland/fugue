@@ -34,6 +34,20 @@
 //! Callers can override the `f64` proposal for any address via
 //! [`adaptive_mcmc_chain_with_overrides`] using [`SiteProposal`].
 //!
+//! ## Structure-varying (trans-dimensional) models (FG-20 / FG-21)
+//!
+//! Models whose set of sample addresses depends on a sampled value (e.g.
+//! `b ~ Bernoulli; if b { x ~ … }`) are handled without panicking. A proposal
+//! that opens a new branch samples the fresh sites from their prior and treats
+//! the change as a reversible-jump birth; a proposal that closes a branch treats
+//! the vanished sites as a death. Both the fresh/vanished sites' prior densities
+//! (as prior-proposal q terms) and the change in the single-site selection
+//! probability (`ln|sites(current)| − ln|sites(proposed)|`) enter the acceptance
+//! ratio, so the chain leaves the correct trans-dimensional posterior invariant
+//! for prior-proposed structure changes rather than silently biasing it. For
+//! fixed-structure models every one of these corrections is identically zero, so
+//! behavior is unchanged.
+//!
 //! ## Algorithm Overview
 //!
 //! The Metropolis-Hastings algorithm generates correlated samples from the posterior by:
@@ -291,11 +305,22 @@ impl ProposalStrategy<u64> for DiscreteWalkProposal {
 /// is what lets the driver return correct accumulators (FG-40) and avoid the
 /// extra current-scoring run (FG-11/FG-12).
 ///
+/// ## Structure-varying (trans-dimensional) proposals (FG-20 / FG-21)
+///
 /// If `target`'s new value opens a branch that requires an address absent from
 /// `base`, that address is sampled fresh from its prior (rather than panicking as
-/// raw `ScoreGivenTrace` would). Trans-dimensional acceptance corrections
-/// (RJMCMC) are out of scope here; for fixed-structure models this path is never
-/// taken.
+/// raw `ScoreGivenTrace` would). This is treated as a **reversible-jump birth
+/// with the prior as the proposal**: the fresh site's prior log-density is added
+/// to `log_q_forward`, so it cancels the same `log_prior` term the site
+/// contributes to the proposal's joint and the acceptance ratio reduces to the
+/// correct RJMCMC form (Jacobian `= 1`). Symmetrically, an address present in
+/// `base` that the proposed structure no longer visits (a **death**) has its
+/// prior log-density added to `log_q_reverse` by [`propose_and_score`], canceling
+/// its contribution to the current state's joint. Together these make single-site
+/// MH leave the correct (trans-dimensional) posterior invariant for models whose
+/// fresh sub-structure is sampled from the prior — e.g. `b ~ Bernoulli; if b { x ~
+/// … }` — instead of silently biasing it. The sampler never panics on a
+/// structure-varying model; it continues with the RJMCMC-corrected ratio.
 struct SingleSiteProposalHandler<'a, R: RngCore> {
     rng: &'a mut R,
     base: &'a Trace,
@@ -377,8 +402,11 @@ impl<'a, R: RngCore> Handler for SingleSiteProposalHandler<'a, R> {
                     (p, dist.log_prob(&p), dist.log_prob(&current))
                 }
             };
-            *self.log_q_forward = lqf;
-            *self.log_q_reverse = lqr;
+            // Accumulate (`+=`, not `=`) so a fresh dimension born earlier in the
+            // execution order (its prior term already added to `log_q_forward`)
+            // is not clobbered by the target's own proposal density.
+            *self.log_q_forward += lqf;
+            *self.log_q_reverse += lqr;
             let lp = dist.log_prob(&proposed);
             self.trace.log_prior += lp;
             self.trace.choices.insert(
@@ -391,11 +419,15 @@ impl<'a, R: RngCore> Handler for SingleSiteProposalHandler<'a, R> {
             );
             proposed
         } else {
-            let x = self
-                .base
-                .get_f64(addr)
-                .unwrap_or_else(|| dist.sample(self.rng));
+            let (x, born) = match self.base.get_f64(addr) {
+                Some(v) => (v, false),
+                None => (dist.sample(self.rng), true),
+            };
             let lp = dist.log_prob(&x);
+            if born {
+                // RJMCMC birth from the prior: cancel this fresh site's log_prior.
+                *self.log_q_forward += lp;
+            }
             self.trace.log_prior += lp;
             self.trace.choices.insert(
                 addr.clone(),
@@ -410,21 +442,29 @@ impl<'a, R: RngCore> Handler for SingleSiteProposalHandler<'a, R> {
     }
 
     fn on_sample_bool(&mut self, addr: &Address, dist: &dyn Distribution<bool>) -> bool {
+        let mut born = false;
         let x = if addr == self.target {
             let current = self
                 .base
                 .get_bool(addr)
                 .unwrap_or_else(|| dist.sample(self.rng));
-            // Symmetric deterministic flip.
-            *self.log_q_forward = 0.0;
-            *self.log_q_reverse = 0.0;
+            // Symmetric deterministic flip: contributes 0 to both q terms (leave
+            // any born/died structural corrections already accumulated intact).
             FlipProposal.propose(current, self.scale, self.rng)
         } else {
-            self.base
-                .get_bool(addr)
-                .unwrap_or_else(|| dist.sample(self.rng))
+            match self.base.get_bool(addr) {
+                Some(v) => v,
+                None => {
+                    born = true;
+                    dist.sample(self.rng)
+                }
+            }
         };
         let lp = dist.log_prob(&x);
+        if born {
+            // RJMCMC birth from the prior: cancel this fresh site's log_prior.
+            *self.log_q_forward += lp;
+        }
         self.trace.log_prior += lp;
         self.trace.choices.insert(
             addr.clone(),
@@ -438,21 +478,29 @@ impl<'a, R: RngCore> Handler for SingleSiteProposalHandler<'a, R> {
     }
 
     fn on_sample_u64(&mut self, addr: &Address, dist: &dyn Distribution<u64>) -> u64 {
+        let mut born = false;
         let x = if addr == self.target {
             let current = self
                 .base
                 .get_u64(addr)
                 .unwrap_or_else(|| dist.sample(self.rng));
-            // Symmetric reflected discrete walk (FG-41).
-            *self.log_q_forward = 0.0;
-            *self.log_q_reverse = 0.0;
+            // Symmetric reflected discrete walk (FG-41): contributes 0 to both q
+            // terms (leave any born/died structural corrections intact).
             DiscreteWalkProposal.propose(current, self.scale, self.rng)
         } else {
-            self.base
-                .get_u64(addr)
-                .unwrap_or_else(|| dist.sample(self.rng))
+            match self.base.get_u64(addr) {
+                Some(v) => v,
+                None => {
+                    born = true;
+                    dist.sample(self.rng)
+                }
+            }
         };
         let lp = dist.log_prob(&x);
+        if born {
+            // RJMCMC birth from the prior: cancel this fresh site's log_prior.
+            *self.log_q_forward += lp;
+        }
         self.trace.log_prior += lp;
         self.trace.choices.insert(
             addr.clone(),
@@ -466,6 +514,7 @@ impl<'a, R: RngCore> Handler for SingleSiteProposalHandler<'a, R> {
     }
 
     fn on_sample_usize(&mut self, addr: &Address, dist: &dyn Distribution<usize>) -> usize {
+        let mut born = false;
         let x = if addr == self.target {
             let current = self
                 .base
@@ -475,15 +524,24 @@ impl<'a, R: RngCore> Handler for SingleSiteProposalHandler<'a, R> {
             // terms cancel the prior in the target, so acceptance reduces to the
             // likelihood ratio and no category can ever be missed.
             let proposed = dist.sample(self.rng);
-            *self.log_q_forward = dist.log_prob(&proposed);
-            *self.log_q_reverse = dist.log_prob(&current);
+            // `+=` so a born fresh dimension's prior term is preserved.
+            *self.log_q_forward += dist.log_prob(&proposed);
+            *self.log_q_reverse += dist.log_prob(&current);
             proposed
         } else {
-            self.base
-                .get_usize(addr)
-                .unwrap_or_else(|| dist.sample(self.rng))
+            match self.base.get_usize(addr) {
+                Some(v) => v,
+                None => {
+                    born = true;
+                    dist.sample(self.rng)
+                }
+            }
         };
         let lp = dist.log_prob(&x);
+        if born {
+            // RJMCMC birth from the prior: cancel this fresh site's log_prior.
+            *self.log_q_forward += lp;
+        }
         self.trace.log_prior += lp;
         self.trace.choices.insert(
             addr.clone(),
@@ -497,22 +555,30 @@ impl<'a, R: RngCore> Handler for SingleSiteProposalHandler<'a, R> {
     }
 
     fn on_sample_i64(&mut self, addr: &Address, dist: &dyn Distribution<i64>) -> i64 {
+        let mut born = false;
         let x = if addr == self.target {
             let current = self
                 .base
                 .get_i64(addr)
                 .unwrap_or_else(|| dist.sample(self.rng));
-            // Symmetric integer random walk (no boundary to reflect at).
-            *self.log_q_forward = 0.0;
-            *self.log_q_reverse = 0.0;
+            // Symmetric integer random walk (no boundary to reflect at):
+            // contributes 0 to both q terms (leave born/died corrections intact).
             let delta = (self.scale * gaussian_z(self.rng)).round() as i64;
             current + delta
         } else {
-            self.base
-                .get_i64(addr)
-                .unwrap_or_else(|| dist.sample(self.rng))
+            match self.base.get_i64(addr) {
+                Some(v) => v,
+                None => {
+                    born = true;
+                    dist.sample(self.rng)
+                }
+            }
         };
         let lp = dist.log_prob(&x);
+        if born {
+            // RJMCMC birth from the prior: cancel this fresh site's log_prior.
+            *self.log_q_forward += lp;
+        }
         self.trace.log_prior += lp;
         self.trace.choices.insert(
             addr.clone(),
@@ -553,6 +619,21 @@ impl<'a, R: RngCore> Handler for SingleSiteProposalHandler<'a, R> {
 /// Propose a new value at `target` and fully score the resulting trace in one
 /// model run. Returns `(model_result, proposed_trace, proposed_log_weight,
 /// log_q_forward, log_q_reverse)`.
+///
+/// `log_q_forward` accumulates the target's proposal density plus the prior
+/// density of every fresh dimension born by the proposal (the RJMCMC birth term).
+/// `log_q_reverse` accumulates the target's reverse density plus the prior
+/// density of every dimension that DIED — present in `current` but not visited by
+/// the proposed structure — which is the reverse-move birth term for those sites
+/// (FG-20 / FG-21). Together they make `log α = Δlog-joint + log q_reverse −
+/// log q_forward` the correct trans-dimensional acceptance ratio for
+/// prior-proposed structural changes.
+///
+/// The final `bool` reports whether the proposed trace's address SET differs from
+/// `current` (a birth and/or death occurred), so the chain driver can refresh its
+/// cached site list even when the site count is unchanged (e.g. a branch that
+/// swaps one address for another).
+#[allow(clippy::type_complexity)]
 fn propose_and_score<A, F, R>(
     rng: &mut R,
     model_fn: &F,
@@ -561,7 +642,7 @@ fn propose_and_score<A, F, R>(
     scale: f64,
     overrides: &HashMap<Address, SiteProposal>,
     kind_cache: &mut HashMap<Address, SiteProposal>,
-) -> (A, Trace, f64, f64, f64)
+) -> (A, Trace, f64, f64, f64, bool)
 where
     F: Fn() -> Model<A>,
     R: Rng,
@@ -582,8 +663,23 @@ where
         },
         model_fn(),
     );
+    // Death correction: any address in `current` the proposal no longer visits is
+    // a dimension the reverse move would have to birth from its prior. Adding its
+    // stored prior log-density (the reverse-birth proposal density) to
+    // `log_q_reverse` cancels its contribution to `current`'s joint in the
+    // acceptance ratio, completing the RJMCMC dimension-matching (FG-20/FG-21).
+    let mut died = 0usize;
+    for (addr, choice) in &current.choices {
+        if !trace.choices.contains_key(addr) {
+            lqr += choice.logp;
+            died += 1;
+        }
+    }
+    // born = |proposed| − |current| + died  (|proposed| = |current| − died + born).
+    let born = trace.choices.len() + died - current.choices.len();
+    let structure_changed = born > 0 || died > 0;
     let lw = trace.total_log_weight();
-    (a, trace, lw, lqf, lqr)
+    (a, trace, lw, lqf, lqr, structure_changed)
 }
 
 /// One cached single-site MH transition used by the chain driver.
@@ -594,6 +690,10 @@ where
 /// acceptance (a freshly-scored trace, FG-40) and `None` on rejection — the
 /// caller keeps its cached current state, so no extra model run happens on
 /// rejection (FG-12).
+///
+/// On acceptance the returned tuple's final `bool` flags whether the accepted
+/// move changed the model's address structure, so the driver can refresh its
+/// cached site list (FG-20/FG-21).
 #[allow(clippy::too_many_arguments)]
 fn single_site_mh_step<A, F, R>(
     rng: &mut R,
@@ -605,7 +705,7 @@ fn single_site_mh_step<A, F, R>(
     overrides: &HashMap<Address, SiteProposal>,
     kind_cache: &mut HashMap<Address, SiteProposal>,
     adapt: bool,
-) -> Option<(A, Trace, f64)>
+) -> Option<(A, Trace, f64, bool)>
 where
     F: Fn() -> Model<A>,
     R: Rng,
@@ -616,12 +716,20 @@ where
     let target = sites[rng.gen_range(0..sites.len())].clone();
     let scale = adaptation.get_scale(&target);
 
-    let (a_prop, prop_trace, prop_lw, lqf, lqr) = propose_and_score(
+    let (a_prop, prop_trace, prop_lw, lqf, lqr, structure_changed) = propose_and_score(
         rng, model_fn, current, &target, scale, overrides, kind_cache,
     );
 
-    // log α = Δlog-joint + log q(x|x') − log q(x'|x).
-    let log_alpha = prop_lw - current_lw + (lqr - lqf);
+    // log α = Δlog-joint + log q(x|x') − log q(x'|x) + dimension term.
+    //
+    // The single-site kernel picks the target uniformly among the *current*
+    // sites, so the forward move carries proposal factor 1/|sites(current)| and
+    // the reverse carries 1/|sites(proposed)|. For structure-varying proposals
+    // these differ, and the term `ln|sites(current)| − ln|sites(proposed)|`
+    // completes the RJMCMC dimension matching (FG-20/FG-21). For fixed-structure
+    // models the two site counts are equal and the term is exactly 0.
+    let dim_term = (sites.len() as f64).ln() - (prop_trace.choices.len() as f64).ln();
+    let log_alpha = prop_lw - current_lw + (lqr - lqf) + dim_term;
     let accept = log_alpha >= 0.0 || rng.gen::<f64>() < log_alpha.exp();
 
     if adapt {
@@ -629,7 +737,7 @@ where
     }
 
     if accept {
-        Some((a_prop, prop_trace, prop_lw))
+        Some((a_prop, prop_trace, prop_lw, structure_changed))
     } else {
         None
     }
@@ -650,7 +758,8 @@ where
 /// 2. Randomly select a site and propose a new value using diminishing adaptive
 ///    scaling, scoring the proposal in the same run (FG-11).
 /// 3. Accept with probability `min(1, exp(log α))` where
-///    `log α = Δlog-joint + q(x|x') − q(x'|x)`.
+///    `log α = Δlog-joint + q(x|x') − q(x'|x)` plus, for structure-varying
+///    proposals, the RJMCMC dimension term (0 for fixed-structure models).
 /// 4. Update adaptive scales using diminishing step sizes.
 ///
 /// On acceptance the returned trace is freshly scored, so its
@@ -729,7 +838,7 @@ pub fn adaptive_single_site_mh<A, R: Rng>(
     let target = sites[rng.gen_range(0..sites.len())].clone();
     let scale = adaptation.get_scale(&target);
 
-    let (a_prop, prop_trace, prop_lw, lqf, lqr) = propose_and_score(
+    let (a_prop, prop_trace, prop_lw, lqf, lqr, _structure_changed) = propose_and_score(
         rng,
         &model_fn,
         current,
@@ -739,7 +848,10 @@ pub fn adaptive_single_site_mh<A, R: Rng>(
         &mut kind_cache,
     );
 
-    let log_alpha = prop_lw - current_lw + (lqr - lqf);
+    // Dimension term for structure-varying proposals (see `single_site_mh_step`);
+    // 0 for fixed-structure models.
+    let dim_term = (sites.len() as f64).ln() - (prop_trace.choices.len() as f64).ln();
+    let log_alpha = prop_lw - current_lw + (lqr - lqf) + dim_term;
     let accept = log_alpha >= 0.0 || rng.gen::<f64>() < log_alpha.exp();
     adaptation.update(&target, accept);
 
@@ -846,15 +958,15 @@ pub fn adaptive_mcmc_chain_with_overrides<A: Clone, R: Rng>(
 
     // FG-11: cache the ordered site list; rebuild only when the address set
     // changes. Single-site MH keeps the model structure fixed, so for the common
-    // case this is built once and reused for the whole chain.
+    // case this is built once and reused for the whole chain. For structure-
+    // varying models the list is refreshed after any accepted move that changed
+    // the address set — including swaps that keep the site COUNT constant
+    // (FG-20/FG-21).
     let mut sites: Vec<Address> = current_trace.choices.keys().cloned().collect();
 
     // Warmup phase: adapt proposal scales.
     for _ in 0..n_warmup {
-        if sites.len() != current_trace.choices.len() {
-            sites = current_trace.choices.keys().cloned().collect();
-        }
-        if let Some((a, t, lw)) = single_site_mh_step(
+        if let Some((a, t, lw, structure_changed)) = single_site_mh_step(
             rng,
             &model_fn,
             &current_trace,
@@ -868,16 +980,16 @@ pub fn adaptive_mcmc_chain_with_overrides<A: Clone, R: Rng>(
             current_a = a;
             current_trace = t;
             current_lw = lw;
+            if structure_changed {
+                sites = current_trace.choices.keys().cloned().collect();
+            }
         }
     }
 
     // Sampling phase: FG-57 freeze adaptation so the recorded draws come from a
     // single fixed transition kernel.
     for _ in 0..n_samples {
-        if sites.len() != current_trace.choices.len() {
-            sites = current_trace.choices.keys().cloned().collect();
-        }
-        if let Some((a, t, lw)) = single_site_mh_step(
+        if let Some((a, t, lw, structure_changed)) = single_site_mh_step(
             rng,
             &model_fn,
             &current_trace,
@@ -891,6 +1003,9 @@ pub fn adaptive_mcmc_chain_with_overrides<A: Clone, R: Rng>(
             current_a = a;
             current_trace = t;
             current_lw = lw;
+            if structure_changed {
+                sites = current_trace.choices.keys().cloned().collect();
+            }
         }
         samples.push((current_a.clone(), current_trace.clone()));
     }
@@ -1113,7 +1228,7 @@ mod tests {
 
         // Warm up with adaptation on.
         for _ in 0..100 {
-            if let Some((_a, t, lw)) = single_site_mh_step(
+            if let Some((_a, t, lw, _sc)) = single_site_mh_step(
                 &mut rng,
                 &model_fn,
                 &current,
@@ -1132,7 +1247,7 @@ mod tests {
 
         // Sampling with adaptation frozen: scales must be untouched.
         for _ in 0..200 {
-            if let Some((_a, t, lw)) = single_site_mh_step(
+            if let Some((_a, t, lw, _sc)) = single_site_mh_step(
                 &mut rng,
                 &model_fn,
                 &current,

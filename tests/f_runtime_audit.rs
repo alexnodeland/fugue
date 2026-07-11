@@ -80,6 +80,59 @@ fn fg19_deep_model_is_stack_safe_via_public_api() {
         .expect("deep interpretation overflowed the stack (FG-19 regression)");
 }
 
+// FG-19 (left-fold shape): the deep-model test above uses a RIGHT-associated
+// bind chain, which the trampoline in `run` already handles. But `plate!` /
+// `sequence_vec` lower to a LEFT-associated continuation tower: the pre-fix fold
+// (`zip(zip(zip(pure, m0), m1), …)`) builds a chain whose *evaluation* of the
+// first continuation recurses once per element, overflowing the stack even with
+// the trampolined interpreter. This test drives a 100k-site `plate!` on the same
+// small (512 KiB) stack. It passes only when `sequence_vec` folds
+// right-associated; a left fold overflows here while leaving the right-fold test
+// above green — which is exactly why the earlier remediation missed this.
+#[test]
+fn fg19_plate_left_fold_is_stack_safe() {
+    let handle = std::thread::Builder::new()
+        .stack_size(512 * 1024)
+        .spawn(|| {
+            let n = 100_000usize;
+            let model = plate!(i in 0..n => {
+                sample(addr!("p", i), Normal::new(0.0, 1.0).unwrap())
+            });
+            let mut rng = StdRng::seed_from_u64(1919);
+            let (vals, trace) = run(
+                PriorHandler {
+                    rng: &mut rng,
+                    trace: Trace::default(),
+                },
+                model,
+            );
+            // Every site sampled, in order, with no lost/duplicated addresses.
+            assert_eq!(vals.len(), n);
+            assert_eq!(trace.choices.len(), n);
+            assert!(trace.log_prior.is_finite());
+        })
+        .expect("spawn");
+    handle
+        .join()
+        .expect("plate!/sequence_vec left-fold overflowed the stack (FG-19 regression)");
+}
+
+// FG-19 (ordering): the right-associated `sequence_vec` must still return results
+// in input order (the reverse-fold + terminal reverse must not scramble them).
+#[test]
+fn fg19_sequence_vec_preserves_order() {
+    let models: Vec<Model<u64>> = (0..8u64).map(pure).collect();
+    let mut rng = StdRng::seed_from_u64(77);
+    let (vals, _t) = run(
+        PriorHandler {
+            rng: &mut rng,
+            trace: Trace::default(),
+        },
+        fugue::core::model::sequence_vec(models),
+    );
+    assert_eq!(vals, (0..8u64).collect::<Vec<_>>());
+}
+
 // ===========================================================================
 // FG-20 / FG-21: structure-varying scoring returns a Result instead of
 // panicking.
@@ -154,6 +207,142 @@ fn fg20_reconciling_scoring_samples_fresh_and_reports_vanished() {
         trace.log_prior,
         expected
     );
+}
+
+// FG-20 (correctness, real code path): `adaptive_mcmc_chain` must sample the
+// correct TRANS-DIMENSIONAL posterior of a structure-varying model, not merely
+// avoid panicking. Model:
+//   b ~ Bernoulli(0.5)
+//   if b { x ~ Normal(0,1); observe y ~ Normal(x,1) = 1 }
+//   else {                  observe y ~ Normal(2,1) = 1 }
+// The "x" address exists only when b=true, so single-site MH must birth/kill it.
+// Exact marginals (reproducible in scipy):
+//   P(y|b=1) = N(1; 0, √2), P(y|b=0) = N(1; 2, 1)
+//   ⇒ P(b=1|y=1) = 0.475879…
+//   E[x | b=1, y=1] = 0.5 (Normal–Normal conjugate posterior N(0.5, 1/√2)).
+// A sampler that samples fresh dimensions WITHOUT the RJMCMC birth/death + site-
+// selection corrections lands near P(b=1) ≈ 0.35 (our simulation), far outside
+// the bound below; the pre-remediation ScoreGivenTrace path panicked outright.
+#[test]
+fn fg20_adaptive_chain_recovers_transdimensional_posterior() {
+    let model_fn = || {
+        sample(addr!("b"), Bernoulli::new(0.5).unwrap()).bind(|b| {
+            if b {
+                sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
+                    .bind(move |x| {
+                        observe(addr!("y"), Normal::new(x, 1.0).unwrap(), 1.0).map(move |_| b)
+                    })
+            } else {
+                observe(addr!("y"), Normal::new(2.0, 1.0).unwrap(), 1.0)
+                    .map(move |_| b)
+            }
+        })
+    };
+
+    let mut rng = StdRng::seed_from_u64(2026);
+    let samples = adaptive_mcmc_chain(&mut rng, model_fn, 120_000, 20_000);
+    assert_eq!(samples.len(), 120_000);
+
+    let n = samples.len() as f64;
+    let p_b1 = samples.iter().filter(|(b, _)| *b).count() as f64 / n;
+    // Exact P(b=1|y=1) = 0.475879 within 0.03 (a biased sampler sits ~0.12 off).
+    assert!(
+        (p_b1 - 0.475879).abs() < 0.03,
+        "P(b=1|y) = {p_b1:.4}, expected 0.4759 (trans-dimensional bias?)"
+    );
+
+    // Conditional E[x | b=1] = 0.5 (Normal–Normal conjugate posterior).
+    let xs: Vec<f64> = samples
+        .iter()
+        .filter(|(b, _)| *b)
+        .filter_map(|(_, t)| t.get_f64(&addr!("x")))
+        .collect();
+    let ex = xs.iter().sum::<f64>() / xs.len() as f64;
+    assert!(
+        (ex - 0.5).abs() < 0.06,
+        "E[x|b=1] = {ex:.4}, expected 0.5"
+    );
+
+    // FG-20 ghost-choice cleanup: a b=false sample must NOT carry a stale "x".
+    assert!(
+        samples
+            .iter()
+            .filter(|(b, _)| !*b)
+            .all(|(_, t)| !t.choices.contains_key(&addr!("x"))),
+        "b=false trace retained a ghost 'x' choice"
+    );
+}
+
+// FG-21 (real code path, no-panic + validity): a model whose branches sample
+// DIFFERENT addresses per selector value must run through `adaptive_mcmc_chain`
+// and `adaptive_single_site_mh` without panicking and return valid traces. This
+// exercises `SingleSiteProposalHandler`'s `unwrap_or_else(|| dist.sample())`: a
+// proposal that flips the selector reaches an address absent from the base trace,
+// which the pre-fix `ScoreGivenTrace` path met with `panic!("missing value …")`.
+// If that fallback is reverted to a panic, this test crashes.
+#[test]
+fn fg21_adaptive_sampler_handles_branch_switching_addresses() {
+    let model_fn = || {
+        sample(addr!("sel"), Bernoulli::new(0.4).unwrap()).bind(|sel| {
+            if sel {
+                sample(addr!("left"), Normal::new(-2.0, 1.0).unwrap())
+                    .bind(move |v| {
+                        observe(addr!("y"), Normal::new(v, 1.0).unwrap(), 0.5).map(move |_| sel)
+                    })
+            } else {
+                sample(addr!("right"), Normal::new(2.0, 1.0).unwrap())
+                    .bind(move |v| {
+                        observe(addr!("y"), Normal::new(v, 1.0).unwrap(), 0.5).map(move |_| sel)
+                    })
+            }
+        })
+    };
+
+    // Chain entry point.
+    let mut rng = StdRng::seed_from_u64(4242);
+    let samples = adaptive_mcmc_chain(&mut rng, model_fn, 20_000, 4_000);
+    assert_eq!(samples.len(), 20_000);
+
+    // The chain must actually explore BOTH structures (so the address-switching
+    // proposal path is exercised many times), never carry both branch addresses
+    // at once (no ghosts), and every trace must have a finite weight.
+    let saw_left = samples
+        .iter()
+        .any(|(_, t)| t.choices.contains_key(&addr!("left")));
+    let saw_right = samples
+        .iter()
+        .any(|(_, t)| t.choices.contains_key(&addr!("right")));
+    assert!(
+        saw_left && saw_right,
+        "chain did not explore both branches (left={saw_left}, right={saw_right})"
+    );
+    assert!(
+        samples.iter().all(|(_, t)| {
+            !(t.choices.contains_key(&addr!("left")) && t.choices.contains_key(&addr!("right")))
+        }),
+        "a trace carried both branch addresses (ghost choice)"
+    );
+    assert!(
+        samples.iter().all(|(_, t)| t.total_log_weight().is_finite()),
+        "a sampled trace had a non-finite weight"
+    );
+
+    // Single-step entry point: drive many `adaptive_single_site_mh` steps from a
+    // prior draw; each must return a valid trace without panicking.
+    let mut rng = StdRng::seed_from_u64(9001);
+    let (_, mut current) = run(
+        PriorHandler {
+            rng: &mut rng,
+            trace: Trace::default(),
+        },
+        model_fn(),
+    );
+    let mut adaptation = DiminishingAdaptation::new(0.44, 0.7);
+    for _ in 0..2_000 {
+        let (_sel, t) = adaptive_single_site_mh(&mut rng, model_fn, &current, &mut adaptation);
+        assert!(t.total_log_weight().is_finite());
+        current = t;
+    }
 }
 
 // ===========================================================================
