@@ -382,9 +382,14 @@ fn test_validation_framework() {
     // Should not reject the null hypothesis (samples come from the distribution)
     assert!(ks_result); // Returns bool, not a struct
 
-    // For now, just test that the validation function exists and can be called
-    // The full conjugate test would require the ConjugateNormalConfig which isn't exported
-    // This validates that the public API is accessible
+    // FG-15: `ConjugateNormalConfig` (and the sibling `ConjugateBetaBernoulliConfig`)
+    // ARE exported at the crate root (see `fugue::lib.rs`'s `pub use
+    // inference::validation::{...}`) and were already reachable via the full
+    // path `fugue::inference::validation::ConjugateNormalConfig` even before
+    // that re-export, since `inference` and `validation` are both `pub mod`.
+    // The harness itself is exercised end-to-end (MCMC -> analytical
+    // posterior comparison, both Normal-Normal and Beta-Bernoulli) in
+    // `tests/analytical_validation.rs`.
 }
 
 #[test]
@@ -807,17 +812,49 @@ fn test_workflow_parameter_estimation_uncertainty() {
         beta_values.len()
     );
 
-    // Should recover approximately correct parameters (α ≈ 0, β ≈ 2)
-    // Use very generous tolerance due to small dataset (5 points) and MCMC variability
+    // FG-49: this model is linear-Gaussian (Normal(0,2^2) priors x
+    // Normal(.,1^2) likelihood with a fixed design matrix), so the joint
+    // posterior over (alpha, beta) is EXACTLY bivariate normal and
+    // computable in closed form via standard Bayesian linear regression:
+    // posterior precision `Lambda_n = Lambda_0 + X^T X / sigma^2`,
+    // posterior mean `Lambda_n^{-1} (Lambda_0 mu_0 + X^T y / sigma^2)`, with
+    // `Lambda_0 = diag(1/4, 1/4)` (prior sigma=2), `sigma=1`, and the
+    // x_data/y_data above. Solving the resulting 2x2 linear system
+    // (independently reproduced in `tests/gen_refs.py`) gives:
+    const POST_ALPHA_MEAN: f64 = 0.246_301_633_045_149_5;
+    const POST_BETA_MEAN: f64 = 1.920_461_095_100_864_5;
+    const POST_ALPHA_VAR: f64 = 0.849_183_477_425_552_3;
+    const POST_BETA_VAR: f64 = 0.080_691_642_651_296_83;
+
+    // CLT-justified bound: for a converged MCMC chain, sample_mean is
+    // asymptotically N(true_mean, posterior_var / ESS), so a 4-standard-error
+    // band has a two-sided false-positive rate of ~6.3e-5 for a correct
+    // implementation -- tight enough that a real regression (e.g. a biased
+    // step-size adaptation, or a variance computed 2x too large) fails this
+    // test, while all but eliminating flakiness. This directly replaces the
+    // prior "generous tolerance ... due to MCMC variability" absolute caps
+    // (alpha within 2.0 of 0, beta within 1.5 of 2.0) with a bound derived
+    // from the actual posterior scale and the chain's own measured ESS.
+    let alpha_ess = effective_sample_size_mcmc(&alpha_values);
+    let beta_ess = effective_sample_size_mcmc(&beta_values);
+    let alpha_se = (POST_ALPHA_VAR / alpha_ess).sqrt();
+    let beta_se = (POST_BETA_VAR / beta_ess).sqrt();
+
     assert!(
-        (alpha_mean).abs() < 2.0,
-        "Alpha estimate {:.4} too far from expected 0.0",
-        alpha_mean
+        (alpha_mean - POST_ALPHA_MEAN).abs() < 4.0 * alpha_se,
+        "FG-49: alpha estimate {:.4} too far from exact posterior mean {:.4} (se={:.4}, ess={:.1})",
+        alpha_mean,
+        POST_ALPHA_MEAN,
+        alpha_se,
+        alpha_ess
     );
     assert!(
-        (beta_mean - 2.0).abs() < 1.5,
-        "Beta estimate {:.4} too far from expected 2.0",
-        beta_mean
+        (beta_mean - POST_BETA_MEAN).abs() < 4.0 * beta_se,
+        "FG-49: beta estimate {:.4} too far from exact posterior mean {:.4} (se={:.4}, ess={:.1})",
+        beta_mean,
+        POST_BETA_MEAN,
+        beta_se,
+        beta_ess
     );
 
     // Uncertainty quantification
@@ -837,12 +874,32 @@ fn test_workflow_parameter_estimation_uncertainty() {
             / (beta_values.len() - 1) as f64;
         var.sqrt()
     };
-
-    // Should have reasonable uncertainty
     assert!(alpha_std > 0.0);
     assert!(beta_std > 0.0);
-    assert!(alpha_std < 2.0); // Not too uncertain
-    assert!(beta_std < 1.0); // Not too uncertain
+
+    // The sample variance's Monte Carlo relative error is ~ sqrt(2/ESS)
+    // (CLT for a second moment); a 3x safety factor on that gives a tight
+    // two-sided band derived from the actual posterior variance, replacing
+    // the previous scale-free absolute caps ("< 2.0" / "< 1.0") that would
+    // have passed a sample variance off by an order of magnitude.
+    let alpha_var_tol = POST_ALPHA_VAR * 3.0 * (2.0 / alpha_ess).sqrt();
+    let beta_var_tol = POST_BETA_VAR * 3.0 * (2.0 / beta_ess).sqrt();
+    assert!(
+        (alpha_std * alpha_std - POST_ALPHA_VAR).abs() < alpha_var_tol,
+        "FG-49: alpha sample variance {:.4} too far from exact posterior variance {:.4} (tol={:.4}, ess={:.1})",
+        alpha_std * alpha_std,
+        POST_ALPHA_VAR,
+        alpha_var_tol,
+        alpha_ess
+    );
+    assert!(
+        (beta_std * beta_std - POST_BETA_VAR).abs() < beta_var_tol,
+        "FG-49: beta sample variance {:.4} too far from exact posterior variance {:.4} (tol={:.4}, ess={:.1})",
+        beta_std * beta_std,
+        POST_BETA_VAR,
+        beta_var_tol,
+        beta_ess
+    );
 
     // Credible intervals (approximate 95% CI)
     let mut alpha_sorted = alpha_values.clone();
@@ -856,9 +913,26 @@ fn test_workflow_parameter_estimation_uncertainty() {
     let beta_ci_lower = beta_sorted[n * 25 / 1000];
     let beta_ci_upper = beta_sorted[n * 975 / 1000];
 
-    // Credible intervals should be reasonable
+    // A 95% normal credible interval has exact width `2 * 1.96 * sigma`;
+    // allow 50% slack over the exact posterior's width for finite-sample
+    // noise in the empirical percentiles (replacing the previous
+    // scale-free "< 4.0" / "< 2.0" absolute caps, which were roughly 2x and
+    // 7x the true posterior CI width respectively and so would not have
+    // caught a substantially over-dispersed chain).
+    let alpha_ci_width_theory = 2.0 * 1.96 * POST_ALPHA_VAR.sqrt();
+    let beta_ci_width_theory = 2.0 * 1.96 * POST_BETA_VAR.sqrt();
     assert!(alpha_ci_upper > alpha_ci_lower);
     assert!(beta_ci_upper > beta_ci_lower);
-    assert!((alpha_ci_upper - alpha_ci_lower) < 4.0); // Not too wide
-    assert!((beta_ci_upper - beta_ci_lower) < 2.0); // Not too wide
+    assert!(
+        (alpha_ci_upper - alpha_ci_lower) < alpha_ci_width_theory * 1.5,
+        "FG-49: alpha 95% CI width {:.4} too wide vs theory {:.4}",
+        alpha_ci_upper - alpha_ci_lower,
+        alpha_ci_width_theory
+    );
+    assert!(
+        (beta_ci_upper - beta_ci_lower) < beta_ci_width_theory * 1.5,
+        "FG-49: beta 95% CI width {:.4} too wide vs theory {:.4}",
+        beta_ci_upper - beta_ci_lower,
+        beta_ci_width_theory
+    );
 }
