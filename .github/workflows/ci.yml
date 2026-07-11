@@ -41,3 +41,45 @@ jobs:
       # - name: mdBook tests (docs/)
       #   if: hashFiles('docs/**/*.md') != ''
       #   run: mdbook test docs
+
+  msrv:
+    name: MSRV (1.87.0)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pins the exact toolchain `rust-version = "1.87"` in Cargo.toml claims
+      # (finding FG-51). If this drifts above what the crate actually needs,
+      # bump both together.
+      - name: Setup Rust 1.87.0 (MSRV)
+        uses: dtolnay/rust-toolchain@1.87.0
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+          key: msrv-1.87.0
+
+      - name: Scope the manifest to the published library
+        run: |
+          # MSRV is a claim about the *published library* (`[dependencies]`),
+          # not about maintainer tooling in `[dev-dependencies]` (mdbook + its
+          # plugins, criterion, proptest, ...): those crates have their own,
+          # higher MSRV floors and are never pulled in by a downstream
+          # `cargo add fugue-ppl`. This is an ephemeral CI checkout, so
+          # truncating the manifest at `[dev-dependencies]` here commits
+          # nothing back and only scopes *this* check to what actually ships.
+          sed -i '/^\[dev-dependencies\]/,$d' Cargo.toml
+          # The committed Cargo.lock may be a newer lock-file format than an
+          # older cargo/rustc pair can parse; regenerating against the
+          # trimmed manifest above is required (and sufficient -- verified
+          # locally: `[dependencies]` resolves and builds cleanly on
+          # rustc 1.87.0 with no other changes, and `cargo clippy
+          # --all-targets --all-features` with `rust-version = "1.87"` finds
+          # zero `incompatible_msrv` diagnostics anywhere in the crate).
+          rm -f Cargo.lock
+
+      - name: cargo check --lib (rustc 1.87.0)
+        run: cargo check --lib
