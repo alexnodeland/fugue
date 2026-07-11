@@ -810,8 +810,18 @@ fn test_validation_cross_validation() {
             })
         };
 
-        // 4. Quick inference (fewer samples for efficiency)
-        let samples = adaptive_mcmc_chain(&mut rng, model_fn, 30, 10);
+        // 4. Inference. FG-49: the original 30 samples / 10 warmup was too
+        // short for adaptive single-site MH's step-size adaptation to
+        // converge on this 2-parameter regression -- empirically (probed
+        // standalone outside this test), that config gave mse ~27, while
+        // bumping to 150/50 or 300/100 both converge to mse ~0.2-0.3,
+        // matching the closed-form theoretical prediction below. The old
+        // "< 200.0" tolerance was hiding an under-provisioned chain, not
+        // validating one. 150 samples / 50 warmup is still fast (6 folds,
+        // well under a second total) and is long enough to reach the
+        // asymptotic regime
+        // the CLT-derived bound below assumes.
+        let samples = adaptive_mcmc_chain(&mut rng, model_fn, 150, 50);
 
         // 5. Prediction on test point
         let params: Vec<(f64, f64)> = samples.iter().map(|(params, _)| *params).collect();
@@ -849,15 +859,34 @@ fn test_validation_cross_validation() {
     assert!(mse > 0.0);
     assert!(mae > 0.0);
 
-    // For this simple linear relationship, errors should be reasonable
-    // Note: With small samples and Bayesian uncertainty, errors can be quite large
-    // Just check that the cross-validation workflow completed successfully
-    assert!(mse.is_finite() && mse > 0.0);
-    assert!(mae.is_finite() && mae > 0.0);
+    println!("LOO-CV predictions: {predictions:?}");
+    println!("LOO-CV mse={mse:.4} mae={mae:.4}");
 
-    // Very lenient bounds - main goal is workflow validation, not precise accuracy
-    assert!(mse < 200.0);
-    assert!(mae < 20.0);
+    // FG-49: CLT-justified bound derived from the actual model, not an
+    // arbitrary round number. Per fold this is linear-Gaussian Bayesian
+    // regression (Normal(0,5^2) priors, Normal(.,1^2) likelihood, a fixed
+    // design matrix), so the exact posterior-mean prediction at the held-out
+    // x is computable in closed form per fold via the same 2x2 conjugate
+    // solve used in `test_workflow_parameter_estimation_uncertainty`
+    // (independently reproduced for all 6 LOO folds in `tests/gen_refs.py`).
+    // That gives a bias-only MSE (posterior-mean prediction vs actual) of
+    // ~0.040, and a mean posterior-predictive parameter variance of ~0.56
+    // at the held-out point. With only ~20 post-warmup MCMC draws averaged
+    // per fold (30 samples, 10 warmup) there is additional Monte Carlo
+    // noise on top of both; a 10x safety factor over the sum of those two
+    // theoretical terms comfortably absorbs that while still being >20x
+    // tighter than the previous unconditional "< 200.0" cap (which would
+    // pass even if predictions were off by more than the entire y range).
+    let mse_bound = 10.0 * (0.040 + 0.56);
+    assert!(
+        mse < mse_bound,
+        "FG-49: LOO-CV mse {mse:.4} exceeds CLT-derived bound {mse_bound:.4}"
+    );
+    assert!(
+        mae < mse_bound.sqrt() * 1.5,
+        "FG-49: LOO-CV mae {mae:.4} exceeds bound {:.4}",
+        mse_bound.sqrt() * 1.5
+    );
 
     // All predictions should be finite
     assert!(predictions.iter().all(|x| x.is_finite()));
@@ -872,7 +901,17 @@ fn test_validation_cross_validation() {
             .min_by(|a, b| a.partial_cmp(b).unwrap())
             .unwrap();
     assert!(pred_range >= 0.0);
-    assert!(pred_range < 100.0); // Very lenient bound - just check it's not completely unreasonable
+    // FG-49: the held-out x values span [1,6] with true slope ~2, so the
+    // *actual* underlying predicted range across folds is ~10 (the exact
+    // posterior-mean predictions per fold span 9.97; see the mse_bound
+    // derivation above). A generous 3x factor over that true range (~30)
+    // catches genuine blow-ups (e.g. an unstable/divergent chain) while
+    // being >3x tighter than the previous scale-free "< 100.0" cap, which
+    // was an order of magnitude looser than the data itself.
+    assert!(
+        pred_range < 30.0,
+        "FG-49: LOO-CV pred_range {pred_range:.4} exceeds bound 30.0"
+    );
 }
 
 #[test]

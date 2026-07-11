@@ -53,6 +53,7 @@ pub use inference::smc::{
     adaptive_smc, effective_sample_size, Particle, ResamplingMethod, SMCConfig,
 };
 pub use inference::validation::{
-    ks_test_distribution, test_conjugate_normal_model, ValidationResult,
+    ks_test_distribution, test_conjugate_beta_bernoulli_model, test_conjugate_normal_model,
+    ConjugateBetaBernoulliConfig, ConjugateNormalConfig, ValidationResult,
 };
 pub use inference::vi::{elbo_with_guide, optimize_meanfield_vi, MeanFieldGuide, VariationalParam};
