@@ -2,10 +2,329 @@
 
 use crate::core::address::Address;
 use crate::core::distribution::Distribution;
-use crate::runtime::handler::Handler;
+use crate::core::model::Model;
+use crate::error::{ErrorCode, FugueError, FugueResult};
+use crate::runtime::handler::{run, Handler};
 use crate::runtime::trace::{Choice, ChoiceValue, Trace};
 
 use rand::RngCore;
+
+/// Panic when a sample site reuses an address already recorded in this
+/// execution's output trace (FG-47).
+///
+/// "Fast" handlers (`PriorHandler`, `ReplayHandler`, `ScoreGivenTrace`) treat a
+/// duplicate address as a programming error and panic with a precise message —
+/// this is the documented fast/safe split. Detection is O(log n) and needs no
+/// extra state: the output trace's `choices` map already contains exactly the
+/// addresses visited so far in this run, so a hit means the address was sampled
+/// twice. Before this check, the second visit silently double-counted its
+/// log-prior while dropping the first choice.
+#[inline]
+fn assert_no_duplicate_sample(trace: &Trace, addr: &Address, handler: &str) {
+    if trace.choices.contains_key(addr) {
+        panic!(
+            "{handler}: address {addr} was sampled twice in one execution \
+             (AddressConflict, ErrorCode::{:?}={}). Every sample site must have \
+             a unique address.",
+            ErrorCode::AddressConflict,
+            ErrorCode::AddressConflict as u32
+        );
+    }
+}
+
+/// Build the [`FugueError`] used for a duplicate sample address, so that "safe"
+/// handlers and the fallible scoring paths surface a real
+/// [`ErrorCode::AddressConflict`] (FG-47) instead of panicking.
+fn address_conflict_error(addr: &Address, handler: &str) -> FugueError {
+    FugueError::ModelError {
+        address: Some(addr.clone()),
+        reason: format!("{handler}: address sampled twice in one execution"),
+        code: ErrorCode::AddressConflict,
+        context: crate::error::ErrorContext::new(),
+    }
+}
+
+// =============================================================================
+// Internal monomorphization macros (FG-54)
+//
+// Each handler used to hand-copy four (now five, with i64) near-identical
+// `on_sample_*` / `on_observe_*` methods. These `macro_rules!` collapse that
+// copy-paste: a handler lists the `(method, type, variant)` rows once and the
+// macro expands the shared body for every supported value type. The behavior is
+// identical to the old hand-written methods, plus the FG-47 duplicate-address
+// check and the FG-48 fresh-logp fix, applied uniformly.
+// =============================================================================
+
+/// The five value types every handler supports, as `(sample_method,
+/// observe_method, rust_type, ChoiceValue variant, type-name literal,
+/// Option-getter, Result-getter)` rows. Passed to the per-handler macros so the
+/// row list lives in exactly one place.
+macro_rules! for_each_value_type {
+    ($m:ident) => {
+        $m! {
+            (on_sample_f64,   on_observe_f64,   f64,   F64,   "f64",   get_f64,   get_f64_result),
+            (on_sample_bool,  on_observe_bool,  bool,  Bool,  "bool",  get_bool,  get_bool_result),
+            (on_sample_u64,   on_observe_u64,   u64,   U64,   "u64",   get_u64,   get_u64_result),
+            (on_sample_usize, on_observe_usize, usize, Usize, "usize", get_usize, get_usize_result),
+            (on_sample_i64,   on_observe_i64,   i64,   I64,   "i64",   get_i64,   get_i64_result),
+        }
+    };
+}
+
+/// Generate the five identical `on_observe_*` methods (every handler scores an
+/// observation the same way: add its log-density to `log_likelihood`).
+macro_rules! impl_observe_methods {
+    ($(($sample:ident, $observe:ident, $ty:ty, $variant:ident, $tyname:literal, $get:ident, $get_res:ident)),* $(,)?) => {
+        $(
+            fn $observe(&mut self, _addr: &Address, dist: &dyn Distribution<$ty>, value: $ty) {
+                self.trace.log_likelihood += dist.log_prob(&value);
+            }
+        )*
+    };
+}
+
+/// `PriorHandler`: draw a fresh value, score it, record it. Panics on a
+/// duplicate address (fast handler).
+macro_rules! impl_prior_sample_methods {
+    ($(($sample:ident, $observe:ident, $ty:ty, $variant:ident, $tyname:literal, $get:ident, $get_res:ident)),* $(,)?) => {
+        $(
+            fn $sample(&mut self, addr: &Address, dist: &dyn Distribution<$ty>) -> $ty {
+                assert_no_duplicate_sample(&self.trace, addr, "PriorHandler");
+                let x = dist.sample(self.rng);
+                let lp = dist.log_prob(&x);
+                self.trace.log_prior += lp;
+                self.trace.choices.insert(
+                    addr.clone(),
+                    Choice { addr: addr.clone(), value: ChoiceValue::$variant(x), logp: lp },
+                );
+                x
+            }
+        )*
+    };
+}
+
+/// `ReplayHandler`: reuse the base value if present (panic on type mismatch),
+/// otherwise sample fresh; always re-score under the current distribution.
+/// Panics on a duplicate address (fast handler).
+macro_rules! impl_replay_sample_methods {
+    ($(($sample:ident, $observe:ident, $ty:ty, $variant:ident, $tyname:literal, $get:ident, $get_res:ident)),* $(,)?) => {
+        $(
+            fn $sample(&mut self, addr: &Address, dist: &dyn Distribution<$ty>) -> $ty {
+                assert_no_duplicate_sample(&self.trace, addr, "ReplayHandler");
+                let x = if let Some(c) = self.base.choices.get(addr) {
+                    match c.value {
+                        ChoiceValue::$variant(v) => v,
+                        _ => panic!("expected {} at {}", $tyname, addr),
+                    }
+                } else {
+                    dist.sample(self.rng)
+                };
+                let lp = dist.log_prob(&x);
+                self.trace.log_prior += lp;
+                self.trace.choices.insert(
+                    addr.clone(),
+                    Choice { addr: addr.clone(), value: ChoiceValue::$variant(x), logp: lp },
+                );
+                x
+            }
+        )*
+    };
+}
+
+/// `ScoreGivenTrace`: read the fixed value from the base trace (panic if
+/// missing or wrong type), score it under the current distribution, and store a
+/// FRESH choice carrying that newly computed logp (FG-48). Panics on a duplicate
+/// address (fast handler).
+macro_rules! impl_score_sample_methods {
+    ($(($sample:ident, $observe:ident, $ty:ty, $variant:ident, $tyname:literal, $get:ident, $get_res:ident)),* $(,)?) => {
+        $(
+            fn $sample(&mut self, addr: &Address, dist: &dyn Distribution<$ty>) -> $ty {
+                assert_no_duplicate_sample(&self.trace, addr, "ScoreGivenTrace");
+                let c = self
+                    .base
+                    .choices
+                    .get(addr)
+                    .unwrap_or_else(|| panic!("missing value for site {} in base trace", addr));
+                let x = match c.value {
+                    ChoiceValue::$variant(v) => v,
+                    _ => panic!("expected {} at {}", $tyname, addr),
+                };
+                let lp = dist.log_prob(&x);
+                self.trace.log_prior += lp;
+                // FG-48: store the freshly computed logp, not the stale base one.
+                self.trace.choices.insert(
+                    addr.clone(),
+                    Choice { addr: addr.clone(), value: ChoiceValue::$variant(x), logp: lp },
+                );
+                x
+            }
+        )*
+    };
+}
+
+/// `SafeReplayHandler`: like `ReplayHandler` but recovers from missing/mismatched
+/// base values by sampling fresh (optionally warning). A duplicate address is a
+/// programming error even in the safe handler, so it invalidates the trace with
+/// `-inf` and warns rather than silently double-counting (FG-47).
+macro_rules! impl_safe_replay_sample_methods {
+    ($(($sample:ident, $observe:ident, $ty:ty, $variant:ident, $tyname:literal, $get:ident, $get_res:ident)),* $(,)?) => {
+        $(
+            fn $sample(&mut self, addr: &Address, dist: &dyn Distribution<$ty>) -> $ty {
+                if self.trace.choices.contains_key(addr) {
+                    if self.warn_on_mismatch {
+                        eprintln!("Warning: {}", address_conflict_error(addr, "SafeReplayHandler"));
+                    }
+                    self.trace.log_prior += f64::NEG_INFINITY;
+                    return dist.sample(self.rng);
+                }
+                let x = match self.base.$get(addr) {
+                    Some(v) => v,
+                    None => {
+                        if self.warn_on_mismatch && self.base.choices.contains_key(addr) {
+                            if let Some(choice) = self.base.choices.get(addr) {
+                                eprintln!(
+                                    "Warning: Type mismatch at {}: expected {}, found {}",
+                                    addr, $tyname, choice.value.type_name()
+                                );
+                            }
+                        }
+                        dist.sample(self.rng)
+                    }
+                };
+                let lp = dist.log_prob(&x);
+                self.trace.log_prior += lp;
+                self.trace.choices.insert(
+                    addr.clone(),
+                    Choice { addr: addr.clone(), value: ChoiceValue::$variant(x), logp: lp },
+                );
+                x
+            }
+        )*
+    };
+}
+
+/// `SafeScoreGivenTrace`: like `ScoreGivenTrace` but returns an invalid (`-inf`)
+/// trace instead of panicking on a missing/mismatched address, and stores a
+/// FRESH choice with the newly computed logp (FG-48). A duplicate address
+/// invalidates the trace (FG-47).
+macro_rules! impl_safe_score_sample_methods {
+    ($(($sample:ident, $observe:ident, $ty:ty, $variant:ident, $tyname:literal, $get:ident, $get_res:ident)),* $(,)?) => {
+        $(
+            fn $sample(&mut self, addr: &Address, dist: &dyn Distribution<$ty>) -> $ty {
+                if self.trace.choices.contains_key(addr) {
+                    if self.warn_on_error {
+                        eprintln!("Warning: {}", address_conflict_error(addr, "SafeScoreGivenTrace"));
+                    }
+                    self.trace.log_prior += f64::NEG_INFINITY;
+                    return <$ty as Default>::default();
+                }
+                match self.base.$get_res(addr) {
+                    Ok(x) => {
+                        let lp = dist.log_prob(&x);
+                        self.trace.log_prior += lp;
+                        // FG-48: fresh logp consistent with what we accumulated.
+                        self.trace.choices.insert(
+                            addr.clone(),
+                            Choice { addr: addr.clone(), value: ChoiceValue::$variant(x), logp: lp },
+                        );
+                        x
+                    }
+                    Err(e) => {
+                        if self.warn_on_error {
+                            eprintln!("Warning: Failed to get {} at {}: {}", $tyname, addr, e);
+                        }
+                        self.trace.log_prior += f64::NEG_INFINITY;
+                        <$ty as Default>::default()
+                    }
+                }
+            }
+        )*
+    };
+}
+
+/// `StrictScoreGivenTrace`: the fallible, structure-checking scoring path
+/// (FG-20/FG-21). It records the FIRST structural problem into `self.error`
+/// instead of panicking: an address absent from the base trace or a type
+/// mismatch yields `ErrorCode::UnexpectedModelStructure`; a duplicate address
+/// yields `ErrorCode::AddressConflict`. On success it stores a fresh, correctly
+/// scored choice.
+macro_rules! impl_strict_score_sample_methods {
+    ($(($sample:ident, $observe:ident, $ty:ty, $variant:ident, $tyname:literal, $get:ident, $get_res:ident)),* $(,)?) => {
+        $(
+            fn $sample(&mut self, addr: &Address, dist: &dyn Distribution<$ty>) -> $ty {
+                if self.trace.choices.contains_key(addr) {
+                    if self.error.is_none() {
+                        *self.error = Some(address_conflict_error(addr, "StrictScoreGivenTrace"));
+                    }
+                    return <$ty as Default>::default();
+                }
+                match self.base.$get_res(addr) {
+                    Ok(x) => {
+                        let lp = dist.log_prob(&x);
+                        self.trace.log_prior += lp;
+                        self.trace.choices.insert(
+                            addr.clone(),
+                            Choice { addr: addr.clone(), value: ChoiceValue::$variant(x), logp: lp },
+                        );
+                        x
+                    }
+                    Err(cause) => {
+                        if self.error.is_none() {
+                            *self.error = Some(FugueError::ModelError {
+                                address: Some(addr.clone()),
+                                reason: format!(
+                                    "model visited address {} not present (as {}) in the base \
+                                     trace; structure varies between the base trace and this model",
+                                    addr, $tyname
+                                ),
+                                code: ErrorCode::UnexpectedModelStructure,
+                                context: crate::error::ErrorContext::new().with_cause(cause),
+                            });
+                        }
+                        <$ty as Default>::default()
+                    }
+                }
+            }
+        )*
+    };
+}
+
+/// `ReconcilingScoreGivenTrace`: the reconciling scoring path (FG-20/FG-21).
+/// Addresses present in the base trace are replayed and re-scored; NEW addresses
+/// (absent, or present with the wrong type) are sampled fresh from the prior and
+/// their log-prior accumulated (the RJMCMC-correct treatment of prior-proposed
+/// fresh dimensions) and recorded in `fresh`. Vanished addresses are computed
+/// after the run by the driver. A duplicate address is still an error.
+macro_rules! impl_reconciling_score_sample_methods {
+    ($(($sample:ident, $observe:ident, $ty:ty, $variant:ident, $tyname:literal, $get:ident, $get_res:ident)),* $(,)?) => {
+        $(
+            fn $sample(&mut self, addr: &Address, dist: &dyn Distribution<$ty>) -> $ty {
+                if self.trace.choices.contains_key(addr) {
+                    if self.error.is_none() {
+                        *self.error =
+                            Some(address_conflict_error(addr, "ReconcilingScoreGivenTrace"));
+                    }
+                    return <$ty as Default>::default();
+                }
+                let x = match self.base.$get(addr) {
+                    Some(v) => v,
+                    None => {
+                        // New (or type-changed) dimension: propose from the prior.
+                        self.fresh.push(addr.clone());
+                        dist.sample(self.rng)
+                    }
+                };
+                let lp = dist.log_prob(&x);
+                self.trace.log_prior += lp;
+                self.trace.choices.insert(
+                    addr.clone(),
+                    Choice { addr: addr.clone(), value: ChoiceValue::$variant(x), logp: lp },
+                );
+                x
+            }
+        )*
+    };
+}
 
 /// Handler for prior sampling - generates fresh random values from distributions.
 ///
@@ -40,81 +359,8 @@ pub struct PriorHandler<'r, R: RngCore> {
     pub trace: Trace,
 }
 impl<'r, R: RngCore> Handler for PriorHandler<'r, R> {
-    fn on_sample_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>) -> f64 {
-        let x = dist.sample(self.rng);
-        let lp = dist.log_prob(&x);
-        self.trace.log_prior += lp;
-        self.trace.choices.insert(
-            addr.clone(),
-            Choice {
-                addr: addr.clone(),
-                value: ChoiceValue::F64(x),
-                logp: lp,
-            },
-        );
-        x
-    }
-
-    fn on_sample_bool(&mut self, addr: &Address, dist: &dyn Distribution<bool>) -> bool {
-        let x = dist.sample(self.rng);
-        let lp = dist.log_prob(&x);
-        self.trace.log_prior += lp;
-        self.trace.choices.insert(
-            addr.clone(),
-            Choice {
-                addr: addr.clone(),
-                value: ChoiceValue::Bool(x),
-                logp: lp,
-            },
-        );
-        x
-    }
-
-    fn on_sample_u64(&mut self, addr: &Address, dist: &dyn Distribution<u64>) -> u64 {
-        let x = dist.sample(self.rng);
-        let lp = dist.log_prob(&x);
-        self.trace.log_prior += lp;
-        self.trace.choices.insert(
-            addr.clone(),
-            Choice {
-                addr: addr.clone(),
-                value: ChoiceValue::U64(x),
-                logp: lp,
-            },
-        );
-        x
-    }
-
-    fn on_sample_usize(&mut self, addr: &Address, dist: &dyn Distribution<usize>) -> usize {
-        let x = dist.sample(self.rng);
-        let lp = dist.log_prob(&x);
-        self.trace.log_prior += lp;
-        self.trace.choices.insert(
-            addr.clone(),
-            Choice {
-                addr: addr.clone(),
-                value: ChoiceValue::Usize(x),
-                logp: lp,
-            },
-        );
-        x
-    }
-
-    fn on_observe_f64(&mut self, _: &Address, dist: &dyn Distribution<f64>, value: f64) {
-        self.trace.log_likelihood += dist.log_prob(&value);
-    }
-
-    fn on_observe_bool(&mut self, _: &Address, dist: &dyn Distribution<bool>, value: bool) {
-        self.trace.log_likelihood += dist.log_prob(&value);
-    }
-
-    fn on_observe_u64(&mut self, _: &Address, dist: &dyn Distribution<u64>, value: u64) {
-        self.trace.log_likelihood += dist.log_prob(&value);
-    }
-
-    fn on_observe_usize(&mut self, _: &Address, dist: &dyn Distribution<usize>, value: usize) {
-        self.trace.log_likelihood += dist.log_prob(&value);
-    }
+    for_each_value_type!(impl_prior_sample_methods);
+    for_each_value_type!(impl_observe_methods);
 
     fn on_factor(&mut self, logw: f64) {
         self.trace.log_factors += logw;
@@ -168,109 +414,8 @@ pub struct ReplayHandler<'r, R: RngCore> {
     pub trace: Trace,
 }
 impl<'r, R: RngCore> Handler for ReplayHandler<'r, R> {
-    fn on_sample_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>) -> f64 {
-        let x = if let Some(c) = self.base.choices.get(addr) {
-            match c.value {
-                ChoiceValue::F64(v) => v,
-                _ => panic!("expected f64 at {}", addr),
-            }
-        } else {
-            dist.sample(self.rng)
-        };
-        let lp = dist.log_prob(&x);
-        self.trace.log_prior += lp;
-        self.trace.choices.insert(
-            addr.clone(),
-            Choice {
-                addr: addr.clone(),
-                value: ChoiceValue::F64(x),
-                logp: lp,
-            },
-        );
-        x
-    }
-
-    fn on_sample_bool(&mut self, addr: &Address, dist: &dyn Distribution<bool>) -> bool {
-        let x = if let Some(c) = self.base.choices.get(addr) {
-            match c.value {
-                ChoiceValue::Bool(v) => v,
-                _ => panic!("expected bool at {}", addr),
-            }
-        } else {
-            dist.sample(self.rng)
-        };
-        let lp = dist.log_prob(&x);
-        self.trace.log_prior += lp;
-        self.trace.choices.insert(
-            addr.clone(),
-            Choice {
-                addr: addr.clone(),
-                value: ChoiceValue::Bool(x),
-                logp: lp,
-            },
-        );
-        x
-    }
-
-    fn on_sample_u64(&mut self, addr: &Address, dist: &dyn Distribution<u64>) -> u64 {
-        let x = if let Some(c) = self.base.choices.get(addr) {
-            match c.value {
-                ChoiceValue::U64(v) => v,
-                _ => panic!("expected u64 at {}", addr),
-            }
-        } else {
-            dist.sample(self.rng)
-        };
-        let lp = dist.log_prob(&x);
-        self.trace.log_prior += lp;
-        self.trace.choices.insert(
-            addr.clone(),
-            Choice {
-                addr: addr.clone(),
-                value: ChoiceValue::U64(x),
-                logp: lp,
-            },
-        );
-        x
-    }
-
-    fn on_sample_usize(&mut self, addr: &Address, dist: &dyn Distribution<usize>) -> usize {
-        let x = if let Some(c) = self.base.choices.get(addr) {
-            match c.value {
-                ChoiceValue::Usize(v) => v,
-                _ => panic!("expected usize at {}", addr),
-            }
-        } else {
-            dist.sample(self.rng)
-        };
-        let lp = dist.log_prob(&x);
-        self.trace.log_prior += lp;
-        self.trace.choices.insert(
-            addr.clone(),
-            Choice {
-                addr: addr.clone(),
-                value: ChoiceValue::Usize(x),
-                logp: lp,
-            },
-        );
-        x
-    }
-
-    fn on_observe_f64(&mut self, _: &Address, dist: &dyn Distribution<f64>, value: f64) {
-        self.trace.log_likelihood += dist.log_prob(&value);
-    }
-
-    fn on_observe_bool(&mut self, _: &Address, dist: &dyn Distribution<bool>, value: bool) {
-        self.trace.log_likelihood += dist.log_prob(&value);
-    }
-
-    fn on_observe_u64(&mut self, _: &Address, dist: &dyn Distribution<u64>, value: u64) {
-        self.trace.log_likelihood += dist.log_prob(&value);
-    }
-
-    fn on_observe_usize(&mut self, _: &Address, dist: &dyn Distribution<usize>, value: usize) {
-        self.trace.log_likelihood += dist.log_prob(&value);
-    }
+    for_each_value_type!(impl_replay_sample_methods);
+    for_each_value_type!(impl_observe_methods);
 
     fn on_factor(&mut self, logw: f64) {
         self.trace.log_factors += logw;
@@ -320,85 +465,8 @@ pub struct ScoreGivenTrace {
     pub trace: Trace,
 }
 impl Handler for ScoreGivenTrace {
-    fn on_sample_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>) -> f64 {
-        let c = self
-            .base
-            .choices
-            .get(addr)
-            .unwrap_or_else(|| panic!("missing value for site {} in base trace", addr));
-        let x = match c.value {
-            ChoiceValue::F64(v) => v,
-            _ => panic!("expected f64 at {}", addr),
-        };
-        let lp = dist.log_prob(&x);
-        self.trace.log_prior += lp;
-        self.trace.choices.insert(addr.clone(), c.clone());
-        x
-    }
-
-    fn on_sample_bool(&mut self, addr: &Address, dist: &dyn Distribution<bool>) -> bool {
-        let c = self
-            .base
-            .choices
-            .get(addr)
-            .unwrap_or_else(|| panic!("missing value for site {} in base trace", addr));
-        let x = match c.value {
-            ChoiceValue::Bool(v) => v,
-            _ => panic!("expected bool at {}", addr),
-        };
-        let lp = dist.log_prob(&x);
-        self.trace.log_prior += lp;
-        self.trace.choices.insert(addr.clone(), c.clone());
-        x
-    }
-
-    fn on_sample_u64(&mut self, addr: &Address, dist: &dyn Distribution<u64>) -> u64 {
-        let c = self
-            .base
-            .choices
-            .get(addr)
-            .unwrap_or_else(|| panic!("missing value for site {} in base trace", addr));
-        let x = match c.value {
-            ChoiceValue::U64(v) => v,
-            _ => panic!("expected u64 at {}", addr),
-        };
-        let lp = dist.log_prob(&x);
-        self.trace.log_prior += lp;
-        self.trace.choices.insert(addr.clone(), c.clone());
-        x
-    }
-
-    fn on_sample_usize(&mut self, addr: &Address, dist: &dyn Distribution<usize>) -> usize {
-        let c = self
-            .base
-            .choices
-            .get(addr)
-            .unwrap_or_else(|| panic!("missing value for site {} in base trace", addr));
-        let x = match c.value {
-            ChoiceValue::Usize(v) => v,
-            _ => panic!("expected usize at {}", addr),
-        };
-        let lp = dist.log_prob(&x);
-        self.trace.log_prior += lp;
-        self.trace.choices.insert(addr.clone(), c.clone());
-        x
-    }
-
-    fn on_observe_f64(&mut self, _: &Address, dist: &dyn Distribution<f64>, value: f64) {
-        self.trace.log_likelihood += dist.log_prob(&value);
-    }
-
-    fn on_observe_bool(&mut self, _: &Address, dist: &dyn Distribution<bool>, value: bool) {
-        self.trace.log_likelihood += dist.log_prob(&value);
-    }
-
-    fn on_observe_u64(&mut self, _: &Address, dist: &dyn Distribution<u64>, value: u64) {
-        self.trace.log_likelihood += dist.log_prob(&value);
-    }
-
-    fn on_observe_usize(&mut self, _: &Address, dist: &dyn Distribution<usize>, value: usize) {
-        self.trace.log_likelihood += dist.log_prob(&value);
-    }
+    for_each_value_type!(impl_score_sample_methods);
+    for_each_value_type!(impl_observe_methods);
 
     fn on_factor(&mut self, logw: f64) {
         self.trace.log_factors += logw;
@@ -454,137 +522,8 @@ pub struct SafeReplayHandler<'r, R: RngCore> {
     pub warn_on_mismatch: bool,
 }
 impl<'r, R: RngCore> Handler for SafeReplayHandler<'r, R> {
-    fn on_sample_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>) -> f64 {
-        let x = match self.base.get_f64(addr) {
-            Some(v) => v,
-            None => {
-                if self.warn_on_mismatch && self.base.choices.contains_key(addr) {
-                    if let Some(choice) = self.base.choices.get(addr) {
-                        eprintln!(
-                            "Warning: Type mismatch at {}: expected f64, found {}",
-                            addr,
-                            choice.value.type_name()
-                        );
-                    }
-                }
-                dist.sample(self.rng)
-            }
-        };
-        let lp = dist.log_prob(&x);
-        self.trace.log_prior += lp;
-        self.trace.choices.insert(
-            addr.clone(),
-            Choice {
-                addr: addr.clone(),
-                value: ChoiceValue::F64(x),
-                logp: lp,
-            },
-        );
-        x
-    }
-
-    fn on_sample_bool(&mut self, addr: &Address, dist: &dyn Distribution<bool>) -> bool {
-        let x = match self.base.get_bool(addr) {
-            Some(v) => v,
-            None => {
-                if self.warn_on_mismatch && self.base.choices.contains_key(addr) {
-                    if let Some(choice) = self.base.choices.get(addr) {
-                        eprintln!(
-                            "Warning: Type mismatch at {}: expected bool, found {}",
-                            addr,
-                            choice.value.type_name()
-                        );
-                    }
-                }
-                dist.sample(self.rng)
-            }
-        };
-        let lp = dist.log_prob(&x);
-        self.trace.log_prior += lp;
-        self.trace.choices.insert(
-            addr.clone(),
-            Choice {
-                addr: addr.clone(),
-                value: ChoiceValue::Bool(x),
-                logp: lp,
-            },
-        );
-        x
-    }
-
-    fn on_sample_u64(&mut self, addr: &Address, dist: &dyn Distribution<u64>) -> u64 {
-        let x = match self.base.get_u64(addr) {
-            Some(v) => v,
-            None => {
-                if self.warn_on_mismatch && self.base.choices.contains_key(addr) {
-                    if let Some(choice) = self.base.choices.get(addr) {
-                        eprintln!(
-                            "Warning: Type mismatch at {}: expected u64, found {}",
-                            addr,
-                            choice.value.type_name()
-                        );
-                    }
-                }
-                dist.sample(self.rng)
-            }
-        };
-        let lp = dist.log_prob(&x);
-        self.trace.log_prior += lp;
-        self.trace.choices.insert(
-            addr.clone(),
-            Choice {
-                addr: addr.clone(),
-                value: ChoiceValue::U64(x),
-                logp: lp,
-            },
-        );
-        x
-    }
-
-    fn on_sample_usize(&mut self, addr: &Address, dist: &dyn Distribution<usize>) -> usize {
-        let x = match self.base.get_usize(addr) {
-            Some(v) => v,
-            None => {
-                if self.warn_on_mismatch && self.base.choices.contains_key(addr) {
-                    if let Some(choice) = self.base.choices.get(addr) {
-                        eprintln!(
-                            "Warning: Type mismatch at {}: expected usize, found {}",
-                            addr,
-                            choice.value.type_name()
-                        );
-                    }
-                }
-                dist.sample(self.rng)
-            }
-        };
-        let lp = dist.log_prob(&x);
-        self.trace.log_prior += lp;
-        self.trace.choices.insert(
-            addr.clone(),
-            Choice {
-                addr: addr.clone(),
-                value: ChoiceValue::Usize(x),
-                logp: lp,
-            },
-        );
-        x
-    }
-
-    fn on_observe_f64(&mut self, _: &Address, dist: &dyn Distribution<f64>, value: f64) {
-        self.trace.log_likelihood += dist.log_prob(&value);
-    }
-
-    fn on_observe_bool(&mut self, _: &Address, dist: &dyn Distribution<bool>, value: bool) {
-        self.trace.log_likelihood += dist.log_prob(&value);
-    }
-
-    fn on_observe_u64(&mut self, _: &Address, dist: &dyn Distribution<u64>, value: u64) {
-        self.trace.log_likelihood += dist.log_prob(&value);
-    }
-
-    fn on_observe_usize(&mut self, _: &Address, dist: &dyn Distribution<usize>, value: usize) {
-        self.trace.log_likelihood += dist.log_prob(&value);
-    }
+    for_each_value_type!(impl_safe_replay_sample_methods);
+    for_each_value_type!(impl_observe_methods);
 
     fn on_factor(&mut self, logw: f64) {
         self.trace.log_factors += logw;
@@ -637,102 +576,8 @@ pub struct SafeScoreGivenTrace {
     pub warn_on_error: bool,
 }
 impl Handler for SafeScoreGivenTrace {
-    fn on_sample_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>) -> f64 {
-        match self.base.get_f64_result(addr) {
-            Ok(x) => {
-                let lp = dist.log_prob(&x);
-                self.trace.log_prior += lp;
-                if let Some(choice) = self.base.choices.get(addr) {
-                    self.trace.choices.insert(addr.clone(), choice.clone());
-                }
-                x
-            }
-            Err(e) => {
-                if self.warn_on_error {
-                    eprintln!("Warning: Failed to get f64 at {}: {}", addr, e);
-                }
-                // Add negative infinity to make this trace invalid
-                self.trace.log_prior += f64::NEG_INFINITY;
-                0.0 // Return a dummy value
-            }
-        }
-    }
-
-    fn on_sample_bool(&mut self, addr: &Address, dist: &dyn Distribution<bool>) -> bool {
-        match self.base.get_bool_result(addr) {
-            Ok(x) => {
-                let lp = dist.log_prob(&x);
-                self.trace.log_prior += lp;
-                if let Some(choice) = self.base.choices.get(addr) {
-                    self.trace.choices.insert(addr.clone(), choice.clone());
-                }
-                x
-            }
-            Err(e) => {
-                if self.warn_on_error {
-                    eprintln!("Warning: Failed to get bool at {}: {}", addr, e);
-                }
-                self.trace.log_prior += f64::NEG_INFINITY;
-                false
-            }
-        }
-    }
-
-    fn on_sample_u64(&mut self, addr: &Address, dist: &dyn Distribution<u64>) -> u64 {
-        match self.base.get_u64_result(addr) {
-            Ok(x) => {
-                let lp = dist.log_prob(&x);
-                self.trace.log_prior += lp;
-                if let Some(choice) = self.base.choices.get(addr) {
-                    self.trace.choices.insert(addr.clone(), choice.clone());
-                }
-                x
-            }
-            Err(e) => {
-                if self.warn_on_error {
-                    eprintln!("Warning: Failed to get u64 at {}: {}", addr, e);
-                }
-                self.trace.log_prior += f64::NEG_INFINITY;
-                0
-            }
-        }
-    }
-
-    fn on_sample_usize(&mut self, addr: &Address, dist: &dyn Distribution<usize>) -> usize {
-        match self.base.get_usize_result(addr) {
-            Ok(x) => {
-                let lp = dist.log_prob(&x);
-                self.trace.log_prior += lp;
-                if let Some(choice) = self.base.choices.get(addr) {
-                    self.trace.choices.insert(addr.clone(), choice.clone());
-                }
-                x
-            }
-            Err(e) => {
-                if self.warn_on_error {
-                    eprintln!("Warning: Failed to get usize at {}: {}", addr, e);
-                }
-                self.trace.log_prior += f64::NEG_INFINITY;
-                0
-            }
-        }
-    }
-
-    fn on_observe_f64(&mut self, _: &Address, dist: &dyn Distribution<f64>, value: f64) {
-        self.trace.log_likelihood += dist.log_prob(&value);
-    }
-
-    fn on_observe_bool(&mut self, _: &Address, dist: &dyn Distribution<bool>, value: bool) {
-        self.trace.log_likelihood += dist.log_prob(&value);
-    }
-
-    fn on_observe_u64(&mut self, _: &Address, dist: &dyn Distribution<u64>, value: u64) {
-        self.trace.log_likelihood += dist.log_prob(&value);
-    }
-
-    fn on_observe_usize(&mut self, _: &Address, dist: &dyn Distribution<usize>, value: usize) {
-        self.trace.log_likelihood += dist.log_prob(&value);
-    }
+    for_each_value_type!(impl_safe_score_sample_methods);
+    for_each_value_type!(impl_observe_methods);
 
     fn on_factor(&mut self, logw: f64) {
         self.trace.log_factors += logw;
@@ -741,6 +586,216 @@ impl Handler for SafeScoreGivenTrace {
     fn finish(self) -> Trace {
         self.trace
     }
+}
+
+// =============================================================================
+// Structure-varying (trans-dimensional) scoring paths (FG-20 / FG-21)
+// =============================================================================
+
+/// The strict, fallible sibling of [`ScoreGivenTrace`].
+///
+/// This handler backs [`score_given_trace_strict`]. Instead of panicking when
+/// the model's address structure differs from the base trace, it records the
+/// first structural problem so the driver can return a [`FugueError`]:
+///
+/// - visiting an address absent from the base trace (or present with the wrong
+///   value type) -> [`ErrorCode::UnexpectedModelStructure`];
+/// - visiting the same address twice -> [`ErrorCode::AddressConflict`].
+///
+/// On success every visited site stores a fresh, correctly scored choice.
+pub struct StrictScoreGivenTrace<'e> {
+    /// Base trace containing the fixed choices to score.
+    pub base: Trace,
+    /// New trace to accumulate log-probabilities.
+    pub trace: Trace,
+    /// First structural error encountered, surfaced by the driver.
+    error: &'e mut Option<FugueError>,
+}
+impl<'e> Handler for StrictScoreGivenTrace<'e> {
+    for_each_value_type!(impl_strict_score_sample_methods);
+    for_each_value_type!(impl_observe_methods);
+
+    fn on_factor(&mut self, logw: f64) {
+        self.trace.log_factors += logw;
+    }
+
+    fn finish(self) -> Trace {
+        self.trace
+    }
+}
+
+/// Score `model` against `base` strictly, returning an error rather than
+/// panicking when the model's address structure does not match the base trace
+/// (FG-20 / FG-21).
+///
+/// Returns `Ok((value, scored_trace))` when every sample site visited by the
+/// model is present in `base` with a matching value type. Returns `Err` with
+/// [`ErrorCode::UnexpectedModelStructure`] if the model visits an address absent
+/// from `base` (a branch opened by a differing latent value), or
+/// [`ErrorCode::AddressConflict`] if the model visits the same address twice.
+///
+/// This is the mechanism the MCMC layer needs to stop crashing on
+/// structure-varying proposals; wiring it into the samplers is a separate work
+/// package.
+///
+/// # Example
+///
+/// ```rust
+/// # use fugue::*;
+/// # use fugue::runtime::interpreters::{score_given_trace_strict, PriorHandler};
+/// # use rand::rngs::StdRng;
+/// # use rand::SeedableRng;
+/// let mut rng = StdRng::seed_from_u64(1);
+/// let (_, base) = runtime::handler::run(
+///     PriorHandler { rng: &mut rng, trace: Trace::default() },
+///     sample(addr!("x"), Normal::new(0.0, 1.0).unwrap()),
+/// );
+///
+/// // Same structure: Ok.
+/// assert!(score_given_trace_strict(
+///     base.clone(),
+///     sample(addr!("x"), Normal::new(0.0, 1.0).unwrap()),
+/// ).is_ok());
+///
+/// // Model reaches an address the base trace never recorded: Err.
+/// let err = score_given_trace_strict(
+///     base,
+///     sample(addr!("y"), Normal::new(0.0, 1.0).unwrap()),
+/// ).unwrap_err();
+/// assert_eq!(err.code(), ErrorCode::UnexpectedModelStructure);
+/// ```
+pub fn score_given_trace_strict<A>(base: Trace, model: Model<A>) -> FugueResult<(A, Trace)> {
+    let mut error: Option<FugueError> = None;
+    let handler = StrictScoreGivenTrace {
+        base,
+        trace: Trace::default(),
+        error: &mut error,
+    };
+    let (a, trace) = run(handler, model);
+    match error {
+        Some(e) => Err(e),
+        None => Ok((a, trace)),
+    }
+}
+
+/// Report of the structural differences reconciled by
+/// [`score_given_trace_reconciled`].
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ReconcileReport {
+    /// Addresses visited by the model that were absent from the base trace (or
+    /// present with the wrong value type). Each was proposed fresh from its
+    /// prior and its `log_prob` accumulated into `log_prior`.
+    pub fresh_addresses: Vec<Address>,
+    /// Addresses present in the base trace that the model did NOT visit. Their
+    /// contribution should be dropped by the caller (e.g. removed from the
+    /// reverse-move density in an RJMCMC step).
+    pub vanished_addresses: Vec<Address>,
+}
+
+/// The reconciling sibling of [`ScoreGivenTrace`], backing
+/// [`score_given_trace_reconciled`].
+///
+/// Addresses present in the base trace are replayed and re-scored. NEW addresses
+/// (absent, or present with a different value type) are sampled fresh from the
+/// prior, their `log_prob` accumulated into `log_prior`, and recorded in
+/// `fresh`. A duplicate address is still an error.
+pub struct ReconcilingScoreGivenTrace<'r, 'f, 'e, R: RngCore> {
+    /// RNG used to propose fresh values for new addresses.
+    pub rng: &'r mut R,
+    /// Base trace containing the fixed choices to replay/score.
+    pub base: Trace,
+    /// New trace accumulating the reconciled execution.
+    pub trace: Trace,
+    /// Addresses sampled fresh from the prior (not present in `base`), in
+    /// visitation order. Borrowed so the driver can read it after `finish`.
+    fresh: &'f mut Vec<Address>,
+    /// First duplicate-address error encountered, surfaced by the driver.
+    error: &'e mut Option<FugueError>,
+}
+impl<'r, 'f, 'e, R: RngCore> Handler for ReconcilingScoreGivenTrace<'r, 'f, 'e, R> {
+    for_each_value_type!(impl_reconciling_score_sample_methods);
+    for_each_value_type!(impl_observe_methods);
+
+    fn on_factor(&mut self, logw: f64) {
+        self.trace.log_factors += logw;
+    }
+
+    fn finish(self) -> Trace {
+        self.trace
+    }
+}
+
+/// Score `model` against `base`, reconciling a differing address structure
+/// instead of panicking (FG-20 / FG-21).
+///
+/// Addresses shared with `base` are replayed and re-scored under the current
+/// model. Addresses the model introduces that are **not** in `base` (new
+/// branches) are sampled fresh from their prior and their log-prior accumulated
+/// — the RJMCMC-correct treatment of prior-proposed fresh dimensions. Addresses
+/// in `base` that the model does **not** visit are reported as
+/// [`ReconcileReport::vanished_addresses`] so the caller can drop their
+/// contribution.
+///
+/// Returns `Err` with [`ErrorCode::AddressConflict`] only if the model visits
+/// the same address twice.
+///
+/// # Example
+///
+/// ```rust
+/// # use fugue::*;
+/// # use fugue::runtime::interpreters::{score_given_trace_reconciled, PriorHandler};
+/// # use rand::rngs::StdRng;
+/// # use rand::SeedableRng;
+/// let mut rng = StdRng::seed_from_u64(7);
+/// let (_, base) = runtime::handler::run(
+///     PriorHandler { rng: &mut rng, trace: Trace::default() },
+///     sample(addr!("x"), Normal::new(0.0, 1.0).unwrap()),
+/// );
+///
+/// // Model drops "x" and introduces "y": "y" is proposed fresh, "x" vanished.
+/// let (_v, trace, report) = score_given_trace_reconciled(
+///     base,
+///     &mut rng,
+///     sample(addr!("y"), Normal::new(0.0, 1.0).unwrap()),
+/// ).unwrap();
+/// assert_eq!(report.fresh_addresses, vec![addr!("y")]);
+/// assert_eq!(report.vanished_addresses, vec![addr!("x")]);
+/// assert!(trace.log_prior.is_finite());
+/// ```
+pub fn score_given_trace_reconciled<A, R: RngCore>(
+    base: Trace,
+    rng: &mut R,
+    model: Model<A>,
+) -> FugueResult<(A, Trace, ReconcileReport)> {
+    let mut error: Option<FugueError> = None;
+    let mut fresh_addresses: Vec<Address> = Vec::new();
+    // Snapshot base addresses up front so we can compute vanished ones after the
+    // run consumes the handler.
+    let base_addresses: Vec<Address> = base.choices.keys().cloned().collect();
+    let handler = ReconcilingScoreGivenTrace {
+        rng,
+        base,
+        trace: Trace::default(),
+        fresh: &mut fresh_addresses,
+        error: &mut error,
+    };
+    let (a, trace) = run(handler, model);
+    if let Some(e) = error {
+        return Err(e);
+    }
+    // Vanished = present in the base trace but not visited by this model run.
+    let vanished_addresses: Vec<Address> = base_addresses
+        .into_iter()
+        .filter(|addr| !trace.choices.contains_key(addr))
+        .collect();
+    Ok((
+        a,
+        trace,
+        ReconcileReport {
+            fresh_addresses,
+            vanished_addresses,
+        },
+    ))
 }
 
 #[cfg(test)]
