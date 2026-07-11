@@ -1,8 +1,9 @@
 #![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/docs/core/distribution.md"))]
 use rand::{Rng, RngCore};
 use rand_distr::{
-    Beta as RDBeta, Binomial as RDBinomial, Distribution as RandDistr, Exp as RDExp,
-    Gamma as RDGamma, LogNormal as RDLogNormal, Normal as RDNormal, Poisson as RDPoisson,
+    Beta as RDBeta, Binomial as RDBinomial, Cauchy as RDCauchy, ChiSquared as RDChiSquared,
+    Distribution as RandDistr, Exp as RDExp, Gamma as RDGamma, LogNormal as RDLogNormal,
+    Normal as RDNormal, Poisson as RDPoisson, StudentT as RDStudentT, Weibull as RDWeibull,
 };
 /// Type alias for log-probabilities.
 ///
@@ -1259,6 +1260,649 @@ impl Distribution<u64> for Poisson {
     }
 }
 
+// =============================================================================
+// FG-31: seven additional univariate distributions.
+//
+// Each follows the established style exactly: a validating `new` constructor
+// returning `FugueResult`, natural `f64`/`i64` return types, and a `log_prob`
+// that carries the FULL normalizing constant (no dropped `lgamma`/`ln` terms).
+// Samplers use `rand_distr` where a matching generator exists and an exact
+// inverse-CDF / reciprocal-Gamma construction otherwise. The closed-form
+// `log_prob` expressions match `scipy.stats.<dist>.logpdf` (constants in the
+// tests were derived from those closed forms).
+// =============================================================================
+
+/// Student's t-distribution with a location and scale, `StudentT(ν, μ, σ)`.
+///
+/// Heavy-tailed generalization of the Normal; as `ν → ∞` it converges to
+/// `Normal(μ, σ)`. Widely used as a robust likelihood/prior because its tails
+/// tolerate outliers. `ν` need not be an integer.
+///
+/// Mathematical Properties:
+/// - **Support**: (-∞, +∞)
+/// - **PDF**: f(x) = Γ((ν+1)/2) / (Γ(ν/2)·√(νπ)·σ) · (1 + z²/ν)^(-(ν+1)/2),
+///   where z = (x−μ)/σ
+/// - **Mean**: μ for ν > 1 (undefined otherwise)
+/// - **Variance**: σ²·ν/(ν−2) for ν > 2 (infinite for 1 < ν ≤ 2)
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// // Robust prior with 3 degrees of freedom.
+/// let robust = sample(addr!("theta"), StudentT::new(3.0, 0.0, 1.0).unwrap());
+/// // Robust likelihood tolerant of outliers.
+/// let obs = observe(addr!("y"), StudentT::new(4.0, 1.0, 0.5).unwrap(), 2.0);
+/// ```
+#[derive(Clone, Copy, Debug)]
+pub struct StudentT {
+    /// Degrees of freedom ν (must be positive).
+    df: f64,
+    /// Location parameter μ.
+    loc: f64,
+    /// Scale parameter σ (must be positive).
+    scale: f64,
+}
+impl StudentT {
+    /// Create a new Student's t-distribution with validated parameters.
+    pub fn new(df: f64, loc: f64, scale: f64) -> crate::error::FugueResult<Self> {
+        if df <= 0.0 || !df.is_finite() {
+            return Err(crate::error::FugueError::invalid_parameters(
+                "StudentT",
+                "Degrees of freedom must be positive and finite",
+                crate::error::ErrorCode::InvalidShape,
+            )
+            .with_context("df", format!("{}", df))
+            .with_context("expected", "> 0.0 and finite"));
+        }
+        if !loc.is_finite() {
+            return Err(crate::error::FugueError::invalid_parameters(
+                "StudentT",
+                "Location (loc) must be finite",
+                crate::error::ErrorCode::InvalidMean,
+            )
+            .with_context("loc", format!("{}", loc)));
+        }
+        if scale <= 0.0 || !scale.is_finite() {
+            return Err(crate::error::FugueError::invalid_parameters(
+                "StudentT",
+                "Scale must be positive and finite",
+                crate::error::ErrorCode::InvalidVariance,
+            )
+            .with_context("scale", format!("{}", scale))
+            .with_context("expected", "> 0.0 and finite"));
+        }
+        Ok(StudentT { df, loc, scale })
+    }
+
+    /// Get the degrees of freedom ν.
+    pub fn df(&self) -> f64 {
+        self.df
+    }
+
+    /// Get the location parameter μ.
+    pub fn loc(&self) -> f64 {
+        self.loc
+    }
+
+    /// Get the scale parameter σ.
+    pub fn scale(&self) -> f64 {
+        self.scale
+    }
+}
+impl Distribution<f64> for StudentT {
+    fn sample(&self, rng: &mut dyn RngCore) -> f64 {
+        if self.df <= 0.0 || self.scale <= 0.0 {
+            return f64::NAN;
+        }
+        // rand_distr's StudentT is standardized (location 0, scale 1); apply the
+        // affine location-scale transform.
+        let t = RDStudentT::new(self.df).unwrap().sample(rng);
+        self.loc + self.scale * t
+    }
+    fn log_prob(&self, x: &f64) -> LogF64 {
+        if self.df <= 0.0
+            || self.scale <= 0.0
+            || !self.df.is_finite()
+            || !self.scale.is_finite()
+            || !self.loc.is_finite()
+            || !x.is_finite()
+        {
+            return f64::NEG_INFINITY;
+        }
+        const LN_PI: f64 = 1.144_729_885_849_400_2; // ln(π)
+        let z = (x - self.loc) / self.scale;
+        // log f = lnΓ((ν+1)/2) − lnΓ(ν/2) − 0.5·ln(νπ) − ln(σ)
+        //         − ((ν+1)/2)·ln(1 + z²/ν)
+        libm::lgamma((self.df + 1.0) / 2.0)
+            - libm::lgamma(self.df / 2.0)
+            - 0.5 * (self.df.ln() + LN_PI)
+            - self.scale.ln()
+            - 0.5 * (self.df + 1.0) * (z * z / self.df).ln_1p()
+    }
+    fn clone_box(&self) -> Box<dyn Distribution<f64>> {
+        Box::new(*self)
+    }
+}
+
+/// The Cauchy (Lorentz) distribution `Cauchy(x₀, γ)`.
+///
+/// The heavy-tailed limit `StudentT(1, x₀, γ)`. It has **no** finite mean or
+/// variance; `x₀` is the median/mode and `γ` the half-width at half-maximum.
+///
+/// Mathematical Properties:
+/// - **Support**: (-∞, +∞)
+/// - **PDF**: f(x) = 1 / (πγ·(1 + ((x−x₀)/γ)²))
+/// - **Mean/Variance**: undefined (heavy tails)
+/// - **Median/Mode**: x₀
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// // Weakly-informative heavy-tailed prior.
+/// let prior = sample(addr!("beta"), Cauchy::new(0.0, 2.5).unwrap());
+/// ```
+#[derive(Clone, Copy, Debug)]
+pub struct Cauchy {
+    /// Location (median) parameter x₀.
+    loc: f64,
+    /// Scale parameter γ (must be positive).
+    scale: f64,
+}
+impl Cauchy {
+    /// Create a new Cauchy distribution with validated parameters.
+    pub fn new(loc: f64, scale: f64) -> crate::error::FugueResult<Self> {
+        if !loc.is_finite() {
+            return Err(crate::error::FugueError::invalid_parameters(
+                "Cauchy",
+                "Location (loc) must be finite",
+                crate::error::ErrorCode::InvalidMean,
+            )
+            .with_context("loc", format!("{}", loc)));
+        }
+        if scale <= 0.0 || !scale.is_finite() {
+            return Err(crate::error::FugueError::invalid_parameters(
+                "Cauchy",
+                "Scale must be positive and finite",
+                crate::error::ErrorCode::InvalidVariance,
+            )
+            .with_context("scale", format!("{}", scale))
+            .with_context("expected", "> 0.0 and finite"));
+        }
+        Ok(Cauchy { loc, scale })
+    }
+
+    /// Get the location (median) parameter x₀.
+    pub fn loc(&self) -> f64 {
+        self.loc
+    }
+
+    /// Get the scale parameter γ.
+    pub fn scale(&self) -> f64 {
+        self.scale
+    }
+}
+impl Distribution<f64> for Cauchy {
+    fn sample(&self, rng: &mut dyn RngCore) -> f64 {
+        if self.scale <= 0.0 {
+            return f64::NAN;
+        }
+        RDCauchy::new(self.loc, self.scale).unwrap().sample(rng)
+    }
+    fn log_prob(&self, x: &f64) -> LogF64 {
+        if self.scale <= 0.0 || !self.scale.is_finite() || !self.loc.is_finite() || !x.is_finite() {
+            return f64::NEG_INFINITY;
+        }
+        const LN_PI: f64 = 1.144_729_885_849_400_2; // ln(π)
+        let z = (x - self.loc) / self.scale;
+        // log f = −ln(π) − ln(γ) − ln(1 + z²)
+        -LN_PI - self.scale.ln() - (z * z).ln_1p()
+    }
+    fn clone_box(&self) -> Box<dyn Distribution<f64>> {
+        Box::new(*self)
+    }
+}
+
+/// The Laplace (double-exponential) distribution `Laplace(μ, b)`.
+///
+/// A symmetric distribution with a sharp peak at `μ` and exponential tails;
+/// its log-density is `−|x−μ|/b` up to a constant, which is why it underlies
+/// L1/LASSO-style priors.
+///
+/// Mathematical Properties:
+/// - **Support**: (-∞, +∞)
+/// - **PDF**: f(x) = (1/(2b))·exp(−|x−μ|/b)
+/// - **Mean**: μ
+/// - **Variance**: 2b²
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// // Sparsity-inducing prior on a coefficient.
+/// let coef = sample(addr!("w"), Laplace::new(0.0, 1.0).unwrap());
+/// ```
+#[derive(Clone, Copy, Debug)]
+pub struct Laplace {
+    /// Location (mean) parameter μ.
+    loc: f64,
+    /// Scale parameter b (must be positive).
+    scale: f64,
+}
+impl Laplace {
+    /// Create a new Laplace distribution with validated parameters.
+    pub fn new(loc: f64, scale: f64) -> crate::error::FugueResult<Self> {
+        if !loc.is_finite() {
+            return Err(crate::error::FugueError::invalid_parameters(
+                "Laplace",
+                "Location (loc) must be finite",
+                crate::error::ErrorCode::InvalidMean,
+            )
+            .with_context("loc", format!("{}", loc)));
+        }
+        if scale <= 0.0 || !scale.is_finite() {
+            return Err(crate::error::FugueError::invalid_parameters(
+                "Laplace",
+                "Scale must be positive and finite",
+                crate::error::ErrorCode::InvalidVariance,
+            )
+            .with_context("scale", format!("{}", scale))
+            .with_context("expected", "> 0.0 and finite"));
+        }
+        Ok(Laplace { loc, scale })
+    }
+
+    /// Get the location (mean) parameter μ.
+    pub fn loc(&self) -> f64 {
+        self.loc
+    }
+
+    /// Get the scale parameter b.
+    pub fn scale(&self) -> f64 {
+        self.scale
+    }
+}
+impl Distribution<f64> for Laplace {
+    fn sample(&self, rng: &mut dyn RngCore) -> f64 {
+        if self.scale <= 0.0 {
+            return f64::NAN;
+        }
+        // Exact inverse-CDF sampling (rand_distr has no Laplace generator):
+        // draw u ∈ (−½, ½) and map through the quantile function. The sign of u
+        // picks the tail and −b·sign(u)·ln(1 − 2|u|) is the corresponding
+        // exponential deviate.
+        let u: f64 = rng.gen::<f64>() - 0.5;
+        self.loc - self.scale * u.signum() * (1.0 - 2.0 * u.abs()).ln()
+    }
+    fn log_prob(&self, x: &f64) -> LogF64 {
+        if self.scale <= 0.0 || !self.scale.is_finite() || !self.loc.is_finite() || !x.is_finite() {
+            return f64::NEG_INFINITY;
+        }
+        // log f = −ln(2b) − |x−μ|/b
+        -(2.0 * self.scale).ln() - (x - self.loc).abs() / self.scale
+    }
+    fn clone_box(&self) -> Box<dyn Distribution<f64>> {
+        Box::new(*self)
+    }
+}
+
+/// The Weibull distribution `Weibull(k, λ)` with shape `k` and scale `λ`.
+///
+/// A flexible positive distribution used for reliability/survival modeling;
+/// `k < 1` is a decreasing hazard, `k = 1` is the Exponential, and `k > 1` is
+/// an increasing hazard.
+///
+/// Mathematical Properties:
+/// - **Support**: [0, +∞)
+/// - **PDF**: f(x) = (k/λ)·(x/λ)^(k−1)·exp(−(x/λ)^k) for x ≥ 0
+/// - **Mean**: λ·Γ(1 + 1/k)
+/// - **Variance**: λ²·[Γ(1 + 2/k) − Γ(1 + 1/k)²]
+///
+/// Boundary semantics (matching `scipy.stats.weibull_min.logpdf`): at `x = 0`,
+/// `log_prob` is `−∞` when `k > 1`, `−ln(λ)` when `k == 1`, and `+∞` when
+/// `k < 1`.
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// // Time-to-failure prior with increasing hazard.
+/// let ttf = sample(addr!("t"), Weibull::new(1.5, 2.0).unwrap());
+/// ```
+#[derive(Clone, Copy, Debug)]
+pub struct Weibull {
+    /// Shape parameter k (must be positive).
+    shape: f64,
+    /// Scale parameter λ (must be positive).
+    scale: f64,
+}
+impl Weibull {
+    /// Create a new Weibull distribution with validated parameters.
+    pub fn new(shape: f64, scale: f64) -> crate::error::FugueResult<Self> {
+        if shape <= 0.0 || !shape.is_finite() {
+            return Err(crate::error::FugueError::invalid_parameters(
+                "Weibull",
+                "Shape parameter must be positive and finite",
+                crate::error::ErrorCode::InvalidShape,
+            )
+            .with_context("shape", format!("{}", shape))
+            .with_context("expected", "> 0.0 and finite"));
+        }
+        if scale <= 0.0 || !scale.is_finite() {
+            return Err(crate::error::FugueError::invalid_parameters(
+                "Weibull",
+                "Scale parameter must be positive and finite",
+                crate::error::ErrorCode::InvalidVariance,
+            )
+            .with_context("scale", format!("{}", scale))
+            .with_context("expected", "> 0.0 and finite"));
+        }
+        Ok(Weibull { shape, scale })
+    }
+
+    /// Get the shape parameter k.
+    pub fn shape(&self) -> f64 {
+        self.shape
+    }
+
+    /// Get the scale parameter λ.
+    pub fn scale(&self) -> f64 {
+        self.scale
+    }
+}
+impl Distribution<f64> for Weibull {
+    fn sample(&self, rng: &mut dyn RngCore) -> f64 {
+        if self.shape <= 0.0 || self.scale <= 0.0 {
+            return f64::NAN;
+        }
+        // rand_distr::Weibull::new takes (scale, shape) in that order.
+        RDWeibull::new(self.scale, self.shape).unwrap().sample(rng)
+    }
+    fn log_prob(&self, x: &f64) -> LogF64 {
+        if self.shape <= 0.0
+            || self.scale <= 0.0
+            || !self.shape.is_finite()
+            || !self.scale.is_finite()
+            || !x.is_finite()
+        {
+            return f64::NEG_INFINITY;
+        }
+        let x = *x;
+        if x < 0.0 {
+            return f64::NEG_INFINITY;
+        }
+        if x == 0.0 {
+            // Endpoint limit of (x/λ)^(k−1): k>1 ⇒ 0, k==1 ⇒ 1/λ, k<1 ⇒ ∞.
+            return if self.shape > 1.0 {
+                f64::NEG_INFINITY
+            } else if self.shape < 1.0 {
+                f64::INFINITY
+            } else {
+                -self.scale.ln()
+            };
+        }
+        // log f = ln(k) − k·ln(λ) + (k−1)·ln(x) − (x/λ)^k
+        self.shape.ln() - self.shape * self.scale.ln() + (self.shape - 1.0) * x.ln()
+            - (x / self.scale).powf(self.shape)
+    }
+    fn clone_box(&self) -> Box<dyn Distribution<f64>> {
+        Box::new(*self)
+    }
+}
+
+/// The chi-squared distribution `ChiSquared(k)` with `k` degrees of freedom.
+///
+/// The distribution of a sum of `k` squared standard normals; the special case
+/// `Gamma(k/2, 1/2)`. `k` need not be an integer.
+///
+/// Mathematical Properties:
+/// - **Support**: (0, +∞)
+/// - **PDF**: f(x) = 1/(2^(k/2)·Γ(k/2))·x^(k/2−1)·exp(−x/2)
+/// - **Mean**: k
+/// - **Variance**: 2k
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// // Sampling distribution of a scaled variance statistic.
+/// let s = sample(addr!("s"), ChiSquared::new(4.0).unwrap());
+/// ```
+#[derive(Clone, Copy, Debug)]
+pub struct ChiSquared {
+    /// Degrees of freedom k (must be positive).
+    k: f64,
+}
+impl ChiSquared {
+    /// Create a new chi-squared distribution with validated parameters.
+    pub fn new(k: f64) -> crate::error::FugueResult<Self> {
+        if k <= 0.0 || !k.is_finite() {
+            return Err(crate::error::FugueError::invalid_parameters(
+                "ChiSquared",
+                "Degrees of freedom must be positive and finite",
+                crate::error::ErrorCode::InvalidShape,
+            )
+            .with_context("k", format!("{}", k))
+            .with_context("expected", "> 0.0 and finite"));
+        }
+        Ok(ChiSquared { k })
+    }
+
+    /// Get the degrees of freedom k.
+    pub fn k(&self) -> f64 {
+        self.k
+    }
+}
+impl Distribution<f64> for ChiSquared {
+    fn sample(&self, rng: &mut dyn RngCore) -> f64 {
+        if self.k <= 0.0 {
+            return f64::NAN;
+        }
+        RDChiSquared::new(self.k).unwrap().sample(rng)
+    }
+    fn log_prob(&self, x: &f64) -> LogF64 {
+        if self.k <= 0.0 || !self.k.is_finite() || !x.is_finite() {
+            return f64::NEG_INFINITY;
+        }
+        if *x <= 0.0 {
+            return f64::NEG_INFINITY;
+        }
+        // log f = −(k/2)·ln(2) − lnΓ(k/2) + (k/2 − 1)·ln(x) − x/2
+        let half_k = self.k / 2.0;
+        -half_k * std::f64::consts::LN_2 - libm::lgamma(half_k) + (half_k - 1.0) * x.ln() - x / 2.0
+    }
+    fn clone_box(&self) -> Box<dyn Distribution<f64>> {
+        Box::new(*self)
+    }
+}
+
+/// The inverse-gamma distribution `InverseGamma(α, β)` with shape `α` and rate
+/// `β`.
+///
+/// If `X ~ InverseGamma(α, β)` then `1/X ~ Gamma(α, rate = β)` — hence the
+/// second parameter is named `rate` to parallel [`Gamma`]. It is the standard
+/// conjugate prior for the variance of a Normal.
+///
+/// Mathematical Properties:
+/// - **Support**: (0, +∞)
+/// - **PDF**: f(x) = β^α/Γ(α)·x^(−α−1)·exp(−β/x)
+/// - **Mean**: β/(α−1) for α > 1
+/// - **Variance**: β²/((α−1)²(α−2)) for α > 2
+///
+/// This matches `scipy.stats.invgamma.logpdf(x, a = α, scale = β)`.
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// // Conjugate prior for an unknown variance.
+/// let var = sample(addr!("sigma2"), InverseGamma::new(3.0, 2.0).unwrap());
+/// ```
+#[derive(Clone, Copy, Debug)]
+pub struct InverseGamma {
+    /// Shape parameter α (must be positive).
+    shape: f64,
+    /// Rate parameter β (must be positive).
+    rate: f64,
+}
+impl InverseGamma {
+    /// Create a new inverse-gamma distribution with validated parameters.
+    pub fn new(shape: f64, rate: f64) -> crate::error::FugueResult<Self> {
+        if shape <= 0.0 || !shape.is_finite() {
+            return Err(crate::error::FugueError::invalid_parameters(
+                "InverseGamma",
+                "Shape parameter must be positive and finite",
+                crate::error::ErrorCode::InvalidShape,
+            )
+            .with_context("shape", format!("{}", shape))
+            .with_context("expected", "> 0.0 and finite"));
+        }
+        if rate <= 0.0 || !rate.is_finite() {
+            return Err(crate::error::FugueError::invalid_parameters(
+                "InverseGamma",
+                "Rate parameter must be positive and finite",
+                crate::error::ErrorCode::InvalidRate,
+            )
+            .with_context("rate", format!("{}", rate))
+            .with_context("expected", "> 0.0 and finite"));
+        }
+        Ok(InverseGamma { shape, rate })
+    }
+
+    /// Get the shape parameter α.
+    pub fn shape(&self) -> f64 {
+        self.shape
+    }
+
+    /// Get the rate parameter β.
+    pub fn rate(&self) -> f64 {
+        self.rate
+    }
+}
+impl Distribution<f64> for InverseGamma {
+    fn sample(&self, rng: &mut dyn RngCore) -> f64 {
+        if self.shape <= 0.0 || self.rate <= 0.0 {
+            return f64::NAN;
+        }
+        // X = 1/Y with Y ~ Gamma(shape = α, rate = β). rand_distr::Gamma takes a
+        // scale, so pass scale = 1/β.
+        let y = RDGamma::new(self.shape, 1.0 / self.rate)
+            .unwrap()
+            .sample(rng);
+        1.0 / y
+    }
+    fn log_prob(&self, x: &f64) -> LogF64 {
+        if self.shape <= 0.0
+            || self.rate <= 0.0
+            || !self.shape.is_finite()
+            || !self.rate.is_finite()
+            || !x.is_finite()
+        {
+            return f64::NEG_INFINITY;
+        }
+        if *x <= 0.0 {
+            return f64::NEG_INFINITY;
+        }
+        // log f = α·ln(β) − lnΓ(α) − (α+1)·ln(x) − β/x
+        self.shape * self.rate.ln()
+            - libm::lgamma(self.shape)
+            - (self.shape + 1.0) * x.ln()
+            - self.rate / x
+    }
+    fn clone_box(&self) -> Box<dyn Distribution<f64>> {
+        Box::new(*self)
+    }
+}
+
+/// A discrete distribution assigning equal probability to every integer in an
+/// inclusive range `[low, high]`, returning `i64`.
+///
+/// This is the first-class consumer of the `i64` sample path (`ChoiceValue::I64`
+/// end-to-end through sample/observe/replay/score).
+///
+/// Mathematical Properties:
+/// - **Support**: {low, low+1, ..., high}
+/// - **PMF**: P(X = k) = 1/(high − low + 1) for low ≤ k ≤ high, 0 otherwise
+/// - **Mean**: (low + high) / 2
+/// - **Variance**: ((high − low + 1)² − 1) / 12
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// // A fair six-sided die labelled 1..=6.
+/// let die = sample(addr!("die"), DiscreteUniform::new(1, 6).unwrap());
+/// // Condition on an observed roll.
+/// let obs = observe(addr!("roll"), DiscreteUniform::new(1, 6).unwrap(), 4i64);
+/// ```
+#[derive(Clone, Copy, Debug)]
+pub struct DiscreteUniform {
+    /// Inclusive lower bound.
+    low: i64,
+    /// Inclusive upper bound (must satisfy `high >= low`).
+    high: i64,
+}
+impl DiscreteUniform {
+    /// Create a new discrete-uniform distribution over the inclusive range
+    /// `[low, high]`.
+    pub fn new(low: i64, high: i64) -> crate::error::FugueResult<Self> {
+        if high < low {
+            return Err(crate::error::FugueError::invalid_parameters(
+                "DiscreteUniform",
+                "Upper bound must be >= lower bound",
+                crate::error::ErrorCode::InvalidRange,
+            )
+            .with_context("low", format!("{}", low))
+            .with_context("high", format!("{}", high)));
+        }
+        Ok(DiscreteUniform { low, high })
+    }
+
+    /// Get the inclusive lower bound.
+    pub fn low(&self) -> i64 {
+        self.low
+    }
+
+    /// Get the inclusive upper bound.
+    pub fn high(&self) -> i64 {
+        self.high
+    }
+
+    /// Number of points in the support (`high − low + 1`).
+    pub fn len(&self) -> u64 {
+        // `high >= low` is a constructor invariant, so the difference is
+        // non-negative and `+ 1` cannot overflow for any valid range whose span
+        // fits in i64 (the whole i64 range would need u64 to count, which this
+        // still represents correctly).
+        (self.high as i128 - self.low as i128 + 1) as u64
+    }
+
+    /// Whether the support is empty. Always `false` for a validly-constructed
+    /// distribution (kept for clippy's `len`/`is_empty` pairing).
+    pub fn is_empty(&self) -> bool {
+        false
+    }
+}
+impl Distribution<i64> for DiscreteUniform {
+    fn sample(&self, rng: &mut dyn RngCore) -> i64 {
+        if self.high < self.low {
+            return self.low;
+        }
+        let n = self.len();
+        // Draw an offset in [0, n) and shift; done in i128 to avoid any overflow
+        // at the extremes of the i64 range.
+        let offset = Rng::gen_range(rng, 0..n) as i128;
+        (self.low as i128 + offset) as i64
+    }
+    fn log_prob(&self, x: &i64) -> LogF64 {
+        if self.high < self.low {
+            return f64::NEG_INFINITY;
+        }
+        if *x < self.low || *x > self.high {
+            return f64::NEG_INFINITY;
+        }
+        // log P = −ln(n)
+        -(self.len() as f64).ln()
+    }
+    fn clone_box(&self) -> Box<dyn Distribution<i64>> {
+        Box::new(*self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1524,5 +2168,215 @@ mod tests {
             // ~1.1e-2 is > 7 std for the tightest bin at N = 40_000.
             assert!((counts[k] as f64 / n as f64 - p).abs() < 1.1e-2);
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // FG-31: the seven new distributions.
+    // -------------------------------------------------------------------------
+
+    // FG-31: interior-point log_prob against the scipy-equivalent closed forms.
+    // Constants were derived with the standard log-pdf expressions in python3
+    // (math.lgamma), identical to `scipy.stats.<dist>.logpdf`.
+    #[test]
+    fn fg31_new_distributions_interior_point_log_prob() {
+        // scipy: stats.t.logpdf(2.5, 3, 1, 2)
+        close(
+            StudentT::new(3.0, 1.0, 2.0).unwrap().log_prob(&2.5),
+            -2.0377365440367736,
+        );
+        // scipy: stats.t.logpdf(0.0, 5, 0, 1)
+        close(
+            StudentT::new(5.0, 0.0, 1.0).unwrap().log_prob(&0.0),
+            -0.9686195890547249,
+        );
+        // scipy: stats.t.logpdf(1.0, 10, 2, 0.5)
+        close(
+            StudentT::new(10.0, 2.0, 0.5).unwrap().log_prob(&1.0),
+            -2.1013474730076767,
+        );
+        // scipy: stats.cauchy.logpdf(1.5, 0, 1)
+        close(
+            Cauchy::new(0.0, 1.0).unwrap().log_prob(&1.5),
+            -2.3233848821910463,
+        );
+        // scipy: stats.cauchy.logpdf(5.0, 2, 3)
+        close(
+            Cauchy::new(2.0, 3.0).unwrap().log_prob(&5.0),
+            -2.9364893550774553,
+        );
+        // scipy: stats.laplace.logpdf(1.5, 0, 1)
+        close(
+            Laplace::new(0.0, 1.0).unwrap().log_prob(&1.5),
+            -2.1931471805599454,
+        );
+        // scipy: stats.laplace.logpdf(-0.5, 1, 2)
+        close(
+            Laplace::new(1.0, 2.0).unwrap().log_prob(&-0.5),
+            -2.136294361119891,
+        );
+        // scipy: stats.weibull_min.logpdf(1.0, 1.5, scale=2)
+        close(
+            Weibull::new(1.5, 2.0).unwrap().log_prob(&1.0),
+            -0.9878090533250272,
+        );
+        // scipy: stats.weibull_min.logpdf(2.0, 2.0, scale=1.5)
+        close(
+            Weibull::new(2.0, 1.5).unwrap().log_prob(&2.0),
+            -1.2024136328742159,
+        );
+        // scipy: stats.chi2.logpdf(3.0, 4)
+        close(
+            ChiSquared::new(4.0).unwrap().log_prob(&3.0),
+            -1.7876820724517808,
+        );
+        // scipy: stats.chi2.logpdf(0.5, 1)
+        close(
+            ChiSquared::new(1.0).unwrap().log_prob(&0.5),
+            -0.8223649429247004,
+        );
+        // scipy: stats.chi2.logpdf(2.0, 2.5)
+        close(
+            ChiSquared::new(2.5).unwrap().log_prob(&2.0),
+            -1.5948753441381327,
+        );
+        // scipy: stats.invgamma.logpdf(1.5, 3, scale=2)
+        close(
+            InverseGamma::new(3.0, 2.0).unwrap().log_prob(&1.5),
+            -1.5688994046461,
+        );
+        // scipy: stats.invgamma.logpdf(0.5, 2, scale=1)
+        close(
+            InverseGamma::new(2.0, 1.0).unwrap().log_prob(&0.5),
+            0.07944154167983575,
+        );
+        // DiscreteUniform over {-2,...,5}: 8 points, log P = -ln(8).
+        close(
+            DiscreteUniform::new(-2, 5).unwrap().log_prob(&0),
+            -2.0794415416798357,
+        );
+    }
+
+    // FG-31: constructor validation and support/boundary behavior.
+    #[test]
+    fn fg31_new_distributions_validation_and_support() {
+        // Constructor validation.
+        assert!(StudentT::new(0.0, 0.0, 1.0).is_err()); // df must be > 0
+        assert!(StudentT::new(3.0, f64::NAN, 1.0).is_err());
+        assert!(StudentT::new(3.0, 0.0, 0.0).is_err()); // scale must be > 0
+        assert!(Cauchy::new(0.0, -1.0).is_err());
+        assert!(Cauchy::new(f64::INFINITY, 1.0).is_err());
+        assert!(Laplace::new(0.0, 0.0).is_err());
+        assert!(Weibull::new(0.0, 1.0).is_err());
+        assert!(Weibull::new(1.0, 0.0).is_err());
+        assert!(ChiSquared::new(0.0).is_err());
+        assert!(ChiSquared::new(-1.0).is_err());
+        assert!(InverseGamma::new(0.0, 1.0).is_err());
+        assert!(InverseGamma::new(1.0, 0.0).is_err());
+        assert!(DiscreteUniform::new(5, 4).is_err()); // high < low
+
+        // Support boundaries.
+        assert_eq!(
+            Weibull::new(2.0, 1.0).unwrap().log_prob(&-0.5),
+            f64::NEG_INFINITY
+        );
+        // Weibull endpoint limits at x = 0.
+        assert_eq!(
+            Weibull::new(2.0, 1.0).unwrap().log_prob(&0.0),
+            f64::NEG_INFINITY
+        ); // k > 1
+        close(
+            Weibull::new(1.0, 2.0).unwrap().log_prob(&0.0),
+            -(2.0f64).ln(),
+        ); // k == 1
+        assert_eq!(
+            Weibull::new(0.5, 1.0).unwrap().log_prob(&0.0),
+            f64::INFINITY
+        ); // k < 1
+        assert_eq!(
+            ChiSquared::new(3.0).unwrap().log_prob(&0.0),
+            f64::NEG_INFINITY
+        );
+        assert_eq!(
+            ChiSquared::new(3.0).unwrap().log_prob(&-1.0),
+            f64::NEG_INFINITY
+        );
+        assert_eq!(
+            InverseGamma::new(2.0, 1.0).unwrap().log_prob(&0.0),
+            f64::NEG_INFINITY
+        );
+        // StudentT/Cauchy/Laplace are full-support: finite everywhere finite.
+        assert!(StudentT::new(2.0, 0.0, 1.0)
+            .unwrap()
+            .log_prob(&-100.0)
+            .is_finite());
+        assert!(Cauchy::new(0.0, 1.0).unwrap().log_prob(&1e6).is_finite());
+        assert!(Laplace::new(0.0, 1.0).unwrap().log_prob(&-42.0).is_finite());
+        // DiscreteUniform: outside the inclusive range -> -inf.
+        let du = DiscreteUniform::new(1, 6).unwrap();
+        assert_eq!(du.log_prob(&0), f64::NEG_INFINITY);
+        assert_eq!(du.log_prob(&7), f64::NEG_INFINITY);
+        assert!(du.log_prob(&1).is_finite());
+        assert!(du.log_prob(&6).is_finite());
+        assert_eq!(du.len(), 6);
+    }
+
+    // FG-31: seeded moment sanity — sample means/variances match analytic
+    // values within Monte-Carlo tolerance. Tolerances are set well above the
+    // standard error at N = 60_000 so the seeded assertions are stable.
+    #[test]
+    fn fg31_new_distributions_moment_sanity() {
+        let mut rng = StdRng::seed_from_u64(31);
+        let n = 60_000usize;
+
+        // Helper: sample mean of a distribution.
+        fn mean_of(d: &impl Distribution<f64>, rng: &mut StdRng, n: usize) -> f64 {
+            (0..n).map(|_| d.sample(rng)).sum::<f64>() / n as f64
+        }
+
+        // StudentT(df=6, loc=1, scale=2): mean = loc = 1 (df > 1).
+        let t = StudentT::new(6.0, 1.0, 2.0).unwrap();
+        assert!((mean_of(&t, &mut rng, n) - 1.0).abs() < 0.1);
+
+        // Laplace(0, 2): mean 0, variance 2b^2 = 8.
+        let lap = Laplace::new(0.0, 2.0).unwrap();
+        let lap_samples: Vec<f64> = (0..n).map(|_| lap.sample(&mut rng)).collect();
+        let lap_mean = lap_samples.iter().sum::<f64>() / n as f64;
+        let lap_var = lap_samples
+            .iter()
+            .map(|x| (x - lap_mean).powi(2))
+            .sum::<f64>()
+            / n as f64;
+        assert!(lap_mean.abs() < 0.1);
+        assert!((lap_var - 8.0).abs() < 0.6);
+
+        // Weibull(shape=2, scale=1.5): mean = scale*Γ(1+1/2) = 1.3293403881791368.
+        let w = Weibull::new(2.0, 1.5).unwrap();
+        assert!((mean_of(&w, &mut rng, n) - 1.3293403881791368).abs() < 0.05);
+
+        // ChiSquared(4): mean 4, variance 2k = 8.
+        let c = ChiSquared::new(4.0).unwrap();
+        let c_samples: Vec<f64> = (0..n).map(|_| c.sample(&mut rng)).collect();
+        let c_mean = c_samples.iter().sum::<f64>() / n as f64;
+        let c_var = c_samples.iter().map(|x| (x - c_mean).powi(2)).sum::<f64>() / n as f64;
+        assert!((c_mean - 4.0).abs() < 0.1);
+        assert!((c_var - 8.0).abs() < 0.6);
+
+        // InverseGamma(shape=4, rate=3): mean = β/(α-1) = 1.
+        let ig = InverseGamma::new(4.0, 3.0).unwrap();
+        assert!((mean_of(&ig, &mut rng, n) - 1.0).abs() < 0.05);
+
+        // Cauchy: no mean; check the empirical MEDIAN converges to loc instead.
+        let cau = Cauchy::new(2.0, 1.0).unwrap();
+        let mut cau_samples: Vec<f64> = (0..n).map(|_| cau.sample(&mut rng)).collect();
+        cau_samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let median = cau_samples[n / 2];
+        assert!((median - 2.0).abs() < 0.1);
+
+        // DiscreteUniform(1, 6): mean 3.5, in-range always.
+        let du = DiscreteUniform::new(1, 6).unwrap();
+        let du_samples: Vec<i64> = (0..n).map(|_| du.sample(&mut rng)).collect();
+        assert!(du_samples.iter().all(|&k| (1..=6).contains(&k)));
+        let du_mean = du_samples.iter().map(|&k| k as f64).sum::<f64>() / n as f64;
+        assert!((du_mean - 3.5).abs() < 0.05);
     }
 }

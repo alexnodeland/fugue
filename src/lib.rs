@@ -16,12 +16,13 @@ pub mod runtime;
 pub use core::address::Address;
 // `addr!` macro is exported at the crate root via #[macro_export]
 pub use core::distribution::{
-    Bernoulli, Beta, Binomial, Categorical, Distribution, Exponential, Gamma, LogNormal, Normal,
-    Poisson, Uniform,
+    Bernoulli, Beta, Binomial, Categorical, Cauchy, ChiSquared, DiscreteUniform, Distribution,
+    Exponential, Gamma, InverseGamma, Laplace, LogNormal, Normal, Poisson, StudentT, Uniform,
+    Weibull,
 };
 pub use core::model::{
-    factor, guard, observe, pure, sample, sample_bool, sample_f64, sample_u64, sample_usize,
-    sequence_vec, traverse_vec, zip, Model, ModelExt, SampleType,
+    factor, guard, observe, pure, sample, sample_bool, sample_f64, sample_i64, sample_u64,
+    sample_usize, sequence_vec, traverse_vec, zip, Model, ModelExt, SampleType,
 };
 pub use runtime::handler::Handler;
 pub use runtime::interpreters::{
@@ -40,6 +41,7 @@ pub use inference::diagnostics::{
     extract_u64_values, extract_usize_values, print_diagnostics, r_hat_f64,
     summarize_f64_parameter, Diagnostics, ParameterSummary,
 };
+pub use inference::hmc::{hmc_chain, HMCConfig};
 pub use inference::mcmc_utils::{
     effective_sample_size_mcmc, effective_sample_size_multichain, geweke_diagnostic,
     DiminishingAdaptation,
