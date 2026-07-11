@@ -180,7 +180,7 @@ All code examples in these guides are:
 | ------------------------ | ------------------------------------------------------------- | ---------------------------- |
 | Understand distributions | [Working with Distributions](./working-with-distributions.md) | Type safety, validation      |
 | Build complex models     | [Building Complex Models](./building-complex-models.md)       | Macros, composition          |
-| Optimize performance     | [Optimizing Performance](./optimizing-performance.md)         | Memory pooling, numerics     |
+| Optimize performance     | [Optimizing Performance](./optimizing-performance.md)         | Numerical stability, batch processing |
 | Debug model issues       | [Debugging Models](./debugging-models.md)                     | Trace analysis, diagnostics  |
 | Extend functionality     | [Custom Handlers](./custom-handlers.md)                       | Handler patterns, decorators |
 | Deploy to production     | [Production Deployment](./production-deployment.md)           | Fault tolerance, monitoring  |

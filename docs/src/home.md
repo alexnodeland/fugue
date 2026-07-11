@@ -42,7 +42,7 @@ Check out these resources to get started:
 - 🔒 **Type-Safe Distributions**: 17 built-in probability distributions with natural return types
 - 📊 **Multiple Inference Methods**: MCMC, HMC, SMC, Variational Inference, ABC (see [Advanced Inference](./tutorials/advanced-inference/README.md))
 - 🔍 **Comprehensive Diagnostics**: R-hat convergence, effective sample size, validation
-- ⚡ **Numerically Stable**: Log-space computations and memory optimization throughout
+- ⚡ **Numerically Stable**: Log-space computations throughout for robust probability arithmetic
 - ✨ **Ergonomic Macros**: Do-notation (`prob!`), vectorization (`plate!`), addressing (`addr!`)
 
 ```admonish note title="🧪 Where Fugue stands today"

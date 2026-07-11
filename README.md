@@ -30,7 +30,7 @@
 - **Type-Safe Distributions**: 17 built-in probability distributions with natural return types
 - **Multiple Inference Methods**: MCMC, HMC, SMC, Variational Inference, ABC
 - **Comprehensive Diagnostics**: R-hat convergence, effective sample size, validation
-- **Numerically Stable**: Log-space computations and memory optimization throughout
+- **Numerically Stable**: Log-space computations throughout for robust probability arithmetic
 - **Ergonomic Macros**: Do-notation (`prob!`), vectorization (`plate!`), addressing (`addr!`)
 
 ## 🤔 Why Fugue?
@@ -39,7 +39,7 @@
 - 🧩 **Direct-style, monadic design**: compose `Model<T>` values with `bind/map` for explicit, readable control flow
 - 🔌 **Pluggable interpreters**: prior sampling, replay, scoring, and safe variants
 - 📊 **Diagnostics**: R-hat, ESS, validation utilities, and a structured error taxonomy (see [`error`](https://docs.rs/fugue-ppl/latest/fugue/error/))
-- ⚡ **Performance-minded**: memory pooling, copy-on-write traces, and numerically stable computations
+- ⚡ **Performance-minded**: O(1), allocation-free address clones (`Arc<str>` with a cached hash) and numerically stable log-space computations
 
 ## 📦 Distributions
 

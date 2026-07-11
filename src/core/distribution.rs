@@ -1863,12 +1863,30 @@ impl DiscreteUniform {
     }
 
     /// Number of points in the support (`high − low + 1`).
+    ///
+    /// Exact for every range except the full `i64` domain, whose support has
+    /// `2^64` points — one more than fits in `u64` — so `len()` **saturates to
+    /// `u64::MAX`** for `DiscreteUniform::new(i64::MIN, i64::MAX)`. Sampling and
+    /// scoring never round-trip through `len()`; they use the exact `u128`
+    /// [`Self::count`], so the full-range case is handled correctly regardless.
     pub fn len(&self) -> u64 {
-        // `high >= low` is a constructor invariant, so the difference is
-        // non-negative and `+ 1` cannot overflow for any valid range whose span
-        // fits in i64 (the whole i64 range would need u64 to count, which this
-        // still represents correctly).
-        (self.high as i128 - self.low as i128 + 1) as u64
+        u64::try_from(self.count()).unwrap_or(u64::MAX)
+    }
+
+    /// Exact number of support points as a `u128`.
+    ///
+    /// `high >= low` is a constructor invariant, so `high − low` ranges over
+    /// `[0, 2^64 − 1]` and `+ 1` over `[1, 2^64]` — always representable in
+    /// `u128`. Only the full `i64` domain reaches `2^64`.
+    fn count(&self) -> u128 {
+        (self.high as i128 - self.low as i128 + 1) as u128
+    }
+
+    /// Whether `[low, high]` spans the entire `i64` domain. This is the one range
+    /// whose `2^64`-point support overflows a `u64` offset, so `sample`/`log_prob`
+    /// special-case it.
+    fn is_full_i64_range(&self) -> bool {
+        self.low == i64::MIN && self.high == i64::MAX
     }
 
     /// Whether the support is empty. Always `false` for a validly-constructed
@@ -1882,9 +1900,17 @@ impl Distribution<i64> for DiscreteUniform {
         if self.high < self.low {
             return self.low;
         }
-        let n = self.len();
-        // Draw an offset in [0, n) and shift; done in i128 to avoid any overflow
-        // at the extremes of the i64 range.
+        if self.is_full_i64_range() {
+            // The support IS the whole i64 domain, so a raw uniform i64 draw is
+            // already a uniform sample over [low, high]. The offset arithmetic
+            // below is unusable here: the count is 2^64, which does not fit in the
+            // u64 that `gen_range` needs.
+            return Rng::gen::<i64>(rng);
+        }
+        // The range is not full, so the count fits in u64. Draw an offset in
+        // [0, n) and shift; the shift is done in i128 to avoid any overflow at the
+        // extremes of the i64 range.
+        let n = self.count() as u64;
         let offset = Rng::gen_range(rng, 0..n) as i128;
         (self.low as i128 + offset) as i64
     }
@@ -1895,8 +1921,14 @@ impl Distribution<i64> for DiscreteUniform {
         if *x < self.low || *x > self.high {
             return f64::NEG_INFINITY;
         }
-        // log P = −ln(n)
-        -(self.len() as f64).ln()
+        // log P = −ln(n). For the full i64 domain n = 2^64, whose logarithm is
+        // exactly 64·ln 2; computing it directly is both exact and avoids the
+        // `2^64 as f64` round-trip.
+        if self.is_full_i64_range() {
+            -(64.0 * std::f64::consts::LN_2)
+        } else {
+            -(self.count() as f64).ln()
+        }
     }
     fn clone_box(&self) -> Box<dyn Distribution<i64>> {
         Box::new(*self)
@@ -2482,5 +2514,80 @@ mod tests {
                 .code(),
             ErrorCode::InvalidRange
         );
+    }
+
+    // Re-verification (low): `DiscreteUniform` over the full i64 domain has a
+    // support of 2^64 points. The pre-fix `len()` computed the count as
+    // `(high - low + 1) as u64`, which truncates 2^64 to 0 — so `sample()`
+    // panicked on `gen_range(0..0)` and `log_prob()` for an in-range `x` returned
+    // `-(0.0).ln() = +INF`. The fix keeps the count in `u128`, samples the full
+    // domain with a raw uniform `i64`, and scores it as `-64·ln 2`.
+    #[test]
+    fn discrete_uniform_full_i64_range_samples_and_scores() {
+        let du = DiscreteUniform::new(i64::MIN, i64::MAX).unwrap();
+
+        // `len()` saturates (2^64 doesn't fit in u64) but the distribution stays
+        // usable.
+        assert_eq!(du.len(), u64::MAX);
+        assert!(!du.is_empty());
+
+        // sample() must not panic and must return real i64 values across the whole
+        // domain (seeded for determinism). A truncated count would panic here.
+        let mut rng = StdRng::seed_from_u64(0xF017_2026);
+        let mut saw_negative = false;
+        let mut saw_positive = false;
+        for _ in 0..10_000 {
+            let x = du.sample(&mut rng);
+            // Every i64 is in support, so log_prob is finite for every draw.
+            assert!(du.log_prob(&x).is_finite());
+            saw_negative |= x < 0;
+            saw_positive |= x > 0;
+        }
+        // A raw uniform i64 spans both signs; a broken offset path (or a fixed
+        // low) would not.
+        assert!(
+            saw_negative && saw_positive,
+            "full-range sampler is not uniform"
+        );
+
+        // log_prob for any in-range x is exactly -ln(2^64) = -64·ln 2. The pre-fix
+        // code returned +INF here.
+        let expected = -(64.0 * std::f64::consts::LN_2);
+        for &x in &[i64::MIN, -1_000_000_i64, -1, 0, 1, 1_000_000_i64, i64::MAX] {
+            let lp = du.log_prob(&x);
+            assert!(
+                (lp - expected).abs() < 1e-12,
+                "full-range log_prob({x}) = {lp}, expected {expected}"
+            );
+        }
+    }
+
+    // Re-verification (low): ranges one short of the full domain (span 2^64 − 1,
+    // the largest that fits in a u64 count) must still sample without overflow and
+    // score as -ln(2^64 − 1).
+    #[test]
+    fn discrete_uniform_near_full_ranges_are_exact() {
+        let mut rng = StdRng::seed_from_u64(0xBEEF_2026);
+
+        for du in [
+            DiscreteUniform::new(i64::MIN, i64::MAX - 1).unwrap(),
+            DiscreteUniform::new(i64::MIN + 1, i64::MAX).unwrap(),
+        ] {
+            // Count = 2^64 − 1 fits exactly in u64.
+            assert_eq!(du.len(), u64::MAX);
+            let expected = -((u64::MAX as f64).ln());
+            for _ in 0..2_000 {
+                let x = du.sample(&mut rng);
+                assert!(du.log_prob(&x).is_finite());
+            }
+            // In-range score is -ln(2^64 − 1); the excluded endpoint is -inf.
+            close(du.log_prob(&0), expected);
+            let excluded = if du.high() == i64::MAX - 1 {
+                i64::MAX
+            } else {
+                i64::MIN
+            };
+            assert_eq!(du.log_prob(&excluded), f64::NEG_INFINITY);
+        }
     }
 }

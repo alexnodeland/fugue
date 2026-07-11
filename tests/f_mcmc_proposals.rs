@@ -194,7 +194,10 @@ fn fg10_categorical_prior_resample_recovers_posterior() {
 
     let l1: f64 = emp.iter().zip(&expected).map(|(a, b)| (a - b).abs()).sum();
     // Aggregate L1: fixed ≈ 0.012, pre-fix ≈ 0.07.
-    assert!(l1 < 0.03, "categorical posterior L1 error {l1:.4} too large");
+    assert!(
+        l1 < 0.03,
+        "categorical posterior L1 error {l1:.4} too large"
+    );
     for k in 0..8 {
         // Per-category: fixed < 0.006, pre-fix up to 0.029 (k=5,7).
         assert!(
@@ -235,7 +238,10 @@ fn fg10_categorical_top_categories_reachable_for_large_k() {
     );
     // And the whole high-index tail is unbiased.
     let l1: f64 = emp.iter().zip(&expected).map(|(a, b)| (a - b).abs()).sum();
-    assert!(l1 < 0.03, "K=12 categorical posterior L1 error {l1:.4} too large");
+    assert!(
+        l1 < 0.03,
+        "K=12 categorical posterior L1 error {l1:.4} too large"
+    );
 }
 
 // FG-41: the reflected discrete walk for count-valued (u64) latents must yield a

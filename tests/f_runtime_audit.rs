@@ -228,13 +228,11 @@ fn fg20_adaptive_chain_recovers_transdimensional_posterior() {
     let model_fn = || {
         sample(addr!("b"), Bernoulli::new(0.5).unwrap()).bind(|b| {
             if b {
-                sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
-                    .bind(move |x| {
-                        observe(addr!("y"), Normal::new(x, 1.0).unwrap(), 1.0).map(move |_| b)
-                    })
+                sample(addr!("x"), Normal::new(0.0, 1.0).unwrap()).bind(move |x| {
+                    observe(addr!("y"), Normal::new(x, 1.0).unwrap(), 1.0).map(move |_| b)
+                })
             } else {
-                observe(addr!("y"), Normal::new(2.0, 1.0).unwrap(), 1.0)
-                    .map(move |_| b)
+                observe(addr!("y"), Normal::new(2.0, 1.0).unwrap(), 1.0).map(move |_| b)
             }
         })
     };
@@ -258,10 +256,7 @@ fn fg20_adaptive_chain_recovers_transdimensional_posterior() {
         .filter_map(|(_, t)| t.get_f64(&addr!("x")))
         .collect();
     let ex = xs.iter().sum::<f64>() / xs.len() as f64;
-    assert!(
-        (ex - 0.5).abs() < 0.06,
-        "E[x|b=1] = {ex:.4}, expected 0.5"
-    );
+    assert!((ex - 0.5).abs() < 0.06, "E[x|b=1] = {ex:.4}, expected 0.5");
 
     // FG-20 ghost-choice cleanup: a b=false sample must NOT carry a stale "x".
     assert!(
@@ -285,15 +280,13 @@ fn fg21_adaptive_sampler_handles_branch_switching_addresses() {
     let model_fn = || {
         sample(addr!("sel"), Bernoulli::new(0.4).unwrap()).bind(|sel| {
             if sel {
-                sample(addr!("left"), Normal::new(-2.0, 1.0).unwrap())
-                    .bind(move |v| {
-                        observe(addr!("y"), Normal::new(v, 1.0).unwrap(), 0.5).map(move |_| sel)
-                    })
+                sample(addr!("left"), Normal::new(-2.0, 1.0).unwrap()).bind(move |v| {
+                    observe(addr!("y"), Normal::new(v, 1.0).unwrap(), 0.5).map(move |_| sel)
+                })
             } else {
-                sample(addr!("right"), Normal::new(2.0, 1.0).unwrap())
-                    .bind(move |v| {
-                        observe(addr!("y"), Normal::new(v, 1.0).unwrap(), 0.5).map(move |_| sel)
-                    })
+                sample(addr!("right"), Normal::new(2.0, 1.0).unwrap()).bind(move |v| {
+                    observe(addr!("y"), Normal::new(v, 1.0).unwrap(), 0.5).map(move |_| sel)
+                })
             }
         })
     };
@@ -323,7 +316,9 @@ fn fg21_adaptive_sampler_handles_branch_switching_addresses() {
         "a trace carried both branch addresses (ghost choice)"
     );
     assert!(
-        samples.iter().all(|(_, t)| t.total_log_weight().is_finite()),
+        samples
+            .iter()
+            .all(|(_, t)| t.total_log_weight().is_finite()),
         "a sampled trace had a non-finite weight"
     );
 
@@ -566,4 +561,88 @@ fn fg61_prob_accepts_tuple_and_struct_patterns() {
         model,
     );
     assert!((val - 3.0).abs() < 1e-12);
+}
+
+// Re-verification (low): FG-11 site-list cache invalidation must fire on set
+// changes that keep the site COUNT constant, not just count changes.
+//
+// The pre-remediation driver rebuilt the cached `sites` list only when
+// `sites.len() != current_trace.choices.len()`. A discrete switch that selects
+// `sample("a", Normal)` vs `sample("b", Normal)` — equal site counts in both
+// branches — changes WHICH addresses are active without changing the count, so
+// the stale list kept proposing the dead branch's address and never proposed the
+// now-active one. The FG-20/21 remediation replaced the length check with a
+// born/died `structure_changed` flag (see `adaptive_mcmc_chain_with_overrides`),
+// which fires on any address-set change including equal-count swaps.
+//
+// This guard drives that exact equal-count switching model through the chain and
+// asserts BOTH branch addresses are visited and BOTH branch-value marginals move
+// (positive sample variance) — i.e. the now-active site is actually proposed, not
+// frozen. It also asserts no ghost (both addresses at once) and finite weights.
+#[test]
+fn fg11_site_cache_invalidates_on_equal_count_branch_switch() {
+    let model_fn = || {
+        sample(addr!("sw"), Bernoulli::new(0.5).unwrap()).bind(|sw| {
+            if sw {
+                sample(addr!("a"), Normal::new(-3.0, 1.0).unwrap()).map(move |x| (sw, x))
+            } else {
+                sample(addr!("b"), Normal::new(3.0, 1.0).unwrap()).map(move |x| (sw, x))
+            }
+        })
+    };
+
+    let mut rng = StdRng::seed_from_u64(0x5175_2026);
+    let samples = adaptive_mcmc_chain(&mut rng, model_fn, 30_000, 5_000);
+    assert_eq!(samples.len(), 30_000);
+
+    let branch_vals = |addr: &Address| -> Vec<f64> {
+        samples
+            .iter()
+            .filter_map(|(_, t)| t.get_f64(addr))
+            .collect()
+    };
+    let variance = |xs: &[f64]| -> f64 {
+        let m = xs.iter().sum::<f64>() / xs.len() as f64;
+        xs.iter().map(|&x| (x - m).powi(2)).sum::<f64>() / xs.len() as f64
+    };
+
+    let a_vals = branch_vals(&addr!("a"));
+    let b_vals = branch_vals(&addr!("b"));
+
+    // Both equal-count branches must be reached as active proposal targets.
+    assert!(
+        !a_vals.is_empty() && !b_vals.is_empty(),
+        "chain froze on one branch (a={}, b={}); site cache did not invalidate on \
+         the equal-count set swap",
+        a_vals.len(),
+        b_vals.len()
+    );
+
+    // Both branch-value marginals must move — a frozen (never-proposed) site would
+    // collapse to a single value.
+    assert!(
+        variance(&a_vals) > 1e-6,
+        "branch 'a' value did not move (variance {:.2e})",
+        variance(&a_vals)
+    );
+    assert!(
+        variance(&b_vals) > 1e-6,
+        "branch 'b' value did not move (variance {:.2e})",
+        variance(&b_vals)
+    );
+
+    // No trace may carry both branch addresses at once (no stale ghost choice),
+    // and every trace must have a finite weight.
+    assert!(
+        samples.iter().all(|(_, t)| {
+            !(t.choices.contains_key(&addr!("a")) && t.choices.contains_key(&addr!("b")))
+        }),
+        "a trace carried both branch addresses (ghost choice)"
+    );
+    assert!(
+        samples
+            .iter()
+            .all(|(_, t)| t.total_log_weight().is_finite()),
+        "a sampled trace had a non-finite weight"
+    );
 }
