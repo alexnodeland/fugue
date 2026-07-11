@@ -65,8 +65,8 @@ cargo clippy -- -D warnings
 
 ### Pull Requests
 
-- Fork the repository and create a feature branch from `develop`
-- **Rebase your branch** to the top of `develop` before submitting PR
+- Fork the repository and create a short-lived feature branch from `main` (trunk-based development)
+- **Rebase your branch** to the top of `main` before submitting PR
 - Use **semantic commit messages** (e.g., `feat:`, `fix:`, `docs:`, `refactor:`)
 - Add tests for new functionality
 - **Ensure all CI checks pass** before requesting review
