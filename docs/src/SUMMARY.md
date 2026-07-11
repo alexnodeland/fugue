@@ -28,6 +28,10 @@
     - [Classification](./tutorials/statistical-modeling/classification.md)
     - [Mixture Models](./tutorials/statistical-modeling/mixture-models.md)
     - [Hierarchical Models](./tutorials/statistical-modeling/hierarchical-models.md)
+  - [Advanced Inference](./tutorials/advanced-inference/README.md)
+    - [Sequential Monte Carlo](./tutorials/advanced-inference/sequential-monte-carlo.md)
+    - [Approximate Bayesian Computation](./tutorials/advanced-inference/approximate-bayesian-computation.md)
+    - [Variational Inference](./tutorials/advanced-inference/variational-inference.md)
 
 ---
 

@@ -76,9 +76,9 @@ Models compile to efficient code with no runtime overhead.
 
 Separate model specification from execution strategy through handlers.
 
-### 📊 **Production Ready**
+### 📊 **Diagnostics Built In**
 
-Built-in diagnostics, memory optimization, and error handling.
+R-hat, effective sample size, memory-optimized traces, and a structured error taxonomy.
 
 ## Architecture Overview
 

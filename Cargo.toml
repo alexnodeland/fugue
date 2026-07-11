@@ -2,6 +2,21 @@
 name = "fugue-ppl"
 version = "0.1.0"
 edition = "2021"
+# Finding FG-51: the README previously claimed "1.70+" with nothing pinning or
+# verifying it. Verified empirically against real toolchains (not just
+# clippy's `incompatible_msrv` lint, which agrees): rustc 1.70.0 actually
+# fails to compile this crate for two independent reasons -- an `E0659`
+# ambiguous-name error on `pub mod core` vs. the `core` extern-prelude crate
+# (resolved by later rustc versions), and `usize::is_multiple_of` in
+# `src/inference/abc.rs`, stable only since 1.87.0. rustc 1.87.0 compiles
+# `[dependencies]` (the graph a downstream consumer actually pulls in)
+# cleanly with zero `incompatible_msrv` findings anywhere in the crate.
+# dev-dependencies (mdbook + plugins, criterion, proptest, ...) are NOT held
+# to this floor -- they're maintainer tooling, not part of the published
+# library -- so the MSRV CI job (.github/workflows/ci.yml) checks `--lib`
+# only, against a temporarily dev-dependency-free manifest. See that job's
+# comments for why.
+rust-version = "1.87"
 license = "MIT"
 description = "Monadic PPL with numerically stable inference and comprehensive diagnostics."
 readme = "README.md"

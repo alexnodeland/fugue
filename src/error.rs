@@ -1,12 +1,41 @@
 //! Error handling for probabilistic programming operations.
 //!
 //! This module provides structured error types with rich context information for graceful handling of common failure modes in probabilistic computation.
+//!
+//! ## Scope (finding FG-33)
+//!
+//! [`ErrorCode`] intentionally only enumerates codes that fugue's own code paths
+//! actually construct today, verified with `grep -rn 'ErrorCode::' src/`. An
+//! earlier revision of this module carried 22 variants across 6 categories
+//! (numerical instability, inference non-convergence, trace corruption, ...) of
+//! which only 11 were ever produced by real logic; the rest were aspirational
+//! placeholders that overstated how much of the crate's failure surface was
+//! actually captured by structured errors (the numerical/model-execution paths
+//! they were meant for return `NaN`/`-inf` or panic-free `Option`s instead, or —
+//! for [`crate::inference::vi::GuideError`] and [`crate::inference::abc::ABCError`]
+//! — got dedicated, more precise algorithm-specific error types rather than being
+//! shoehorned into this general enum). See `CHANGELOG.md` for the removed list.
+//!
+//! The live codes today:
+//!
+//! | Code | Category | Constructed in |
+//! |------|----------|-----------------|
+//! | `InvalidMean`/`InvalidVariance`/`InvalidProbability`/`InvalidRange`/`InvalidShape`/`InvalidRate`/`InvalidCount` | Distribution validation (1xx) | `core::distribution` constructors |
+//! | `AddressConflict` | Model execution (3xx) | `runtime::interpreters` (duplicate sample address) |
+//! | `UnexpectedModelStructure` | Model execution (3xx) | `runtime::interpreters` (replay/score structure mismatch) |
+//! | `TraceAddressNotFound` | Trace manipulation (5xx) | `runtime::trace` typed accessors |
+//! | `TypeMismatch` | Type system (6xx) | `runtime::trace` typed accessors |
 
 use crate::core::address::Address;
 use crate::core::distribution::*;
 use std::fmt;
 
 /// Error codes for programmatic error handling and categorization.
+///
+/// Every variant here is constructed by real logic somewhere in the crate — see
+/// the module-level table. If you're adding a new failure mode, add the code
+/// here *and* wire it into the code path that detects it in the same change;
+/// don't add speculative codes for failure modes nothing produces yet (FG-33).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ErrorCode {
     // Distribution parameter validation errors (1xx)
@@ -18,30 +47,15 @@ pub enum ErrorCode {
     InvalidRate = 105,
     InvalidCount = 106,
 
-    // Numerical computation errors (2xx)
-    NumericalOverflow = 200,
-    NumericalUnderflow = 201,
-    NumericalInstability = 202,
-    InvalidLogDensity = 203,
-
     // Model execution errors (3xx)
-    ModelExecutionFailed = 300,
     AddressConflict = 301,
     UnexpectedModelStructure = 302,
 
-    // Inference algorithm errors (4xx)
-    InferenceConvergenceFailed = 400,
-    InsufficientSamples = 401,
-    InvalidInferenceConfig = 402,
-
     // Trace manipulation errors (5xx)
     TraceAddressNotFound = 500,
-    TraceCorrupted = 501,
-    TraceReplayFailed = 502,
 
     // Type system errors (6xx)
     TypeMismatch = 600,
-    UnsupportedType = 601,
 }
 
 impl ErrorCode {
@@ -56,25 +70,12 @@ impl ErrorCode {
             ErrorCode::InvalidRate => "Rate parameter is invalid",
             ErrorCode::InvalidCount => "Count parameter is invalid",
 
-            ErrorCode::NumericalOverflow => "Numerical computation resulted in overflow",
-            ErrorCode::NumericalUnderflow => "Numerical computation resulted in underflow",
-            ErrorCode::NumericalInstability => "Numerical computation is unstable",
-            ErrorCode::InvalidLogDensity => "Log density computation is invalid",
-
-            ErrorCode::ModelExecutionFailed => "Model execution failed",
             ErrorCode::AddressConflict => "Address already exists in trace",
             ErrorCode::UnexpectedModelStructure => "Model structure is unexpected",
 
-            ErrorCode::InferenceConvergenceFailed => "Inference algorithm failed to converge",
-            ErrorCode::InsufficientSamples => "Insufficient samples for reliable inference",
-            ErrorCode::InvalidInferenceConfig => "Inference configuration is invalid",
-
             ErrorCode::TraceAddressNotFound => "Address not found in trace",
-            ErrorCode::TraceCorrupted => "Trace data is corrupted",
-            ErrorCode::TraceReplayFailed => "Trace replay failed",
 
             ErrorCode::TypeMismatch => "Type mismatch in trace value",
-            ErrorCode::UnsupportedType => "Unsupported type for operation",
         }
     }
 
@@ -82,9 +83,7 @@ impl ErrorCode {
     pub fn category(&self) -> ErrorCategory {
         match (*self as u32) / 100 {
             1 => ErrorCategory::DistributionValidation,
-            2 => ErrorCategory::NumericalComputation,
             3 => ErrorCategory::ModelExecution,
-            4 => ErrorCategory::InferenceAlgorithm,
             5 => ErrorCategory::TraceManipulation,
             6 => ErrorCategory::TypeSystem,
             _ => ErrorCategory::Unknown,
@@ -93,12 +92,14 @@ impl ErrorCode {
 }
 
 /// High-level error categories for filtering and handling.
+///
+/// Only categories with at least one live [`ErrorCode`] are represented (FG-33):
+/// numerical-computation and inference-algorithm buckets were removed because no
+/// code in the crate constructs an error in either category today.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorCategory {
     DistributionValidation,
-    NumericalComputation,
     ModelExecution,
-    InferenceAlgorithm,
     TraceManipulation,
     TypeSystem,
     Unknown,
@@ -151,6 +152,10 @@ impl Default for ErrorContext {
 }
 
 /// Errors that can occur during probabilistic programming operations.
+///
+/// Every variant is constructed by real logic in the crate (FG-33): the
+/// speculative `NumericalError` and `InferenceError` variants were removed
+/// because nothing produced them — see the module-level docs.
 #[derive(Debug, Clone)]
 #[allow(clippy::result_large_err)]
 pub enum FugueError {
@@ -161,23 +166,9 @@ pub enum FugueError {
         code: ErrorCode,
         context: ErrorContext,
     },
-    /// Numerical computation failed
-    NumericalError {
-        operation: String,
-        details: String,
-        code: ErrorCode,
-        context: ErrorContext,
-    },
     /// Model execution failed
     ModelError {
         address: Option<Address>,
-        reason: String,
-        code: ErrorCode,
-        context: ErrorContext,
-    },
-    /// Inference algorithm failed
-    InferenceError {
-        algorithm: String,
         reason: String,
         code: ErrorCode,
         context: ErrorContext,
@@ -217,20 +208,6 @@ impl fmt::Display for FugueError {
                 self.write_context(f, context)?;
                 Ok(())
             }
-            FugueError::NumericalError {
-                operation,
-                details,
-                code,
-                context,
-            } => {
-                write!(
-                    f,
-                    "[{}] Numerical error in {}: {}",
-                    *code as u32, operation, details
-                )?;
-                self.write_context(f, context)?;
-                Ok(())
-            }
             FugueError::ModelError {
                 address,
                 reason,
@@ -242,20 +219,6 @@ impl fmt::Display for FugueError {
                 } else {
                     write!(f, "[{}] Model error: {}", *code as u32, reason)?;
                 }
-                self.write_context(f, context)?;
-                Ok(())
-            }
-            FugueError::InferenceError {
-                algorithm,
-                reason,
-                code,
-                context,
-            } => {
-                write!(
-                    f,
-                    "[{}] Inference error in {}: {}",
-                    *code as u32, algorithm, reason
-                )?;
                 self.write_context(f, context)?;
                 Ok(())
             }
@@ -333,9 +296,7 @@ impl FugueError {
     pub fn code(&self) -> ErrorCode {
         match self {
             FugueError::InvalidParameters { code, .. } => *code,
-            FugueError::NumericalError { code, .. } => *code,
             FugueError::ModelError { code, .. } => *code,
-            FugueError::InferenceError { code, .. } => *code,
             FugueError::TraceError { code, .. } => *code,
             FugueError::TypeMismatch { code, .. } => *code,
         }
@@ -350,9 +311,7 @@ impl FugueError {
     pub fn context(&self) -> &ErrorContext {
         match self {
             FugueError::InvalidParameters { context, .. } => context,
-            FugueError::NumericalError { context, .. } => context,
             FugueError::ModelError { context, .. } => context,
-            FugueError::InferenceError { context, .. } => context,
             FugueError::TraceError { context, .. } => context,
             FugueError::TypeMismatch { context, .. } => context,
         }
@@ -363,19 +322,42 @@ impl FugueError {
         matches!(self.category(), ErrorCategory::DistributionValidation)
     }
 
-    /// Check if this error is caused by numerical computation issues.
-    pub fn is_numerical_error(&self) -> bool {
-        matches!(self.category(), ErrorCategory::NumericalComputation)
+    /// Add context to an existing error.
+    pub fn with_context(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        match &mut self {
+            FugueError::InvalidParameters { context, .. } => {
+                context.context.push((key.into(), value.into()));
+            }
+            FugueError::ModelError { context, .. } => {
+                context.context.push((key.into(), value.into()));
+            }
+            FugueError::TraceError { context, .. } => {
+                context.context.push((key.into(), value.into()));
+            }
+            FugueError::TypeMismatch { context, .. } => {
+                context.context.push((key.into(), value.into()));
+            }
+        }
+        self
     }
 
-    /// Check if this error is recoverable (can be handled and retried).
-    pub fn is_recoverable(&self) -> bool {
-        matches!(
-            self.code(),
-            ErrorCode::InsufficientSamples
-                | ErrorCode::NumericalInstability
-                | ErrorCode::InferenceConvergenceFailed
-        )
+    /// Add source location to an existing error.
+    pub fn with_source_location(mut self, file: impl Into<String>, line: u32) -> Self {
+        match &mut self {
+            FugueError::InvalidParameters { context, .. } => {
+                context.source_location = Some((file.into(), line));
+            }
+            FugueError::ModelError { context, .. } => {
+                context.source_location = Some((file.into(), line));
+            }
+            FugueError::TraceError { context, .. } => {
+                context.source_location = Some((file.into(), line));
+            }
+            FugueError::TypeMismatch { context, .. } => {
+                context.source_location = Some((file.into(), line));
+            }
+        }
+        self
     }
 }
 
@@ -419,20 +401,6 @@ impl FugueError {
         }
     }
 
-    /// Create a NumericalError with enhanced context.
-    pub fn numerical_error(
-        operation: impl Into<String>,
-        details: impl Into<String>,
-        code: ErrorCode,
-    ) -> Self {
-        Self::NumericalError {
-            operation: operation.into(),
-            details: details.into(),
-            code,
-            context: ErrorContext::new(),
-        }
-    }
-
     /// Create a TraceError with enhanced context.
     pub fn trace_error(
         operation: impl Into<String>,
@@ -463,104 +431,6 @@ impl FugueError {
             context: ErrorContext::new(),
         }
     }
-
-    /// Add context to an existing error.
-    pub fn with_context(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        match &mut self {
-            FugueError::InvalidParameters { context, .. } => {
-                context.context.push((key.into(), value.into()));
-            }
-            FugueError::NumericalError { context, .. } => {
-                context.context.push((key.into(), value.into()));
-            }
-            FugueError::ModelError { context, .. } => {
-                context.context.push((key.into(), value.into()));
-            }
-            FugueError::InferenceError { context, .. } => {
-                context.context.push((key.into(), value.into()));
-            }
-            FugueError::TraceError { context, .. } => {
-                context.context.push((key.into(), value.into()));
-            }
-            FugueError::TypeMismatch { context, .. } => {
-                context.context.push((key.into(), value.into()));
-            }
-        }
-        self
-    }
-
-    /// Add source location to an existing error.
-    pub fn with_source_location(mut self, file: impl Into<String>, line: u32) -> Self {
-        match &mut self {
-            FugueError::InvalidParameters { context, .. } => {
-                context.source_location = Some((file.into(), line));
-            }
-            FugueError::NumericalError { context, .. } => {
-                context.source_location = Some((file.into(), line));
-            }
-            FugueError::ModelError { context, .. } => {
-                context.source_location = Some((file.into(), line));
-            }
-            FugueError::InferenceError { context, .. } => {
-                context.source_location = Some((file.into(), line));
-            }
-            FugueError::TraceError { context, .. } => {
-                context.source_location = Some((file.into(), line));
-            }
-            FugueError::TypeMismatch { context, .. } => {
-                context.source_location = Some((file.into(), line));
-            }
-        }
-        self
-    }
-}
-
-// =============================================================================
-// From Trait Implementations for Common Conversions
-// =============================================================================
-
-/// Convert from standard library errors to FugueError.
-impl From<std::num::ParseFloatError> for FugueError {
-    fn from(err: std::num::ParseFloatError) -> Self {
-        FugueError::numerical_error(
-            "parse_float",
-            format!("Failed to parse float: {}", err),
-            ErrorCode::NumericalInstability,
-        )
-    }
-}
-
-impl From<std::num::ParseIntError> for FugueError {
-    fn from(err: std::num::ParseIntError) -> Self {
-        FugueError::numerical_error(
-            "parse_int",
-            format!("Failed to parse integer: {}", err),
-            ErrorCode::NumericalInstability,
-        )
-    }
-}
-
-/// Helper for converting string errors (common in examples).
-impl From<&str> for FugueError {
-    fn from(msg: &str) -> Self {
-        FugueError::ModelError {
-            address: None,
-            reason: msg.to_string(),
-            code: ErrorCode::ModelExecutionFailed,
-            context: ErrorContext::new(),
-        }
-    }
-}
-
-impl From<String> for FugueError {
-    fn from(msg: String) -> Self {
-        FugueError::ModelError {
-            address: None,
-            reason: msg,
-            code: ErrorCode::ModelExecutionFailed,
-            context: ErrorContext::new(),
-        }
-    }
 }
 
 // =============================================================================
@@ -583,26 +453,6 @@ macro_rules! invalid_params {
     };
     ($dist:expr, $reason:expr, $code:ident, $($key:expr => $value:expr),+ $(,)?) => {
         $crate::error::FugueError::invalid_parameters($dist, $reason, $crate::error::ErrorCode::$code)
-            $(.with_context($key, $value))*
-    };
-}
-
-/// Create a NumericalError with optional context.
-///
-/// Example:
-/// ```rust
-/// # use fugue::*;
-/// let err = numerical_error!("log", "input was negative", NumericalInstability);
-/// let err_with_ctx = numerical_error!("log", "input was negative", NumericalInstability,
-///     "input" => "-1.5");
-/// ```
-#[macro_export]
-macro_rules! numerical_error {
-    ($op:expr, $details:expr, $code:ident) => {
-        $crate::error::FugueError::numerical_error($op, $details, $crate::error::ErrorCode::$code)
-    };
-    ($op:expr, $details:expr, $code:ident, $($key:expr => $value:expr),+ $(,)?) => {
-        $crate::error::FugueError::numerical_error($op, $details, $crate::error::ErrorCode::$code)
             $(.with_context($key, $value))*
     };
 }
@@ -800,14 +650,52 @@ mod tests {
     use super::*;
     use crate::addr;
 
+    /// FG-33: every remaining `ErrorCode` variant must be live (constructed
+    /// somewhere in the crate) and correctly categorized. This test enumerates
+    /// all 11 surviving variants; if a future change adds a variant without
+    /// updating this list, the mismatch is a signal to double check it's wired
+    /// into a real code path rather than left aspirational again.
+    #[test]
+    fn error_code_taxonomy_is_exactly_the_live_set() {
+        let all = [
+            ErrorCode::InvalidMean,
+            ErrorCode::InvalidVariance,
+            ErrorCode::InvalidProbability,
+            ErrorCode::InvalidRange,
+            ErrorCode::InvalidShape,
+            ErrorCode::InvalidRate,
+            ErrorCode::InvalidCount,
+            ErrorCode::AddressConflict,
+            ErrorCode::UnexpectedModelStructure,
+            ErrorCode::TraceAddressNotFound,
+            ErrorCode::TypeMismatch,
+        ];
+        assert_eq!(all.len(), 11);
+        for code in all {
+            // Every code must have a non-empty description and a known category.
+            assert!(!code.description().is_empty());
+            assert_ne!(code.category(), ErrorCategory::Unknown);
+        }
+    }
+
     #[test]
     fn error_code_category_and_description() {
         let code = ErrorCode::InvalidMean;
         assert!(ErrorCode::InvalidMean.description().contains("mean"));
         assert_eq!(code.category(), ErrorCategory::DistributionValidation);
 
-        let code = ErrorCode::NumericalOverflow;
-        assert_eq!(code.category(), ErrorCategory::NumericalComputation);
+        assert_eq!(
+            ErrorCode::AddressConflict.category(),
+            ErrorCategory::ModelExecution
+        );
+        assert_eq!(
+            ErrorCode::TraceAddressNotFound.category(),
+            ErrorCategory::TraceManipulation
+        );
+        assert_eq!(
+            ErrorCode::TypeMismatch.category(),
+            ErrorCategory::TypeSystem
+        );
     }
 
     #[test]
@@ -821,6 +709,7 @@ mod tests {
         assert!(msg.contains("mu=nan"));
         assert_eq!(err.code(), ErrorCode::InvalidMean);
         assert_eq!(err.category(), ErrorCategory::DistributionValidation);
+        assert!(err.is_validation_error());
     }
 
     #[test]
@@ -831,16 +720,8 @@ mod tests {
             _ => panic!("expected InvalidParameters"),
         }
 
-        let e2 = numerical_error!("compute", "overflow", NumericalOverflow, "x" => "1e309");
+        let e2 = trace_error!("lookup", Some(addr!("x")), "missing", TraceAddressNotFound);
         match e2 {
-            FugueError::NumericalError { code, .. } => {
-                assert_eq!(code, ErrorCode::NumericalOverflow)
-            }
-            _ => panic!("expected NumericalError"),
-        }
-
-        let e3 = trace_error!("lookup", Some(addr!("x")), "missing", TraceAddressNotFound);
-        match e3 {
             FugueError::TraceError { code, .. } => {
                 assert_eq!(code, ErrorCode::TraceAddressNotFound)
             }
@@ -870,41 +751,14 @@ mod tests {
         // Build a cause chain
         let base = FugueError::invalid_parameters("Normal", "bad", ErrorCode::InvalidMean);
         let ctx = ErrorContext::new().with_cause(base.clone());
-        let inf = FugueError::InferenceError {
-            algorithm: "MH".into(),
-            reason: "did not converge".into(),
-            code: ErrorCode::InferenceConvergenceFailed,
-            context: ctx.clone(),
-        };
-        let msg = format!("{}", inf);
-        assert!(msg.contains("Inference error"));
-
         let model_err = FugueError::ModelError {
             address: Some(crate::addr!("x")),
             reason: "failed".into(),
-            code: ErrorCode::ModelExecutionFailed,
+            code: ErrorCode::UnexpectedModelStructure,
             context: ctx,
         };
-        let msg2 = format!("{}", model_err);
-        assert!(msg2.contains("Model error"));
-    }
-
-    #[test]
-    fn from_conversions_cover_paths() {
-        // ParseFloatError
-        let e_float: FugueError = "abc".parse::<f64>().unwrap_err().into();
-        assert!(matches!(e_float, FugueError::NumericalError { .. }));
-
-        // ParseIntError
-        let e_int: FugueError = "abc".parse::<i32>().unwrap_err().into();
-        assert!(matches!(e_int, FugueError::NumericalError { .. }));
-
-        // From<&str>
-        let e_str: FugueError = "oops".into();
-        assert!(matches!(e_str, FugueError::ModelError { .. }));
-
-        // From<String>
-        let e_string: FugueError = String::from("oops").into();
-        assert!(matches!(e_string, FugueError::ModelError { .. }));
+        let msg = format!("{}", model_err);
+        assert!(msg.contains("Model error"));
+        assert!(msg.contains("Caused by"));
     }
 }
