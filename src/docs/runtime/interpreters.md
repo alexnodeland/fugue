@@ -372,7 +372,6 @@ All interpreters implement the `Handler` trait and integrate seamlessly:
 
 - Zero-cost dispatch through compile-time trait resolution
 - Consistent interface across all execution modes
-- Composable with memory optimization systems (pools, COW traces)
 
 ### With Inference Algorithms
 
@@ -450,7 +449,6 @@ impl InferenceRunner {
 
 - [`Handler`](../handler.md) - The trait interface all interpreters implement
 - [`Trace`](../trace.md) - The trace representation used by all interpreters  
-- [Memory Optimization](../memory.md) - How interpreters integrate with memory pools
 - [Inference Algorithms](../../inference/README.md) - How interpreters enable inference
 
 ### Usage Guides

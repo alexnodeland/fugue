@@ -54,4 +54,3 @@ pub use inference::validation::{
     ks_test_distribution, test_conjugate_normal_model, ValidationResult,
 };
 pub use inference::vi::{elbo_with_guide, optimize_meanfield_vi, MeanFieldGuide, VariationalParam};
-pub use runtime::memory::{CowTrace, PooledPriorHandler, TraceBuilder, TracePool};

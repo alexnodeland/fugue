@@ -47,13 +47,6 @@
 //! - Macro interaction with type system
 //! - Nested macro usage and composition
 //!
-//! ### 7. Memory Management Coverage (`test_memory_*`)
-//! - `TracePool` and `PooledPriorHandler` integration
-//! - `CowTrace` copy-on-write semantics
-//! - `TraceBuilder` for manual trace construction
-//! - Memory efficiency and resource usage
-//! - Pool statistics and monitoring
-//!
 //! ### 8. Numerical Utilities Coverage (`test_numerical_*`)
 //! - `log_sum_exp()` and `weighted_log_sum_exp()`
 //! - `normalize_log_probs()` probability normalization
@@ -548,78 +541,10 @@ fn test_macro_system_comprehensive() {
     }
 }
 
-#[test]
-fn test_memory_management_coverage() {
-    let mut rng = StdRng::seed_from_u64(42);
-
-    // Test TracePool
-    let mut pool = runtime::memory::TracePool::new(5);
-    let stats_initial = pool.stats();
-    assert_eq!(stats_initial.total_gets(), 0);
-    assert_eq!(stats_initial.hits, 0);
-    assert_eq!(stats_initial.misses, 0);
-
-    // Get a trace from the pool
-    let trace1 = pool.get();
-    let stats_after_get = pool.stats();
-    assert_eq!(stats_after_get.total_gets(), 1);
-    assert_eq!(stats_after_get.misses, 1); // First get is always a miss
-
-    // Return the trace to the pool
-    pool.return_trace(trace1);
-    let stats_after_return = pool.stats();
-    assert_eq!(stats_after_return.returns, 1);
-    assert_eq!(pool.len(), 1);
-
-    // Get another trace (should be a hit this time)
-    let _trace2 = pool.get();
-    let stats_after_second_get = pool.stats();
-    assert_eq!(stats_after_second_get.hits, 1);
-    assert_eq!(stats_after_second_get.total_gets(), 2);
-
-    // Test pool capacity
-    assert_eq!(pool.capacity(), 5);
-
-    // Test CowTrace copy-on-write semantics
-    let base_trace = runtime::trace::Trace::default();
-    let cow_trace = runtime::memory::CowTrace::from_trace(base_trace.clone());
-    let converted_back = cow_trace.to_trace();
-    assert_eq!(converted_back.choices.len(), base_trace.choices.len());
-
-    // Test CowTrace creation and access
-    let cow_trace2 = runtime::memory::CowTrace::new();
-    let choices = cow_trace2.choices();
-    assert!(choices.is_empty());
-
-    // Test TraceBuilder for manual trace construction
-    let mut builder = runtime::memory::TraceBuilder::new();
-    builder.add_sample(addr!("x"), 1.5, -0.5);
-    builder.add_sample_bool(addr!("flag"), true, -0.7);
-    builder.add_sample_u64(addr!("count"), 42, -0.3);
-    builder.add_sample_usize(addr!("index"), 3, -0.2);
-    builder.add_observation(-1.2);
-    builder.add_factor(-0.8);
-
-    let built_trace = builder.build();
-    assert_eq!(built_trace.get_f64(&addr!("x")), Some(1.5));
-    assert_eq!(built_trace.get_bool(&addr!("flag")), Some(true));
-    assert_eq!(built_trace.get_u64(&addr!("count")), Some(42));
-    assert_eq!(built_trace.get_usize(&addr!("index")), Some(3));
-    assert!((built_trace.log_likelihood + 1.2).abs() < 1e-12);
-    assert!((built_trace.log_factors + 0.8).abs() < 1e-12);
-
-    // Test PooledPriorHandler integration
-    let model = sample(addr!("test"), Normal::new(0.0, 1.0).unwrap());
-    let pooled_handler = runtime::memory::PooledPriorHandler::new(&mut rng, &mut pool);
-
-    let (result, final_trace) = runtime::handler::run(pooled_handler, model);
-    assert!(result.is_finite());
-    assert!(final_trace.get_f64(&addr!("test")).is_some());
-
-    // Pool should now have additional statistics
-    let final_stats = pool.stats();
-    assert!(final_stats.total_gets() >= 2);
-}
+// FG-22/FG-62/FG-63/FG-64: the memory-optimization subsystem (TracePool,
+// CowTrace, TraceBuilder, PooledPriorHandler) was removed after benchmarks showed
+// it beat the shipped PriorHandler by <4% end-to-end (below the bar for keeping a
+// dead subsystem), so its coverage test was removed with it.
 
 #[test]
 fn test_inference_api_coverage() {

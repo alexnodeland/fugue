@@ -102,14 +102,14 @@ macro_rules! plate {
 #[macro_export]
 macro_rules! scoped_addr {
     ($scope:expr, $name:expr) => {
-        $crate::core::address::Address(format!(
+        $crate::core::address::Address::new(format!(
             "{}::{}",
             $scope,
             $crate::core::address::escape_addr_segment(&format!("{}", $name))
         ))
     };
     ($scope:expr, $name:expr, $($indices:expr),+) => {
-        $crate::core::address::Address(format!(
+        $crate::core::address::Address::new(format!(
             "{}::{}#{}",
             $scope,
             $crate::core::address::escape_addr_segment(&format!("{}", $name)),
@@ -169,9 +169,9 @@ mod tests {
     #[test]
     fn scoped_addr_formats_with_scope_and_indices() {
         let a = scoped_addr!("scope", "name");
-        assert_eq!(a.0, "scope::name");
+        assert_eq!(a.as_str(), "scope::name");
         let b = scoped_addr!("scope", "name", "{}", 3);
-        assert_eq!(b.0, "scope::name#3");
+        assert_eq!(b.as_str(), "scope::name#3");
     }
 
     // Regression for FG-61: `prob!` binds accept irrefutable patterns on the

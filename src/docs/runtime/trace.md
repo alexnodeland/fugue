@@ -337,7 +337,7 @@ assert_eq!(merged_trace.total_log_weight(), custom_trace.total_log_weight());
 2. **Type Safety**: All value access is type-checked, preventing runtime errors from type mismatches
 3. **Decomposed Log-Weights**: Prior, likelihood, and factors are tracked separately for algorithmic flexibility
 4. **Efficient Access**: BTreeMap provides O(log n) lookups with ordered iteration
-5. **Memory Efficiency**: Copy-on-write and pooling strategies (see memory module) optimize allocation patterns
+5. **Cheap Keys**: `Address` keys are `Arc<str>` with a cached hash, so clones and hashing are allocation-free
 
 ### Architectural Decisions
 
@@ -371,8 +371,7 @@ Using `BTreeMap<Address, Choice>` provides:
 ### Evolution Strategy
 
 - **Backwards Compatible**: New `ChoiceValue` variants and `Trace` methods are additive
-- **Performance Focused**: Internal optimizations (memory pooling, COW) don't change the API
-- **Composable**: Traces work seamlessly with all interpreter and memory optimization strategies
+- **Composable**: Traces work seamlessly with all interpreter strategies
 
 ## Error Handling
 
@@ -504,14 +503,6 @@ All trace operations integrate seamlessly with the handler system:
 - **Log-Weight Accumulation**: Handlers update the three log-weight components (`log_prior`, `log_likelihood`, `log_factors`) according to their interpretation strategy
 - **Address Resolution**: Handlers use the trace's address-based storage to implement replay and scoring modes
 
-### With Memory Optimization
-
-The trace system integrates with memory optimization strategies:
-
-- **Copy-on-Write**: `CowTrace` wraps `Trace` to enable efficient sharing in MCMC
-- **Memory Pooling**: `TracePool` pre-allocates `Trace` objects to reduce garbage collection pressure
-- **TraceBuilder**: Efficient construction of traces with pre-sized allocations
-
 ### With Inference Algorithms
 
 | Algorithm | Trace Usage Pattern | Key Operations |
@@ -525,7 +516,7 @@ The trace system integrates with memory optimization strategies:
 
 - **Address Lookup**: O(log n) via `BTreeMap` - efficient for most probabilistic models
 - **Choice Insertion**: O(log n) with potential reallocation
-- **Trace Cloning**: O(n) but optimized with COW strategies in memory module  
+- **Trace Cloning**: O(n) in the number of choices; `Address` keys clone allocation-free  
 - **Type Access**: O(log n + constant) for address lookup plus O(1) type extraction
 - **Log-Weight Computation**: O(1) since components are pre-accumulated
 
@@ -589,7 +580,6 @@ fn monitor_inference_traces(traces: &[Trace]) {
 ### Related Systems
 
 - [`Handler`](../handler.md) - How interpreters consume and produce traces
-- [`Memory Optimization`](../memory.md) - Efficient trace allocation and sharing strategies
 - [`Interpreters`](../interpreters.md) - How different execution modes use traces
 
 ### Usage Guides

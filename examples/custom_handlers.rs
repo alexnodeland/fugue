@@ -228,7 +228,7 @@ impl<H: Handler> StatisticsHandler<H> {
     }
 
     fn update_f64_range(&mut self, addr: &Address, value: f64) {
-        let key = addr.0.clone();
+        let key = addr.as_str().to_string();
         self.stats
             .parameter_ranges
             .entry(key)

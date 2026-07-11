@@ -429,7 +429,7 @@ mod mcmc_tests {
     #[test]
     fn test_diminishing_adaptation() {
         let mut adapter = DiminishingAdaptation::new(0.44, 0.7);
-        let addr = Address("test".to_string());
+        let addr = Address::new("test");
 
         // Initial scale should be 1.0
         assert_eq!(adapter.get_scale(&addr), 1.0);

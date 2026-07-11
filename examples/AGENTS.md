@@ -172,21 +172,19 @@ fn analyze_posterior_samples(samples: &[(f64, Trace)]) -> Result<(), Box<dyn std
 //! memory management, and performance optimization.
 
 use fugue::prelude::*;
-use fugue::runtime::memory::{TracePool, PooledPriorHandler};
+use fugue::runtime::interpreters::PriorHandler;
 
 fn production_inference_pipeline(
     data: &[f64],
     config: &InferenceConfig,
 ) -> Result<PosteriorSummary, InferenceError> {
-    // Use memory pooling for high-throughput scenarios
-    let mut trace_pool = TracePool::new(config.pool_capacity);
     let mut rng = StdRng::seed_from_u64(config.random_seed);
-    
+
     // Model with comprehensive error handling
     let model = create_validated_model(data)?;
-    
-    // Run inference with pooled memory management
-    let handler = PooledPriorHandler::new(&mut rng, &mut trace_pool);
+
+    // Run inference with the shipped PriorHandler
+    let handler = PriorHandler { rng: &mut rng, trace: Trace::default() };
     let samples = run_inference_with_diagnostics(handler, model, config)?;
     
     // Validate results before returning
@@ -317,7 +315,7 @@ let prior = Normal::new(0.0, 2.5)?;
 
 ### Memory Management
 
-- Use `TracePool` for high-frequency inference
+- `Address` keys clone allocation-free (`Arc<str>` + cached hash)
 - Consider streaming processing for large datasets
 - Monitor memory usage in long-running examples
 - Demonstrate memory cleanup patterns

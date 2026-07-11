@@ -17,8 +17,7 @@ src/
 ├── runtime/            # Execution engine
 │   ├── handler.rs      # Handler trait and execution framework
 │   ├── interpreters.rs # Built-in model interpreters
-│   ├── trace.rs        # Execution history management
-│   └── memory.rs       # Memory optimization strategies
+│   └── trace.rs        # Execution history management
 ├── inference/          # Inference algorithms
 │   ├── mcmc/           # Markov Chain Monte Carlo
 │   ├── smc/            # Sequential Monte Carlo
@@ -124,13 +123,7 @@ make bench
 - Enables replay, scoring, and debugging
 - Type-safe value storage and retrieval
 - Memory-efficient representation
-
-**`memory.rs`** - Performance Optimization
-
-- `TracePool`: Reusable trace allocation
-- `CowTrace`: Copy-on-write semantics
-- `PooledHandler`: Memory-pooled execution
-- Production-oriented memory management
+- `Address` keys are `Arc<str>` with a cached hash, so clones and hashing are allocation-free
 
 ### `inference/` - Inference Algorithms
 
@@ -335,14 +328,6 @@ let addr = format!("param_{}", rng.gen::<u64>()); // Random component
 
 // GOOD: Deterministic addressing
 let addr = addr!("param", deterministic_index); // Reproducible
-```
-
-### Memory Management
-
-```rust
-// Consider trace pooling for hot paths
-let mut pool = TracePool::new(capacity);
-let handler = PooledPriorHandler::new(&mut rng, &mut pool);
 ```
 
 ### Error Propagation

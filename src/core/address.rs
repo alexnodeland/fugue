@@ -1,9 +1,32 @@
 #![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/docs/core/address.md"))]
 use std::fmt::{Display, Formatter};
+use std::hash::{Hash, Hasher};
+use std::ops::Deref;
+use std::sync::Arc;
 
 /// A unique identifier for random variables and observation sites in probabilistic models.
 /// Addresses serve as stable names for probabilistic choices, enabling conditioning, inference, and replay.
-/// They are implemented as wrapped strings with ordering and hashing support for use in collections.
+///
+/// # Representation (FG-05)
+///
+/// `Address` is backed by an `Arc<str>` together with a **precomputed** 64-bit
+/// hash of that string. This makes the two operations that dominate inference
+/// bookkeeping cheap:
+///
+/// - **Clone** is an atomic reference-count bump plus a `u64` copy — no heap
+///   allocation and no string copy. Concrete handlers (`PriorHandler`,
+///   `ScoreGivenTrace`, …) clone every address twice per sample site (once as the
+///   `BTreeMap` key, once inside the stored `Choice`), and single-site MH clones
+///   the whole trace several times per step, so cheap cloning removes what the
+///   audit measured as the per-iteration allocation hot spot.
+/// - **Hash** writes the cached `u64` directly instead of re-hashing the string
+///   on every `HashMap` probe. Equality still compares the underlying `str`
+///   (after a fast hash pre-check), so hash collisions remain correct.
+///
+/// Ordering (`Ord`/`PartialOrd`) compares the underlying `str` lexicographically,
+/// preserving the stable, human-meaningful `BTreeMap` iteration order that traces
+/// rely on. `Display` and `Deref<Target = str>` are preserved so downstream code
+/// that formatted or string-sliced an address keeps compiling.
 ///
 /// # Index-separator encoding (collision-free)
 ///
@@ -40,11 +63,110 @@ use std::fmt::{Display, Formatter};
 /// map.insert(addr1, 1.0);
 /// map.insert(addr2, 2.0);
 /// ```
-#[derive(Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
-pub struct Address(pub String);
+#[derive(Clone, Debug)]
+pub struct Address {
+    /// Reference-counted, immutable backing string. Cloning shares this buffer.
+    repr: Arc<str>,
+    /// Precomputed hash of `repr`, written directly by [`Hash`] so that hashing
+    /// an address never re-scans the string.
+    hash: u64,
+}
+
+/// Compute the cached hash for an address's backing string.
+///
+/// Uses [`std::collections::hash_map::DefaultHasher`], whose keys are fixed, so
+/// the value is deterministic for a given string within and across runs of the
+/// same build. The value is only ever compared for equality and fed to another
+/// hasher via [`Hasher::write_u64`], so its only requirements are determinism and
+/// good dispersion — both of which SipHash satisfies.
+#[inline]
+fn compute_address_hash(s: &str) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    s.hash(&mut hasher);
+    hasher.finish()
+}
+
+impl Address {
+    /// Construct an address from any string-like value.
+    ///
+    /// The backing string is moved into an `Arc<str>` once, and its hash is
+    /// computed once, here at construction. All later clones are allocation-free.
+    #[inline]
+    pub fn new(name: impl Into<Arc<str>>) -> Self {
+        let repr: Arc<str> = name.into();
+        let hash = compute_address_hash(&repr);
+        Address { repr, hash }
+    }
+
+    /// Borrow the underlying string slice.
+    #[inline]
+    pub fn as_str(&self) -> &str {
+        &self.repr
+    }
+}
+
 impl Display for Address {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        write!(f, "{}", self.repr)
+    }
+}
+
+impl Deref for Address {
+    type Target = str;
+    #[inline]
+    fn deref(&self) -> &str {
+        &self.repr
+    }
+}
+
+impl Hash for Address {
+    /// Write the precomputed hash rather than re-hashing the string on every
+    /// `HashMap` probe (FG-05).
+    #[inline]
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        state.write_u64(self.hash);
+    }
+}
+
+impl PartialEq for Address {
+    /// Equality compares the underlying `str`; the cached hash is used only as a
+    /// fast reject so distinct strings that collide in the hash still compare
+    /// unequal.
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.hash == other.hash && self.repr == other.repr
+    }
+}
+
+impl Eq for Address {}
+
+impl PartialOrd for Address {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Address {
+    /// Lexicographic ordering on the backing string, preserving stable
+    /// `BTreeMap` iteration order.
+    #[inline]
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.as_str().cmp(other.as_str())
+    }
+}
+
+impl From<String> for Address {
+    #[inline]
+    fn from(s: String) -> Self {
+        Address::new(s)
+    }
+}
+
+impl From<&str> for Address {
+    #[inline]
+    fn from(s: &str) -> Self {
+        Address::new(s)
     }
 }
 
@@ -127,10 +249,10 @@ pub fn make_indexed(name: impl Display, index: impl Display) -> String {
 #[macro_export]
 macro_rules! addr {
     ($name:expr) => {
-        $crate::core::address::Address($crate::core::address::make_name($name))
+        $crate::core::address::Address::new($crate::core::address::make_name($name))
     };
     ($name:expr, $i:expr) => {
-        $crate::core::address::Address($crate::core::address::make_indexed($name, $i))
+        $crate::core::address::Address::new($crate::core::address::make_indexed($name, $i))
     };
 }
 
@@ -141,17 +263,48 @@ mod tests {
 
     #[test]
     fn display_formats_inner_string() {
-        let a = Address("alpha".to_string());
+        let a = Address::new("alpha");
         assert_eq!(a.to_string(), "alpha");
+    }
+
+    // Regression for FG-05: an Address caches a hash of its backing string, so
+    // the `Hash` impl must agree with `Eq` (equal addresses hash equally) and
+    // clones must remain equal and share the backing buffer.
+    #[test]
+    fn cached_hash_is_consistent_with_eq_and_clone() {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        fn h(a: &Address) -> u64 {
+            let mut hasher = DefaultHasher::new();
+            a.hash(&mut hasher);
+            hasher.finish()
+        }
+
+        let a = addr!("mu", 7);
+        let b = addr!("mu", 7);
+        assert_eq!(a, b);
+        assert_eq!(h(&a), h(&b), "equal addresses must hash equally");
+
+        // Clone is allocation-free (shares the Arc) and stays equal.
+        let c = a.clone();
+        assert_eq!(a, c);
+        assert!(Arc::ptr_eq(&a.repr, &c.repr));
+        assert_eq!(h(&a), h(&c));
+
+        // A different address hashes differently (with overwhelming probability)
+        // and, more importantly, compares unequal.
+        let d = addr!("mu", 8);
+        assert_ne!(a, d);
     }
 
     #[test]
     fn addr_macro_basic_and_indexed() {
         let a = addr!("x");
-        assert_eq!(a.0, "x");
+        assert_eq!(a.as_str(), "x");
 
         let b = addr!("x", 3);
-        assert_eq!(b.0, "x#3");
+        assert_eq!(b.as_str(), "x#3");
     }
 
     // Regression for FG-26 / FG-52: the `addr!` index-separator scheme must be
@@ -164,15 +317,15 @@ mod tests {
         let indexed = addr!("x", 3);
         let literal_hash = addr!("x#3");
         assert_ne!(indexed, literal_hash);
-        assert_eq!(indexed.0, "x#3");
-        assert_eq!(literal_hash.0, "x\\#3");
+        assert_eq!(indexed.as_str(), "x#3");
+        assert_eq!(literal_hash.as_str(), "x\\#3");
 
         // The auditor's second example: addr!("a", "b#3") vs addr!("a#b", 3).
         let a = addr!("a", "b#3");
         let b = addr!("a#b", 3);
         assert_ne!(a, b);
-        assert_eq!(a.0, "a#b\\#3");
-        assert_eq!(b.0, "a\\#b#3");
+        assert_eq!(a.as_str(), "a#b\\#3");
+        assert_eq!(b.as_str(), "a\\#b#3");
 
         // The backslash escape character is itself escaped so it cannot forge
         // a separator boundary.
@@ -189,15 +342,15 @@ mod tests {
         let left = addr!("a#", "b");
         let right = addr!("a", "#b");
         assert_ne!(left, right);
-        assert_eq!(left.0, "a\\##b");
-        assert_eq!(right.0, "a#\\#b");
+        assert_eq!(left.as_str(), "a\\##b");
+        assert_eq!(right.as_str(), "a#\\#b");
     }
 
     #[test]
     fn equality_hash_and_ordering() {
-        let a1 = Address("x".into());
-        let a2 = Address("x".into());
-        let b = Address("y".into());
+        let a1 = Address::new("x");
+        let a2 = Address::new("x");
+        let b = Address::new("y");
 
         // Eq/Hash
         let mut set = HashSet::new();
@@ -211,7 +364,7 @@ mod tests {
         bset.insert(b);
         bset.insert(a1);
         // Expect alphabetical order: "x" comes after "y"? No, "x" < "y"
-        let ordered: Vec<String> = bset.into_iter().map(|a| a.0).collect();
+        let ordered: Vec<String> = bset.into_iter().map(|a| a.as_str().to_string()).collect();
         assert_eq!(ordered, vec!["x".to_string(), "y".to_string()]);
     }
 }

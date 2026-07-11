@@ -10,14 +10,12 @@ The runtime solves the fundamental challenge in probabilistic programming: **how
 - **Conditioned** on observed data to perform inference  
 - **Scored** to compute log-probabilities for specific executions
 - **Replayed** with modified choices for MCMC proposals
-- **Optimized** with memory pooling for high-throughput scenarios
 
-This flexibility is achieved through a **clean effect handler architecture** with four integrated components:
+This flexibility is achieved through a **clean effect handler architecture** with three integrated components:
 
 - **[Handler System](handler.md)**: The `Handler` trait and `run` function provide type-safe execution with algebraic effects
 - **[Built-in Interpreters](interpreters.md)**: Five foundational handlers (`PriorHandler`, `ReplayHandler`, `ScoreGivenTrace`, etc.)
 - **[Trace System](trace.md)**: The foundational data structures (`Trace`, `Choice`, `ChoiceValue`) that record execution history
-- **[Memory Optimization](memory.md)**: Efficient allocation strategies (`TracePool`, `CowTrace`, `TraceBuilder`) for production performance
 
 The key architectural insight is the **separation of model description from execution strategy**: models describe *what* should happen, handlers define *how* it happens, and traces record *what actually happened*.
 
@@ -121,29 +119,12 @@ The data structures that make probabilistic programming possible by recording ex
 - Type-safe value access with both Option and Result APIs
 - Three-component log-weight decomposition for algorithmic flexibility
 
-### [Memory Optimization](memory.md) - Production Performance Strategies
-
-Advanced allocation strategies for high-throughput probabilistic computing.
-
-**Core Types:**
-
-- `TracePool`: Reusable trace allocation for batch processing
-- `CowTrace`: Copy-on-write semantics for efficient trace sharing
-- `TraceBuilder`: Optimized trace construction with pre-sized allocations
-- `PooledPriorHandler`: Memory-pooled handler for production workloads
-
-**Performance Benefits:**
-
-- Reduces garbage collection pressure in high-frequency sampling
-- Enables efficient parallel execution with shared trace data
-- Provides detailed allocation statistics for performance monitoring
-
 ## Design & Evolution
 
 ### Status
 
 - **Stable**: The runtime system has been stable since v0.1 and provides the foundation for all probabilistic programming operations
-- **Complete**: All four components (handler, interpreters, trace, memory) provide comprehensive execution capabilities
+- **Complete**: All three components (handler, interpreters, trace) provide comprehensive execution capabilities
 - **Performance Critical**: Extensively optimized for high-throughput inference workloads
 - **Extensible**: Clean abstractions allow custom handlers and optimization strategies
 
@@ -153,8 +134,7 @@ Advanced allocation strategies for high-throughput probabilistic computing.
 2. **Trace-Centric Design**: All executions produce replayable, scorable traces that enable advanced inference
 3. **Type Safety Throughout**: All value handling is type-safe with compile-time guarantees
 4. **Zero-Cost Abstractions**: Handler dispatch and trace operations have no runtime overhead
-5. **Memory Conscious**: Copy-on-write semantics and pooling strategies minimize allocation pressure
-6. **Composable Architecture**: Handlers can be chained, combined, and extended for complex workflows
+5. **Composable Architecture**: Handlers can be chained, combined, and extended for complex workflows
 
 ### Evolution Strategy
 
@@ -200,7 +180,6 @@ The runtime provides execution infrastructure for all inference algorithms:
 - **[Handler System](handler.md)** - Type-safe execution engine with algebraic effects pattern
 - **[Built-in Interpreters](interpreters.md)** - Five foundational handlers for all execution modes
 - **[Trace System](trace.md)** - Execution history recording with type-safe value access
-- **[Memory Optimization](memory.md)** - Efficient allocation strategies for production performance
 
 ### Related Modules
 
@@ -211,19 +190,14 @@ The runtime provides execution infrastructure for all inference algorithms:
 ### Implementation Guides
 
 - [Custom Handler Implementation](../../src/how-to/custom-handlers.md) - Building specialized execution strategies
-- [Memory Optimization Strategies](../../src/how-to/memory-optimization.md) - High-performance allocation patterns
 - [Production Deployment](../../src/how-to/production-deployment.md) - Runtime configuration for production systems
 - [Debugging Runtime Issues](../../src/how-to/runtime-debugging.md) - Tools and techniques for runtime analysis
 
 ### Examples
 
 - [`trace_manipulation.rs`](../../../examples/trace_manipulation.rs) - Comprehensive trace operations
-- [`handler_patterns.rs`](../../../examples/handler_patterns.rs) - Advanced handler usage patterns
-- [`memory_optimization.rs`](../../../examples/memory_optimization.rs) - High-performance memory strategies
-- [`production_inference.rs`](../../../examples/production_inference.rs) - Production deployment patterns
 
 ### Benchmarks
 
-- [`memory_benchmarks.rs`](../../../benches/memory_benchmarks.rs) - Memory allocation performance analysis
-- [`handler_benchmarks.rs`](../../../benches/handler_benchmarks.rs) - Handler dispatch and trace operation benchmarks
-- [`inference_benchmarks.rs`](../../../benches/inference_benchmarks.rs) - End-to-end inference performance testing
+- [`f_perf.rs`](../../../benches/f_perf.rs) - End-to-end inference performance (MCMC/SMC/VI entry points)
+- [`mcmc_benchmarks.rs`](../../../benches/mcmc_benchmarks.rs) - MCMC adaptation and diagnostic microbenchmarks

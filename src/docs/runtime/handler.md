@@ -298,17 +298,11 @@ fn on_sample_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>) -> f64
 - **SMC**: Uses PriorHandler for particle generation and ScoreGivenTrace for reweighting
 - **ABC**: Uses PriorHandler with custom distance functions in the handler logic
 
-### With Memory Management
-
-- `PooledPriorHandler` provides zero-allocation execution for performance-critical code
-- `CowTrace` enables efficient trace sharing between handlers
-- Memory handlers integrate with the standard Handler trait without modification
-
 ### Performance Characteristics
 
 - Handler dispatch is zero-cost (resolved at compile time)
 - Trace operations are O(log n) for address lookups using BTreeMap
-- Memory pooling can eliminate allocation overhead entirely
+- `Address` clones are allocation-free (`Arc<str>` + cached hash), keeping per-site bookkeeping cheap
 - Type preservation avoids boxing/unboxing costs
 
 ## Reference Links
@@ -325,12 +319,10 @@ fn on_sample_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>) -> f64
 - [`PriorHandler`](../interpreters.rs) - Forward sampling from priors
 - [`ReplayHandler`](../interpreters.rs) - Trace replay with fallback
 - [`ScoreGivenTrace`](../interpreters.rs) - Fixed trace scoring
-- [`PooledPriorHandler`](../memory.rs) - Memory-optimized sampling
 
 ### Usage Patterns
 
 - [Custom Handlers Guide](../../src/how-to/custom-handlers.md) - Building new handler types
-- [Memory Optimization](../memory.md) - Using pooled handlers for performance
 - [MCMC Integration](../../inference/README.md) - How handlers enable inference algorithms
 
 ### Examples

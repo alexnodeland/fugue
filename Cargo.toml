@@ -3,7 +3,7 @@ name = "fugue-ppl"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Production-ready monadic PPL with numerically stable inference, comprehensive diagnostics, and memory optimization."
+description = "Monadic PPL with numerically stable inference and comprehensive diagnostics."
 readme = "README.md"
 keywords = ["probability-monad", "ppl", "monad", "effects", "traces"]
 categories = ["science", "mathematics"]
@@ -44,9 +44,9 @@ mdbook-linkcheck = "0.7.7"
 mdbook-toc = "0.14.2"
 
 [[bench]]
-name = "memory_benchmarks"
+name = "mcmc_benchmarks"
 harness = false
 
 [[bench]]
-name = "mcmc_benchmarks"
+name = "f_perf"
 harness = false

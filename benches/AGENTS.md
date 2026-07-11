@@ -144,28 +144,33 @@ criterion_group!(mcmc_benches, benchmark_mcmc_throughput);
 criterion_main!(mcmc_benches);
 ```
 
-### Memory Benchmark Patterns
+### End-to-End Benchmark Patterns
+
+Benchmark the *shipped* inference entry points on a representative model (see
+`benches/f_perf.rs`), not isolated bookkeeping utilities. The former memory
+subsystem (`TracePool`/`PooledPriorHandler`/`CowTrace`/`TraceBuilder`) was
+removed after `f_perf`'s `pooling_evidence` group showed <4% end-to-end benefit.
 
 ```rust
-//! # Memory Usage Benchmarks
-//! 
-//! Measures memory allocation patterns and validates memory optimization
-//! strategies for high-throughput scenarios.
+//! # End-to-End Inference Benchmarks
+//!
+//! Measures the real per-step and per-N cost of the functions users call.
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use fugue::runtime::memory::{TracePool, PooledPriorHandler};
+use fugue::runtime::interpreters::PriorHandler;
+use fugue::*;
 
-fn benchmark_trace_pooling(c: &mut Criterion) {
-    c.bench_function("trace_pooling_vs_allocation", |b| {
+fn benchmark_prior_execution(c: &mut Criterion) {
+    c.bench_function("prior_handler_execution", |b| {
         b.iter(|| {
             let mut rng = StdRng::seed_from_u64(42);
-            let mut pool = TracePool::new(100);
-            
-            // Benchmark pooled allocation pattern
+
+            // Benchmark the shipped PriorHandler over a representative model
             for _ in 0..1000 {
-                let handler = PooledPriorHandler::new(&mut rng, &mut pool);
-                let model = simple_test_model();
-                let result = runtime::handler::run(handler, model);
+                let (result, _trace) = runtime::handler::run(
+                    PriorHandler { rng: &mut rng, trace: Trace::default() },
+                    simple_test_model(),
+                );
                 black_box(result);
             }
         });

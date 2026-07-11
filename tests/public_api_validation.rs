@@ -96,7 +96,6 @@
 //! // Utilities
 //! pub use core::numerical::{log1p_exp, log_sum_exp, normalize_log_probs, safe_ln};
 //! pub use error::{ErrorCategory, ErrorCode, ErrorContext, FugueError, ...};
-//! pub use runtime::memory::{CowTrace, PooledPriorHandler, TraceBuilder, TracePool};
 //! ```
 //!
 //! ## Testing Guidelines
@@ -222,7 +221,7 @@ fn test_public_exports_accessibility() {
 
     // Address system
     let _addr = addr!("test");
-    let _address = Address("test".to_string());
+    let _address = Address::new("test");
 
     // Distributions - test construction to verify exports
     let _normal = Normal::new(0.0, 1.0).unwrap();
@@ -493,56 +492,10 @@ fn test_api_contract_inference_algorithms() {
     assert!(!optimized_guide.params.is_empty());
 }
 
-#[test]
-fn test_api_contract_memory_management() {
-    // Test memory management APIs
-
-    // TracePool interface
-    let mut pool = TracePool::new(10); // max_size parameter required
-    let stats_before = pool.stats();
-    assert_eq!(stats_before.total_gets(), 0); // Use total_gets() method
-
-    // Get a trace from the pool
-    let trace = pool.get();
-    let stats_after_get = pool.stats();
-    assert_eq!(stats_after_get.misses, 1); // First get is always a miss
-
-    // Return the trace
-    pool.return_trace(trace); // Method is called return_trace
-    let stats_after_return = pool.stats();
-    assert_eq!(stats_after_return.returns, 1);
-
-    // Pool capacity and length
-    assert_eq!(pool.capacity(), 10);
-    assert_eq!(pool.len(), 1); // One trace returned
-
-    // CowTrace interface (copy-on-write semantics)
-    let base_trace = runtime::trace::Trace::default();
-    let cow_trace = CowTrace::from_trace(base_trace.clone()); // Use from_trace
-    let converted_back = cow_trace.to_trace(); // Use to_trace method
-    assert_eq!(converted_back.choices.len(), base_trace.choices.len());
-
-    // Test CowTrace creation and choices access
-    let cow_trace2 = CowTrace::new();
-    let choices = cow_trace2.choices(); // Read-only access
-    assert!(choices.is_empty());
-
-    // TraceBuilder interface
-    let mut builder = TraceBuilder::new();
-    builder.add_sample(addr!("test"), 1.0, -0.5); // Use add_sample method
-    let built_trace = builder.build();
-    assert_eq!(built_trace.get_f64(&addr!("test")), Some(1.0));
-
-    // Test other builder methods
-    let mut builder2 = TraceBuilder::new();
-    builder2.add_sample_bool(addr!("bool_test"), true, -0.7);
-    builder2.add_observation(-1.2);
-    builder2.add_factor(-0.3);
-    let built_trace2 = builder2.build();
-    assert_eq!(built_trace2.get_bool(&addr!("bool_test")), Some(true));
-    assert!((built_trace2.log_likelihood + 1.2).abs() < 1e-12);
-    assert!((built_trace2.log_factors + 0.3).abs() < 1e-12);
-}
+// FG-22/FG-62/FG-63/FG-64: the memory-optimization subsystem (TracePool,
+// CowTrace, TraceBuilder, PooledPriorHandler) was benchmarked against the shipped
+// PriorHandler and won by <4% end-to-end — below the bar to keep a dead
+// subsystem — so it was removed. Its dedicated API-contract test went with it.
 
 #[test]
 fn test_compatibility_legacy_patterns() {
@@ -560,10 +513,10 @@ fn test_compatibility_legacy_patterns() {
     assert!(result.is_finite());
     assert!(trace.get_f64(&addr!("param")).is_some());
 
-    // Legacy pattern 2: Manual trace building (if supported)
-    let mut builder = runtime::memory::TraceBuilder::new();
-    builder.add_sample(addr!("manual"), 2.5, -1.0);
-    let manual_trace = builder.build();
+    // Legacy pattern 2: Manual trace building via Trace::insert_choice
+    let mut manual_trace = runtime::trace::Trace::default();
+    manual_trace.insert_choice(addr!("manual"), runtime::trace::ChoiceValue::F64(2.5), -1.0);
+    manual_trace.log_prior += -1.0;
 
     assert_eq!(manual_trace.get_f64(&addr!("manual")), Some(2.5));
     assert!((manual_trace.log_prior + 1.0).abs() < 1e-12);
