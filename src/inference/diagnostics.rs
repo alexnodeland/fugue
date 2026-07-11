@@ -6,15 +6,20 @@
 //!
 //! ## Available Diagnostics
 //!
-//! - **R-hat (Potential Scale Reduction Factor)**: Measures between-chain vs within-chain variance
+//! - **Split-R-hat (Potential Scale Reduction Factor)**: Measures between-chain
+//!   vs within-chain variance after splitting each chain in half (Vehtari et al.
+//!   2021), so within-chain trends are detected. The classic (1992) statistic is
+//!   available via [`classic_r_hat_f64`].
+//! - **Effective sample size**: Routed through the single normalized estimator in
+//!   [`crate::inference::mcmc_utils`]; summaries use the multi-chain estimator.
 //! - **Parameter summaries**: Mean, standard deviation, quantiles for each parameter
 //! - **Diagnostic printing**: Formatted output for quick assessment
 //!
 //! ## Convergence Assessment
 //!
-//! The R-hat statistic compares the variance between multiple chains to the variance
-//! within chains. Values close to 1.0 indicate convergence, while values > 1.1
-//! suggest that chains haven't mixed well and more sampling is needed.
+//! The split-R-hat statistic compares the variance between (split) chains to the
+//! variance within chains. Values close to 1.0 indicate convergence, while values
+//! > 1.1 suggest that chains haven't mixed well and more sampling is needed.
 //!
 //! ## Best Practices
 //!
@@ -61,6 +66,7 @@
 //! ```
 
 use crate::core::address::Address;
+use crate::inference::mcmc_utils::{effective_sample_size_mcmc, effective_sample_size_multichain};
 use crate::runtime::trace::Trace;
 use std::collections::HashMap;
 
@@ -165,7 +171,8 @@ impl Diagnostics<u64> for u64 {
             return None;
         }
 
-        let r_hat_val = r_hat_from_f64_chains(&f64_chains);
+        // Report split-R-hat for consistency with the f64 path (FG-36).
+        let r_hat_val = split_r_hat_from_f64_chains(&f64_chains);
         if r_hat_val.is_finite() {
             Some(r_hat_val)
         } else {
@@ -199,13 +206,56 @@ impl Diagnostics<usize> for usize {
     }
 }
 
-/// Compute R-hat convergence diagnostic for f64 values.
+/// Compute the split-R-hat convergence diagnostic for f64 values.
+///
+/// FG-36: this returns *split*-R-hat (Vehtari et al. 2021), the current best
+/// practice: each chain is split in half and the halves are treated as separate
+/// chains before applying the Gelman-Rubin formula. Splitting lets the
+/// diagnostic detect *within-chain* non-stationarity (e.g. a slow trend) that
+/// classic R-hat misses when all chains drift the same way. The classic (1992)
+/// statistic remains available via [`classic_r_hat_f64`]; summaries report the
+/// split value.
 pub fn r_hat_f64(chains: &[Vec<Trace>], addr: &Address) -> f64 {
     let chain_values: Vec<Vec<f64>> = chains
         .iter()
         .map(|chain| extract_f64_values(chain, addr))
         .collect();
+    split_r_hat_from_f64_chains(&chain_values)
+}
+
+/// Compute the classic (non-split) Gelman & Rubin (1992) R-hat for f64 values.
+///
+/// Retained so callers who specifically want the 1992 statistic can request it;
+/// [`r_hat_f64`] and the parameter summaries use the split variant (FG-36).
+pub fn classic_r_hat_f64(chains: &[Vec<Trace>], addr: &Address) -> f64 {
+    let chain_values: Vec<Vec<f64>> = chains
+        .iter()
+        .map(|chain| extract_f64_values(chain, addr))
+        .collect();
     r_hat_from_f64_chains(&chain_values)
+}
+
+/// Split each chain in half (dropping the middle draw when the length is odd)
+/// and return the `2m` half-chains, per Vehtari et al. (2021).
+fn split_f64_chains(chain_values: &[Vec<f64>]) -> Vec<Vec<f64>> {
+    let mut out = Vec::with_capacity(chain_values.len() * 2);
+    for c in chain_values {
+        let half = c.len() / 2;
+        if half == 0 {
+            // Too short to split; keep as-is so downstream guards handle it.
+            out.push(c.clone());
+            continue;
+        }
+        out.push(c[..half].to_vec());
+        out.push(c[half..2 * half].to_vec());
+    }
+    out
+}
+
+/// Split-R-hat from pre-extracted f64 chains (FG-36).
+fn split_r_hat_from_f64_chains(chain_values: &[Vec<f64>]) -> f64 {
+    let split = split_f64_chains(chain_values);
+    r_hat_from_f64_chains(&split)
 }
 
 /// Helper function to compute R-hat from pre-extracted f64 chains.
@@ -254,60 +304,17 @@ fn r_hat_from_f64_chains(chain_values: &[Vec<f64>]) -> f64 {
 }
 
 /// Compute effective sample size for a single chain.
+///
+/// FG-01: this used to compute `tau` from *raw* autocovariances (never dividing
+/// by the lag-0 variance), which made ESS scale with the parameter's variance
+/// instead of being a dimensionless diagnostic — silently wrong by an order of
+/// magnitude for any parameter whose variance isn't ~1, and able to report
+/// `ESS > n` for variance `< 1`. The buggy estimator has been deleted; this is
+/// now a thin wrapper over the single, correct normalized estimator in
+/// [`crate::inference::mcmc_utils`], so every ESS path in the crate routes
+/// through the same implementation.
 pub fn effective_sample_size(values: &[f64]) -> f64 {
-    if values.len() < 4 {
-        return values.len() as f64;
-    }
-
-    let n = values.len();
-    let mean = values.iter().sum::<f64>() / n as f64;
-
-    // Compute autocorrelations
-    let mut autocorrs = Vec::new();
-    let max_lag = (n / 4).min(200); // Reasonable maximum lag
-
-    for lag in 0..max_lag {
-        if lag >= n - 1 {
-            break;
-        }
-
-        let mut num = 0.0;
-        let mut count = 0;
-
-        for i in 0..(n - lag) {
-            num += (values[i] - mean) * (values[i + lag] - mean);
-            count += 1;
-        }
-
-        if count > 0 {
-            autocorrs.push(num / count as f64);
-        } else {
-            break;
-        }
-    }
-
-    if autocorrs.is_empty() {
-        return n as f64;
-    }
-
-    // Find first negative autocorrelation or use all
-    let mut _sum_autocorr = autocorrs[0]; // lag 0 = variance
-    let mut tau = 1.0;
-
-    for (lag, &rho) in autocorrs.iter().enumerate().skip(1) {
-        if rho <= 0.0 {
-            break;
-        }
-        _sum_autocorr += 2.0 * rho;
-        tau = 1.0 + 2.0 * autocorrs[1..=lag].iter().sum::<f64>();
-
-        // Automatic windowing condition
-        if lag as f64 >= 6.0 * tau {
-            break;
-        }
-    }
-
-    n as f64 / tau
+    effective_sample_size_mcmc(values)
 }
 
 /// Compute summary statistics for a parameter across chains.
@@ -362,13 +369,17 @@ pub fn summarize_f64_parameter(chains: &[Vec<Trace>], addr: &Address) -> Paramet
         quantiles.insert(name.to_string(), sorted_values[idx]);
     }
 
-    // Diagnostics
+    // Diagnostics. FG-36: report split-R-hat. FG-37: compute ESS across ALL
+    // chains (Vehtari et al. 2021 multi-chain estimator), consistent with the
+    // pooled mean/std/quantiles above — the previous code used only the first
+    // chain, discarding (M-1)/M of the data and mislabeling a per-chain ESS as
+    // the parameter's ESS.
     let r_hat_val = r_hat_f64(chains, addr);
-    let ess_val = if !chains.is_empty() {
-        effective_sample_size(&extract_f64_values(&chains[0], addr))
-    } else {
-        0.0
-    };
+    let per_chain_values: Vec<Vec<f64>> = chains
+        .iter()
+        .map(|chain| extract_f64_values(chain, addr))
+        .collect();
+    let ess_val = effective_sample_size_multichain(&per_chain_values);
 
     ParameterSummary {
         mean,

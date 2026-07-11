@@ -36,14 +36,17 @@ pub use inference::abc::{
     abc_rejection, abc_scalar_summary, abc_smc, DistanceFunction, EuclideanDistance,
 };
 pub use inference::diagnostics::{
-    extract_bool_values, extract_f64_values, extract_i64_values, extract_u64_values,
-    extract_usize_values, print_diagnostics, r_hat_f64, summarize_f64_parameter, Diagnostics,
-    ParameterSummary,
+    classic_r_hat_f64, extract_bool_values, extract_f64_values, extract_i64_values,
+    extract_u64_values, extract_usize_values, print_diagnostics, r_hat_f64,
+    summarize_f64_parameter, Diagnostics, ParameterSummary,
 };
 pub use inference::mcmc_utils::{
-    effective_sample_size_mcmc, geweke_diagnostic, DiminishingAdaptation,
+    effective_sample_size_mcmc, effective_sample_size_multichain, geweke_diagnostic,
+    DiminishingAdaptation,
 };
-pub use inference::mh::{adaptive_mcmc_chain, adaptive_single_site_mh};
+pub use inference::mh::{
+    adaptive_mcmc_chain, adaptive_mcmc_chain_with_overrides, adaptive_single_site_mh, SiteProposal,
+};
 pub use inference::smc::{
     adaptive_smc, effective_sample_size, Particle, ResamplingMethod, SMCConfig,
 };
