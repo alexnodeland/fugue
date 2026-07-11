@@ -645,6 +645,224 @@ impl Validate for Categorical {
     }
 }
 
+// FG-55: the seven impls above historically covered only part of the exported
+// distribution suite. The impls below extend `Validate` to the remaining ten
+// exported distributions (LogNormal, Binomial, Poisson, StudentT, Cauchy,
+// Laplace, Weibull, ChiSquared, InverseGamma, DiscreteUniform) so the standalone
+// trait is complete for all 17 distributions re-exported at the crate root. Each
+// impl mirrors the validation performed by the corresponding `new()` constructor
+// in `core::distribution` exactly (same predicates, messages, error codes, and
+// context keys). `tests/f_validate_coverage.rs` guards against future drift.
+
+impl Validate for LogNormal {
+    fn validate(&self) -> FugueResult<()> {
+        if !self.mu().is_finite() {
+            return Err(invalid_params!(
+                "LogNormal",
+                "Mean (mu) must be finite",
+                InvalidMean,
+                "mu" => format!("{}", self.mu())
+            ));
+        }
+        if self.sigma() <= 0.0 || !self.sigma().is_finite() {
+            return Err(invalid_params!(
+                "LogNormal",
+                "Standard deviation (sigma) must be positive and finite",
+                InvalidVariance,
+                "sigma" => format!("{}", self.sigma()),
+                "expected" => "> 0.0 and finite"
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Validate for Binomial {
+    fn validate(&self) -> FugueResult<()> {
+        if !self.p().is_finite() || !(0.0..=1.0).contains(&self.p()) {
+            return Err(invalid_params!(
+                "Binomial",
+                "Probability must be in [0, 1]",
+                InvalidProbability,
+                "p" => format!("{}", self.p()),
+                "expected" => "[0.0, 1.0]"
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Validate for Poisson {
+    fn validate(&self) -> FugueResult<()> {
+        if self.lambda() <= 0.0 || !self.lambda().is_finite() {
+            return Err(invalid_params!(
+                "Poisson",
+                "Rate parameter lambda must be positive and finite",
+                InvalidRate,
+                "lambda" => format!("{}", self.lambda()),
+                "expected" => "> 0.0 and finite"
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Validate for StudentT {
+    fn validate(&self) -> FugueResult<()> {
+        if self.df() <= 0.0 || !self.df().is_finite() {
+            return Err(invalid_params!(
+                "StudentT",
+                "Degrees of freedom must be positive and finite",
+                InvalidShape,
+                "df" => format!("{}", self.df()),
+                "expected" => "> 0.0 and finite"
+            ));
+        }
+        if !self.loc().is_finite() {
+            return Err(invalid_params!(
+                "StudentT",
+                "Location (loc) must be finite",
+                InvalidMean,
+                "loc" => format!("{}", self.loc())
+            ));
+        }
+        if self.scale() <= 0.0 || !self.scale().is_finite() {
+            return Err(invalid_params!(
+                "StudentT",
+                "Scale must be positive and finite",
+                InvalidVariance,
+                "scale" => format!("{}", self.scale()),
+                "expected" => "> 0.0 and finite"
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Validate for Cauchy {
+    fn validate(&self) -> FugueResult<()> {
+        if !self.loc().is_finite() {
+            return Err(invalid_params!(
+                "Cauchy",
+                "Location (loc) must be finite",
+                InvalidMean,
+                "loc" => format!("{}", self.loc())
+            ));
+        }
+        if self.scale() <= 0.0 || !self.scale().is_finite() {
+            return Err(invalid_params!(
+                "Cauchy",
+                "Scale must be positive and finite",
+                InvalidVariance,
+                "scale" => format!("{}", self.scale()),
+                "expected" => "> 0.0 and finite"
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Validate for Laplace {
+    fn validate(&self) -> FugueResult<()> {
+        if !self.loc().is_finite() {
+            return Err(invalid_params!(
+                "Laplace",
+                "Location (loc) must be finite",
+                InvalidMean,
+                "loc" => format!("{}", self.loc())
+            ));
+        }
+        if self.scale() <= 0.0 || !self.scale().is_finite() {
+            return Err(invalid_params!(
+                "Laplace",
+                "Scale must be positive and finite",
+                InvalidVariance,
+                "scale" => format!("{}", self.scale()),
+                "expected" => "> 0.0 and finite"
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Validate for Weibull {
+    fn validate(&self) -> FugueResult<()> {
+        if self.shape() <= 0.0 || !self.shape().is_finite() {
+            return Err(invalid_params!(
+                "Weibull",
+                "Shape parameter must be positive and finite",
+                InvalidShape,
+                "shape" => format!("{}", self.shape()),
+                "expected" => "> 0.0 and finite"
+            ));
+        }
+        if self.scale() <= 0.0 || !self.scale().is_finite() {
+            return Err(invalid_params!(
+                "Weibull",
+                "Scale parameter must be positive and finite",
+                InvalidVariance,
+                "scale" => format!("{}", self.scale()),
+                "expected" => "> 0.0 and finite"
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Validate for ChiSquared {
+    fn validate(&self) -> FugueResult<()> {
+        if self.k() <= 0.0 || !self.k().is_finite() {
+            return Err(invalid_params!(
+                "ChiSquared",
+                "Degrees of freedom must be positive and finite",
+                InvalidShape,
+                "k" => format!("{}", self.k()),
+                "expected" => "> 0.0 and finite"
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Validate for InverseGamma {
+    fn validate(&self) -> FugueResult<()> {
+        if self.shape() <= 0.0 || !self.shape().is_finite() {
+            return Err(invalid_params!(
+                "InverseGamma",
+                "Shape parameter must be positive and finite",
+                InvalidShape,
+                "shape" => format!("{}", self.shape()),
+                "expected" => "> 0.0 and finite"
+            ));
+        }
+        if self.rate() <= 0.0 || !self.rate().is_finite() {
+            return Err(invalid_params!(
+                "InverseGamma",
+                "Rate parameter must be positive and finite",
+                InvalidRate,
+                "rate" => format!("{}", self.rate()),
+                "expected" => "> 0.0 and finite"
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Validate for DiscreteUniform {
+    fn validate(&self) -> FugueResult<()> {
+        if self.high() < self.low() {
+            return Err(invalid_params!(
+                "DiscreteUniform",
+                "Upper bound must be >= lower bound",
+                InvalidRange,
+                "low" => format!("{}", self.low()),
+                "high" => format!("{}", self.high())
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -740,10 +958,26 @@ mod tests {
 
     #[test]
     fn validate_trait_on_valid_distributions() {
+        // FG-55: `Validate` is implemented for all 17 exported distributions;
+        // exercise a valid instance of each here. `tests/f_validate_coverage.rs`
+        // is the public-API drift guard.
         assert!(Normal::new(0.0, 1.0).unwrap().validate().is_ok());
+        assert!(Exponential::new(1.0).unwrap().validate().is_ok());
+        assert!(Beta::new(2.0, 3.0).unwrap().validate().is_ok());
+        assert!(Gamma::new(2.0, 1.0).unwrap().validate().is_ok());
         assert!(Uniform::new(0.0, 1.0).unwrap().validate().is_ok());
         assert!(Bernoulli::new(0.5).unwrap().validate().is_ok());
         assert!(Categorical::new(vec![0.2, 0.8]).unwrap().validate().is_ok());
+        assert!(LogNormal::new(0.0, 1.0).unwrap().validate().is_ok());
+        assert!(Binomial::new(10, 0.5).unwrap().validate().is_ok());
+        assert!(Poisson::new(3.0).unwrap().validate().is_ok());
+        assert!(StudentT::new(5.0, 0.0, 1.0).unwrap().validate().is_ok());
+        assert!(Cauchy::new(0.0, 1.0).unwrap().validate().is_ok());
+        assert!(Laplace::new(0.0, 1.0).unwrap().validate().is_ok());
+        assert!(Weibull::new(2.0, 1.5).unwrap().validate().is_ok());
+        assert!(ChiSquared::new(4.0).unwrap().validate().is_ok());
+        assert!(InverseGamma::new(3.0, 2.0).unwrap().validate().is_ok());
+        assert!(DiscreteUniform::new(1, 6).unwrap().validate().is_ok());
     }
 
     #[test]

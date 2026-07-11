@@ -2379,4 +2379,108 @@ mod tests {
         let du_mean = du_samples.iter().map(|&k| k as f64).sum::<f64>() / n as f64;
         assert!((du_mean - 3.5).abs() < 0.05);
     }
+
+    // FG-55: `Validate` is now implemented for every exported distribution. The
+    // trait mirrors each `new()` constructor, so an *invalid* instance can only
+    // be built here — via a struct literal with private fields, which is only
+    // possible inside this module. One case per newly implemented distribution
+    // (LogNormal, Binomial, Poisson, StudentT, Cauchy, Laplace, Weibull,
+    // ChiSquared, InverseGamma, DiscreteUniform), asserting the same error code
+    // the corresponding constructor emits. (The public, valid-instance
+    // exhaustiveness guard lives in `tests/f_validate_coverage.rs`.)
+    #[test]
+    fn fg55_validate_rejects_invalid_parameters() {
+        use crate::error::{ErrorCode, Validate};
+
+        // LogNormal: non-positive sigma -> InvalidVariance.
+        assert_eq!(
+            LogNormal {
+                mu: 0.0,
+                sigma: 0.0
+            }
+            .validate()
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidVariance
+        );
+        // Binomial: probability outside [0, 1] -> InvalidProbability.
+        assert_eq!(
+            Binomial { n: 10, p: 1.5 }.validate().unwrap_err().code(),
+            ErrorCode::InvalidProbability
+        );
+        // Poisson: non-positive rate -> InvalidRate.
+        assert_eq!(
+            Poisson { lambda: -1.0 }.validate().unwrap_err().code(),
+            ErrorCode::InvalidRate
+        );
+        // StudentT: non-positive degrees of freedom -> InvalidShape.
+        assert_eq!(
+            StudentT {
+                df: 0.0,
+                loc: 0.0,
+                scale: 1.0
+            }
+            .validate()
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidShape
+        );
+        // Cauchy: non-positive scale -> InvalidVariance.
+        assert_eq!(
+            Cauchy {
+                loc: 0.0,
+                scale: -1.0
+            }
+            .validate()
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidVariance
+        );
+        // Laplace: non-finite location -> InvalidMean.
+        assert_eq!(
+            Laplace {
+                loc: f64::NAN,
+                scale: 1.0
+            }
+            .validate()
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidMean
+        );
+        // Weibull: non-positive shape -> InvalidShape.
+        assert_eq!(
+            Weibull {
+                shape: -2.0,
+                scale: 1.0
+            }
+            .validate()
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidShape
+        );
+        // ChiSquared: non-positive degrees of freedom -> InvalidShape.
+        assert_eq!(
+            ChiSquared { k: 0.0 }.validate().unwrap_err().code(),
+            ErrorCode::InvalidShape
+        );
+        // InverseGamma: non-positive rate -> InvalidRate.
+        assert_eq!(
+            InverseGamma {
+                shape: 2.0,
+                rate: -1.0
+            }
+            .validate()
+            .unwrap_err()
+            .code(),
+            ErrorCode::InvalidRate
+        );
+        // DiscreteUniform: high < low -> InvalidRange.
+        assert_eq!(
+            DiscreteUniform { low: 5, high: 1 }
+                .validate()
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidRange
+        );
+    }
 }
