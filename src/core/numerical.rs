@@ -151,15 +151,20 @@ mod tests {
 
     #[test]
     fn test_log_sum_exp_stability() {
-        // Test with extreme values
-        let large_vals = vec![700.0, 701.0, 699.0];
-        let result = log_sum_exp(&large_vals);
-        assert!(result.is_finite());
+        // FG-32: exact value, not just finiteness.
+        // 701 + ln(e^-1 + 1 + e^-2) = 701.4076059644444
+        assert!((log_sum_exp(&[700.0, 701.0, 699.0]) - 701.4076059644444).abs() < 1e-9);
+
+        // Single-element input returns the element exactly.
+        assert_eq!(log_sum_exp(&[5.0]), 5.0);
 
         // Test with small values
         let small_vals = vec![-700.0, -701.0, -699.0];
         let result = log_sum_exp(&small_vals);
         assert!(result.is_finite());
+
+        // Extreme spread: the small term underflows, ln(1 + e^-1000) == 0.
+        assert_eq!(log_sum_exp(&[0.0, -1000.0]), 0.0);
 
         // Test empty case
         assert_eq!(log_sum_exp(&[]), f64::NEG_INFINITY);
@@ -179,17 +184,22 @@ mod tests {
         // Should sum to 1.0
         assert!((probs.iter().sum::<f64>() - 1.0).abs() < 1e-10);
 
-        // Should be in correct ratios
-        assert!(probs[0] > probs[1]);
-        assert!(probs[1] > probs[2]);
+        // FG-32: exact softmax values and ratios, not merely ordering.
+        assert!((probs[0] - 0.6652409557748219).abs() < 1e-9);
+        assert!((probs[1] - 0.24472847105479764).abs() < 1e-9);
+        assert!((probs[2] - 0.09003057317038043).abs() < 1e-9);
+        // Adjacent ratio is exp(-1 - (-2)) = e.
+        assert!((probs[0] / probs[1] - std::f64::consts::E).abs() < 1e-9);
     }
 
     #[test]
     fn test_log1p_exp_stability() {
-        // Test extreme cases
+        // FG-32: exact values at hand-computable points.
+        assert!((log1p_exp(0.0) - std::f64::consts::LN_2).abs() < 1e-9); // ln(2)
+        assert!((log1p_exp(2.0) - 2.1269280110429727).abs() < 1e-9); // ln(1 + e^2)
         assert!((log1p_exp(50.0) - 50.0).abs() < 1e-10);
-        assert!(log1p_exp(-50.0) < 1e-10);
-        assert!(log1p_exp(0.0).abs() < 1.0);
+        assert!((log1p_exp(-50.0) - 1.9287498479639178e-22).abs() < 1e-31);
+        assert_eq!(log1p_exp(-1000.0), 0.0);
     }
 
     #[test]
