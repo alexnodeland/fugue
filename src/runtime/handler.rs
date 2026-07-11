@@ -39,6 +39,20 @@ pub trait Handler {
     /// Handle a usize sampling operation (Categorical).
     fn on_sample_usize(&mut self, addr: &Address, dist: &dyn Distribution<usize>) -> usize;
 
+    /// Handle an i64 sampling operation (signed discrete distributions).
+    ///
+    /// This has a default implementation that panics so that handlers written
+    /// before the i64 sample path existed keep compiling unchanged; every
+    /// handler shipped in this crate overrides it. A model only reaches this
+    /// method if it contains a [`Model::SampleI64`](crate::Model::SampleI64)
+    /// node (e.g. a future `DiscreteUniform` distribution).
+    fn on_sample_i64(&mut self, addr: &Address, _dist: &dyn Distribution<i64>) -> i64 {
+        panic!(
+            "handler does not implement on_sample_i64 (i64 sample site at {})",
+            addr
+        )
+    }
+
     /// Handle an f64 observation operation.
     fn on_observe_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>, value: f64);
 
@@ -50,6 +64,17 @@ pub trait Handler {
 
     /// Handle a usize observation operation.
     fn on_observe_usize(&mut self, addr: &Address, dist: &dyn Distribution<usize>, value: usize);
+
+    /// Handle an i64 observation operation.
+    ///
+    /// Defaults to a panic for the same forward-compatibility reason as
+    /// [`Handler::on_sample_i64`]; all in-crate handlers override it.
+    fn on_observe_i64(&mut self, addr: &Address, _dist: &dyn Distribution<i64>, _value: i64) {
+        panic!(
+            "handler does not implement on_observe_i64 (i64 observe site at {})",
+            addr
+        )
+    }
 
     /// Handle a factor operation.
     ///
@@ -97,24 +122,36 @@ pub trait Handler {
 /// assert!(trace.total_log_weight().is_finite());
 /// ```
 pub fn run<A>(mut h: impl Handler, m: Model<A>) -> (A, Trace) {
-    fn go<A>(h: &mut impl Handler, m: Model<A>) -> A {
-        match m {
-            Model::Pure(a) => a,
+    // Iterative trampoline (FG-19): the model is a CPS-encoded linked list of
+    // continuations, so we interpret it in an explicit loop instead of the old
+    // `go(h, k(x))` recursion. This keeps interpretation O(1) in stack depth
+    // regardless of model length, so deep chains (e.g. `plate!`/`sequence_vec`
+    // over thousands of sites, or a 100k-deep sample+bind loop) no longer
+    // overflow the stack. Each effectful node advances `m` to its continuation
+    // `k(value)` and loops; only `Model::Pure` terminates.
+    let mut m = m;
+    let a = loop {
+        m = match m {
+            Model::Pure(a) => break a,
             Model::SampleF64 { addr, dist, k } => {
                 let x = h.on_sample_f64(&addr, &*dist);
-                go(h, k(x))
+                k(x)
             }
             Model::SampleBool { addr, dist, k } => {
                 let x = h.on_sample_bool(&addr, &*dist);
-                go(h, k(x))
+                k(x)
             }
             Model::SampleU64 { addr, dist, k } => {
                 let x = h.on_sample_u64(&addr, &*dist);
-                go(h, k(x))
+                k(x)
             }
             Model::SampleUsize { addr, dist, k } => {
                 let x = h.on_sample_usize(&addr, &*dist);
-                go(h, k(x))
+                k(x)
+            }
+            Model::SampleI64 { addr, dist, k } => {
+                let x = h.on_sample_i64(&addr, &*dist);
+                k(x)
             }
             Model::ObserveF64 {
                 addr,
@@ -123,7 +160,7 @@ pub fn run<A>(mut h: impl Handler, m: Model<A>) -> (A, Trace) {
                 k,
             } => {
                 h.on_observe_f64(&addr, &*dist, value);
-                go(h, k(()))
+                k(())
             }
             Model::ObserveBool {
                 addr,
@@ -132,7 +169,7 @@ pub fn run<A>(mut h: impl Handler, m: Model<A>) -> (A, Trace) {
                 k,
             } => {
                 h.on_observe_bool(&addr, &*dist, value);
-                go(h, k(()))
+                k(())
             }
             Model::ObserveU64 {
                 addr,
@@ -141,7 +178,7 @@ pub fn run<A>(mut h: impl Handler, m: Model<A>) -> (A, Trace) {
                 k,
             } => {
                 h.on_observe_u64(&addr, &*dist, value);
-                go(h, k(()))
+                k(())
             }
             Model::ObserveUsize {
                 addr,
@@ -150,15 +187,23 @@ pub fn run<A>(mut h: impl Handler, m: Model<A>) -> (A, Trace) {
                 k,
             } => {
                 h.on_observe_usize(&addr, &*dist, value);
-                go(h, k(()))
+                k(())
+            }
+            Model::ObserveI64 {
+                addr,
+                dist,
+                value,
+                k,
+            } => {
+                h.on_observe_i64(&addr, &*dist, value);
+                k(())
             }
             Model::Factor { logw, k } => {
                 h.on_factor(logw);
-                go(h, k(()))
+                k(())
             }
-        }
-    }
-    let a = go(&mut h, m);
+        };
+    };
     let t = h.finish();
     (a, t)
 }
@@ -198,5 +243,48 @@ mod tests {
         assert!(trace.log_likelihood.is_finite());
         // Factor contributes exact -1.0
         assert!((trace.log_factors + 1.0).abs() < 1e-12);
+    }
+
+    // Regression for FG-19: interpretation must be stack-safe. Before the
+    // trampoline, `run` recursed once per effectful node (`go(h, k(x))`), so a
+    // deep sample+bind chain overflowed the stack. This model is a loop of
+    // 100_000 sequential `sample`+`bind` sites (the accumulator is threaded as a
+    // plain parameter so each continuation directly yields the next node); it
+    // overflows the stack on the pre-fix recursive interpreter and completes in
+    // O(1) stack on the trampoline. Runs on a small-stack thread to make the
+    // guarantee explicit rather than relying on the test harness's stack size.
+    #[test]
+    fn interpretation_is_stack_safe_for_deep_models() {
+        fn build(i: usize, n: usize, acc: f64) -> Model<f64> {
+            if i >= n {
+                crate::core::model::pure(acc)
+            } else {
+                crate::core::model::sample(addr!("x", i), Normal::new(0.0, 1.0).unwrap())
+                    .bind(move |x| build(i + 1, n, acc + x))
+            }
+        }
+
+        // 512 KiB stack: comfortably too small for 100_000 recursive frames,
+        // but ample for the constant-stack trampoline.
+        let handle = std::thread::Builder::new()
+            .stack_size(512 * 1024)
+            .spawn(|| {
+                let n = 100_000;
+                let mut rng = StdRng::seed_from_u64(2024);
+                let (sum, trace) = crate::runtime::handler::run(
+                    PriorHandler {
+                        rng: &mut rng,
+                        trace: Trace::default(),
+                    },
+                    build(0, n, 0.0),
+                );
+                assert!(sum.is_finite());
+                assert_eq!(trace.choices.len(), n);
+                assert!(trace.log_prior.is_finite());
+            })
+            .expect("spawn thread");
+        handle
+            .join()
+            .expect("deep model interpretation overflowed the stack");
     }
 }

@@ -56,6 +56,16 @@ pub enum Model<A> {
         /// Continuation function to apply to the sampled value.
         k: Box<dyn FnOnce(usize) -> Model<A> + Send + 'static>,
     },
+    /// Sample from an i64 distribution (signed discrete distributions, e.g. a
+    /// future `DiscreteUniform` over a signed range).
+    SampleI64 {
+        /// Unique identifier for this sampling site.
+        addr: Address,
+        /// Distribution to sample from.
+        dist: Box<dyn Distribution<i64>>,
+        /// Continuation function to apply to the sampled value.
+        k: Box<dyn FnOnce(i64) -> Model<A> + Send + 'static>,
+    },
     /// Observe/condition on an f64 value.
     ObserveF64 {
         /// Unique identifier for this observation site.
@@ -97,6 +107,17 @@ pub enum Model<A> {
         dist: Box<dyn Distribution<usize>>,
         /// The observed value to condition on.
         value: usize,
+        /// Continuation function (always receives unit).
+        k: Box<dyn FnOnce(()) -> Model<A> + Send + 'static>,
+    },
+    /// Observe/condition on an i64 value.
+    ObserveI64 {
+        /// Unique identifier for this observation site.
+        addr: Address,
+        /// Distribution that generates the observed value.
+        dist: Box<dyn Distribution<i64>>,
+        /// The observed value to condition on.
+        value: i64,
         /// Continuation function (always receives unit).
         k: Box<dyn FnOnce(()) -> Model<A> + Send + 'static>,
     },
@@ -178,6 +199,33 @@ pub fn sample_u64(addr: Address, dist: impl Distribution<u64> + 'static) -> Mode
 /// ```
 pub fn sample_usize(addr: Address, dist: impl Distribution<usize> + 'static) -> Model<usize> {
     Model::SampleUsize {
+        addr,
+        dist: Box::new(dist),
+        k: Box::new(pure),
+    }
+}
+
+/// Sample from an i64 distribution (signed discrete distributions).
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// # use fugue::core::model::sample_i64;
+/// # use fugue::core::distribution::Distribution;
+/// # use rand::RngCore;
+/// // A tiny signed-discrete distribution (a real `DiscreteUniform` lands in a
+/// // later work package); shown here only to illustrate the i64 sample path.
+/// #[derive(Clone)]
+/// struct AlwaysZero;
+/// impl Distribution<i64> for AlwaysZero {
+///     fn sample(&self, _rng: &mut dyn RngCore) -> i64 { 0 }
+///     fn log_prob(&self, x: &i64) -> f64 { if *x == 0 { 0.0 } else { f64::NEG_INFINITY } }
+///     fn clone_box(&self) -> Box<dyn Distribution<i64>> { Box::new(self.clone()) }
+/// }
+/// let model = sample_i64(addr!("k"), AlwaysZero);
+/// ```
+pub fn sample_i64(addr: Address, dist: impl Distribution<i64> + 'static) -> Model<i64> {
+    Model::SampleI64 {
         addr,
         dist: Box::new(dist),
         k: Box::new(pure),
@@ -301,6 +349,27 @@ impl SampleType for usize {
         value: usize,
     ) -> Model<()> {
         Model::ObserveUsize {
+            addr,
+            dist,
+            value,
+            k: Box::new(pure),
+        }
+    }
+}
+impl SampleType for i64 {
+    fn make_sample_model(addr: Address, dist: Box<dyn Distribution<i64>>) -> Model<i64> {
+        Model::SampleI64 {
+            addr,
+            dist,
+            k: Box::new(pure),
+        }
+    }
+    fn make_observe_model(
+        addr: Address,
+        dist: Box<dyn Distribution<i64>>,
+        value: i64,
+    ) -> Model<()> {
+        Model::ObserveI64 {
             addr,
             dist,
             value,
@@ -443,6 +512,11 @@ impl<A: 'static> ModelExt<A> for Model<A> {
                 dist,
                 k: Box::new(move |x| k1(x).bind(k)),
             },
+            Model::SampleI64 { addr, dist, k: k1 } => Model::SampleI64 {
+                addr,
+                dist,
+                k: Box::new(move |x| k1(x).bind(k)),
+            },
             Model::ObserveF64 {
                 addr,
                 dist,
@@ -482,6 +556,17 @@ impl<A: 'static> ModelExt<A> for Model<A> {
                 value,
                 k: k1,
             } => Model::ObserveUsize {
+                addr,
+                dist,
+                value,
+                k: Box::new(move |()| k1(()).bind(k)),
+            },
+            Model::ObserveI64 {
+                addr,
+                dist,
+                value,
+                k: k1,
+            } => Model::ObserveI64 {
                 addr,
                 dist,
                 value,
