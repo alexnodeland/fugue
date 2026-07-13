@@ -58,6 +58,8 @@ Most PPLs make every draw a `f64`, so a coin flip comes back as `1.0` and you
 compare floats; a count comes back as `4.0` and you round it. Fugue draws return
 their **natural type**, checked at compile time.
 
+<div class="fugue-explorable fv-inline" data-viz="type-flow" data-caption="Each sampler drops its draw into a slot of its natural type — a bool, a u64 count, a usize index — never a float you have to decode."></div>
+
 ```rust
 use fugue::*;
 use rand::thread_rng;

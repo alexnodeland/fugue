@@ -103,6 +103,7 @@
       cursor = 0; walkActive = -1;
       autoPlay = false; stepClock = 0; updatePlayLabel();
       muCurrent = drawMu();
+      rainTicks = null; // §A.6: a Perform ×200 cloud must not survive Reset
       if (loopApi) loopApi.pause();
       updateReadouts(); render();
     }
@@ -330,8 +331,10 @@
       for (var d = 0; d < N; d++) {
         var dx = xs(data[d]), dy = L.dotY;
         var activeObs = (walkActive === d + 1);
+        var grabbing = dragHandle && dragHandle.grabbed && dragHandle.target === d;
         var pulse = (activeObs && !loopApi.reduced) ? 0.5 + 0.5 * Math.sin(now / 200) : 0;
-        var rad = 7 + (activeObs ? 2 : 0);
+        var rad = 7 + (activeObs ? 2 : 0) + (grabbing ? 2 : 0);
+        if (grabbing) FV.halo(ctx, dx, dy, rad + 8); // §A.2 grab halo
         ctx.save();
         if (activeObs) {
           ctx.globalAlpha = 0.25 + 0.35 * pulse;
@@ -484,53 +487,39 @@
     }
 
     // ---------------------------------------------------------- interactions
-    // Drag a data dot in the hero.
-    var dragIdx = -1;
-    function heroPt(ev) {
-      var r = hero.el.getBoundingClientRect();
-      return { x: ev.clientX - r.left, y: ev.clientY - r.top };
-    }
-    function dotHit(px, py) {
-      if (!heroLayout) return -1;
-      var xs = heroLayout.xs, dy = heroLayout.dotY;
-      for (var d = 0; d < N; d++) {
-        var dx = xs(data[d]);
-        if ((px - dx) * (px - dx) + (py - dy) * (py - dy) <= 196) return d;
-      }
-      return -1;
-    }
-    hero.el.addEventListener("pointerdown", function (ev) {
-      var p = heroPt(ev);
-      var hit = dotHit(p.x, p.y);
-      if (hit >= 0) {
-        dragIdx = hit; rainTicks = null;
-        if (hero.el.setPointerCapture) try { hero.el.setPointerCapture(ev.pointerId); } catch (e) {}
-        ev.preventDefault();
-      }
-    });
-    hero.el.addEventListener("pointermove", function (ev) {
-      var p = heroPt(ev);
-      if (dragIdx >= 0) {
-        var v = heroLayout.xs.invert(p.x);
+    // Drag a data dot in the hero, via the shared pointer manager. fullCapture is
+    // false: the hero is a tall (≈400px) chart whose bulk is non-interactive, so
+    // the canvas stays touch-action:pan-y — a thumb swiping the chart body scrolls
+    // the page, and only a pointerdown that actually lands on a dot (generous
+    // coarse-pointer slop ≥22px, §A.2) is claimed so the drag never scrolls.
+    var dragHandle = FV.drag(hero.el, {
+      inflate: 14,
+      fullCapture: false,
+      hitTest: function (x, y, slop) {
+        if (!heroLayout) return -1;
+        var xs = heroLayout.xs, dy = heroLayout.dotY;
+        var r = Math.max(14, slop), best = -1, bestD = r * r;
+        for (var d = 0; d < N; d++) {
+          var dx = xs(data[d]);
+          var dd = (x - dx) * (x - dx) + (y - dy) * (y - dy);
+          if (dd <= bestD) { bestD = dd; best = d; }
+        }
+        return best; // -1 = miss (page scrolls, rain untouched)
+      },
+      onStart: function () { rainTicks = null; },
+      onDrag: function (idx, x) {
+        if (!heroLayout) return;
+        var v = heroLayout.xs.invert(x);
         v = Math.max(-3.5, Math.min(5.5, v));
-        data[dragIdx] = v;
+        data[idx] = v;
         updateReadouts(); render();
-        ev.preventDefault();
-      } else {
-        hero.el.style.cursor = dotHit(p.x, p.y) >= 0 ? "grab" : "default";
       }
     });
-    function endDrag(ev) {
-      if (dragIdx >= 0 && hero.el.releasePointerCapture) {
-        try { hero.el.releasePointerCapture(ev.pointerId); } catch (e) {}
-      }
-      dragIdx = -1;
-    }
-    hero.el.addEventListener("pointerup", endDrag);
-    hero.el.addEventListener("pointercancel", endDrag);
 
-    // Click the strip to Step.
-    strip.el.addEventListener("pointerdown", function (ev) { ev.preventDefault(); onStep(); });
+    // Tap (not swipe) the strip to Step. A plain `click` fires only on a tap and
+    // is suppressed by the browser after a scroll, so a thumb swiping over the
+    // strip scrolls the page instead of stepping (§A.1 — no preventDefault here).
+    strip.el.addEventListener("click", function () { onStep(); });
 
     // ---------------------------------------------------------------- boot
     var loopApi = FV.loop(root, tick);

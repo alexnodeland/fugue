@@ -52,6 +52,8 @@ For a coin this product has a closed form. A Beta prior multiplied by
 
 $$\underbrace{\textcolor{#58A6FF}{\mathrm{Beta}(\alpha,\beta)}}_{\text{prior}} \times \underbrace{\textcolor{#F2CC60}{p^{\,h}(1-p)^{\,t}}}_{\text{likelihood}} \;\propto\; \underbrace{\textcolor{#56D364}{\mathrm{Beta}(\alpha+h,\ \beta+t)}}_{\text{posterior}}$$
 
+<div class="fugue-explorable fv-inline" data-viz="seq-update" data-seed="11" data-caption="The same posterior, built one flip at a time: Beta(1+k, 1+n−k) sharpens as n grows from 0 to 16 — each new datum folds straight into α or β."></div>
+
 Every heads slides one unit of belief into α; every tails, into β. That is why
 **Replay** works: feeding the flips one at a time, using each posterior as the
 next prior, lands on exactly the same green curve as folding them in all at

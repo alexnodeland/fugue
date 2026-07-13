@@ -918,39 +918,71 @@
       if (o.onInput) o.onInput(value);
     }
 
-    var dragging = false, startX = 0, startVal = 0;
+    var dragging = false, startX = 0, startVal = 0, pid = null;
     var range = (max - min) || 1;
+    // Prefer Pointer Events: setPointerCapture keeps move/up on the span itself
+    // (no window listeners), and `.fv-scrub` sets touch-action:none, so a thumb
+    // drag scrubs cleanly and never scroll-fights the page. Legacy fallback keeps
+    // the old mouse+touch path for browsers without PointerEvent.
+    var usePointer = typeof window !== "undefined" && !!window.PointerEvent;
 
+    function coordX(e) {
+      if (e.touches && e.touches[0]) return e.touches[0].clientX;
+      if (e.changedTouches && e.changedTouches[0]) return e.changedTouches[0].clientX;
+      return e.clientX;
+    }
     function onDown(e) {
       dragging = true;
-      startX = (e.touches ? e.touches[0].clientX : e.clientX);
+      startX = coordX(e);
       startVal = value;
       spanEl.classList.add("fv-scrub-active");
+      if (usePointer) {
+        pid = e.pointerId;
+        if (spanEl.setPointerCapture && pid != null) {
+          try { spanEl.setPointerCapture(pid); } catch (err) {}
+        }
+      } else {
+        window.addEventListener("mousemove", onMove);
+        window.addEventListener("mouseup", onUp);
+        window.addEventListener("touchmove", onMove, { passive: false });
+        window.addEventListener("touchend", onUp);
+      }
       if (e.cancelable) e.preventDefault();
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
-      window.addEventListener("touchmove", onMove, { passive: false });
-      window.addEventListener("touchend", onUp);
     }
     function onMove(e) {
       if (!dragging) return;
-      var cx = (e.touches ? e.touches[0].clientX : e.clientX);
-      var dx = cx - startX;
+      if (usePointer && pid != null && e.pointerId != null && e.pointerId !== pid) return;
+      var dx = coordX(e) - startX;
       // ~200px of drag traverses the full range
       value = clamp(startVal + (dx / 200) * range);
       emit();
       if (e.cancelable) e.preventDefault();
     }
-    function onUp() {
+    function onUp(e) {
+      if (!dragging) return;
       dragging = false;
       spanEl.classList.remove("fv-scrub-active");
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-      window.removeEventListener("touchmove", onMove);
-      window.removeEventListener("touchend", onUp);
+      if (usePointer) {
+        if (spanEl.releasePointerCapture && pid != null) {
+          try { spanEl.releasePointerCapture(pid); } catch (err) {}
+        }
+        pid = null;
+      } else {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+        window.removeEventListener("touchmove", onMove);
+        window.removeEventListener("touchend", onUp);
+      }
     }
-    spanEl.addEventListener("mousedown", onDown);
-    spanEl.addEventListener("touchstart", onDown, { passive: false });
+    if (usePointer) {
+      spanEl.addEventListener("pointerdown", onDown);
+      spanEl.addEventListener("pointermove", onMove);
+      spanEl.addEventListener("pointerup", onUp);
+      spanEl.addEventListener("pointercancel", onUp);
+    } else {
+      spanEl.addEventListener("mousedown", onDown);
+      spanEl.addEventListener("touchstart", onDown, { passive: false });
+    }
     spanEl.addEventListener("keydown", function (e) {
       var d = 0;
       if (e.key === "ArrowLeft" || e.key === "ArrowDown") d = -1;
@@ -1081,6 +1113,224 @@
   }
 
   // ==========================================================================
+  // Touch & smoothness helpers (see §A of the explorables spec)
+  //
+  // These exist so every widget handles a thumb the same, correct way:
+  //  - a canvas drag NEVER scroll-fights the page (claim the gesture only on a
+  //    real hit; otherwise let the page scroll),
+  //  - coarse pointers get inflated hit targets (>=22 CSS px),
+  //  - state advances on its own clock while render tweens between states.
+  // ==========================================================================
+
+  // True on touch/stylus-primary devices. Checked live (not cached) so hybrid
+  // laptops that gain/lose a touchscreen answer correctly per gesture.
+  function isCoarsePointer() {
+    if (typeof window === "undefined" || !window.matchMedia) return false;
+    try {
+      return window.matchMedia("(pointer: coarse)").matches;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // drag(canvasEl, opts) -> handle. An OPT-IN pointer drag manager for a canvas.
+  //
+  // The whole point is scroll-fight avoidance: on pointerdown it runs your
+  // hitTest; ONLY when that returns a target does it claim the gesture
+  // (setPointerCapture + preventDefault) so the drag can never scroll the page.
+  // A miss is ignored entirely, so a thumb on empty canvas still scrolls.
+  //
+  // opts:
+  //   hitTest(x, y, slop) -> target   REQUIRED. x,y are CSS px from the canvas
+  //       top-left; `slop` is the current hit-inflation (>=22 on coarse pointers,
+  //       else opts.inflate). Return any truthy target (an index, an object) the
+  //       pointer is over, or a "miss" sentinel: null / undefined / false / -1.
+  //   onStart(target, x, y, ev)       optional; once when a grab begins.
+  //   onDrag(target, x, y, ev)        called on every move while grabbing.
+  //   onEnd(target, ev)               optional; when the grab releases/cancels.
+  //   inflate  (number, default 0)    base hit slop on FINE pointers; coarse
+  //                                   pointers always get at least 22.
+  //   fullCapture (bool, default true) true adds `.fv-touch-none` to the canvas
+  //       (touch-action:none) — the whole canvas is treated as interactive, so a
+  //       drag is perfectly smooth but a plain swipe over it won't scroll the
+  //       page. Set false for a mostly-ambient canvas that should still scroll on
+  //       a swipe (a hit is still claimed best-effort). Ambient-only micros
+  //       should simply NOT call drag(): their canvas stays pan-y and scrolls.
+  //
+  // Returns { grabbed, target, slop, isCoarse, destroy() } where `grabbed` (bool)
+  // and `target` are live getters — draw your grab halo (see halo()) while
+  // `grabbed` is true. destroy() removes every listener and drops the class.
+  function drag(canvasEl, opts) {
+    opts = opts || {};
+    var hitTest = opts.hitTest || function () { return null; };
+    var baseInflate = opts.inflate || 0;
+    var fullCapture = opts.fullCapture !== false; // default true
+    var usePointer = typeof window !== "undefined" && !!window.PointerEvent;
+
+    if (fullCapture) canvasEl.classList.add("fv-touch-none");
+
+    var state = { grabbed: false, target: null, slop: baseInflate, isCoarse: false };
+    var activeId = null;
+
+    function pt(e) {
+      var t = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]);
+      if (t) return { x: t.clientX, y: t.clientY, id: t.identifier };
+      return { x: e.clientX, y: e.clientY, id: e.pointerId != null ? e.pointerId : 0 };
+    }
+    function local(p) {
+      var r = canvasEl.getBoundingClientRect();
+      return [p.x - r.left, p.y - r.top];
+    }
+    function isHit(t) {
+      return t !== null && t !== undefined && t !== false && t !== -1;
+    }
+    function slopFor() {
+      var c = isCoarsePointer();
+      state.isCoarse = c;
+      return c ? Math.max(22, baseInflate) : baseInflate;
+    }
+    // For a pointer event, only the captured pointer drives move/end.
+    function otherPointer(e) {
+      return usePointer && e.pointerId != null && activeId != null && e.pointerId !== activeId;
+    }
+
+    function begin(e) {
+      if (state.grabbed) return;
+      var slop = slopFor();
+      state.slop = slop;
+      var p = pt(e), xy = local(p);
+      var target = hitTest(xy[0], xy[1], slop);
+      if (!isHit(target)) return; // miss: don't claim — page scrolls, others run
+      state.grabbed = true;
+      state.target = target;
+      activeId = p.id;
+      canvasEl.classList.add("fv-grabbing");
+      if (usePointer && canvasEl.setPointerCapture && e.pointerId != null) {
+        try { canvasEl.setPointerCapture(e.pointerId); } catch (err) {}
+      } else if (!usePointer) {
+        window.addEventListener("mousemove", move);
+        window.addEventListener("mouseup", end);
+        window.addEventListener("touchmove", move, { passive: false });
+        window.addEventListener("touchend", end);
+        window.addEventListener("touchcancel", end);
+      }
+      if (e.cancelable) e.preventDefault();
+      if (opts.onStart) opts.onStart(target, xy[0], xy[1], e);
+    }
+    function move(e) {
+      if (!state.grabbed || otherPointer(e)) return;
+      var xy = local(pt(e));
+      if (opts.onDrag) opts.onDrag(state.target, xy[0], xy[1], e);
+      if (e.cancelable) e.preventDefault();
+    }
+    function end(e) {
+      if (!state.grabbed || otherPointer(e)) return;
+      state.grabbed = false;
+      canvasEl.classList.remove("fv-grabbing");
+      if (usePointer && canvasEl.releasePointerCapture && e.pointerId != null) {
+        try { canvasEl.releasePointerCapture(e.pointerId); } catch (err) {}
+      } else if (!usePointer) {
+        window.removeEventListener("mousemove", move);
+        window.removeEventListener("mouseup", end);
+        window.removeEventListener("touchmove", move);
+        window.removeEventListener("touchend", end);
+        window.removeEventListener("touchcancel", end);
+      }
+      var t = state.target;
+      state.target = null;
+      activeId = null;
+      if (opts.onEnd) opts.onEnd(t, e);
+    }
+    function hover(e) {
+      if (state.grabbed) return;
+      var xy = local(pt(e));
+      canvasEl.style.cursor = isHit(hitTest(xy[0], xy[1], state.slop || baseInflate)) ? "grab" : "";
+    }
+
+    if (usePointer) {
+      canvasEl.addEventListener("pointerdown", begin);
+      canvasEl.addEventListener("pointermove", move);
+      canvasEl.addEventListener("pointerup", end);
+      canvasEl.addEventListener("pointercancel", end);
+      canvasEl.addEventListener("pointermove", hover);
+    } else {
+      canvasEl.addEventListener("mousedown", begin);
+      canvasEl.addEventListener("touchstart", begin, { passive: false });
+      canvasEl.addEventListener("mousemove", hover);
+    }
+
+    return {
+      get grabbed() { return state.grabbed; },
+      get target() { return state.target; },
+      get slop() { return state.slop; },
+      get isCoarse() { return state.isCoarse; },
+      destroy: function () {
+        if (usePointer) {
+          canvasEl.removeEventListener("pointerdown", begin);
+          canvasEl.removeEventListener("pointermove", move);
+          canvasEl.removeEventListener("pointerup", end);
+          canvasEl.removeEventListener("pointercancel", end);
+          canvasEl.removeEventListener("pointermove", hover);
+        } else {
+          canvasEl.removeEventListener("mousedown", begin);
+          canvasEl.removeEventListener("touchstart", begin);
+          canvasEl.removeEventListener("mousemove", hover);
+          window.removeEventListener("mousemove", move);
+          window.removeEventListener("mouseup", end);
+          window.removeEventListener("touchmove", move);
+          window.removeEventListener("touchend", end);
+          window.removeEventListener("touchcancel", end);
+        }
+        if (fullCapture) canvasEl.classList.remove("fv-touch-none");
+      }
+    };
+  }
+
+  // halo(ctx, x, y, r, color, alpha) — draw a soft grab-halo ring at pixel (x,y).
+  // Call from render while a drag handle's api.grabbed is true (§A.2: "show a
+  // subtle halo on the grabbed point while dragging"). Defaults to the hot color.
+  function halo(ctx, x, y, r, color, alpha) {
+    if (!isFinite(x) || !isFinite(y)) return;
+    var col = color || theme().colors.hot;
+    var a = alpha != null ? alpha : 0.35;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, 2 * Math.PI);
+    ctx.globalAlpha = a * 0.4;
+    ctx.fillStyle = col;
+    ctx.fill();
+    ctx.globalAlpha = a;
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = col;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // pace(hz, maxPerFrame) -> step(dt) -> integer count.
+  //
+  // Tick/render decoupling (§A.3): advance logical state at a FIXED `hz`
+  // steps/sec regardless of the render frame rate. Each frame call step(dt) with
+  // that frame's dt (seconds); it returns how many logical ticks to run now,
+  // carrying the sub-tick remainder to the next frame — so no stutter when rAF
+  // drops frames. After a long stall (backgrounded tab) the backlog is capped at
+  // maxPerFrame (default 5) and the remainder dropped, avoiding a spiral of death.
+  //
+  //   var pacer = FV.pace(60);
+  //   ... inside loop tick(dt): for (var n = pacer(dt); n-- > 0; ) advance();
+  function pace(hz, maxPerFrame) {
+    var acc = 0;
+    var cap = maxPerFrame > 0 ? maxPerFrame : 5;
+    return function (dt) {
+      if (!(dt > 0) || !(hz > 0)) return 0;
+      acc += dt * hz;
+      var n = Math.floor(acc);
+      if (n > cap) { n = cap; acc = 0; }
+      else acc -= n;
+      return n;
+    };
+  }
+
+  // ==========================================================================
   // Widget lifecycle — lazy init via IntersectionObserver
   // ==========================================================================
 
@@ -1193,6 +1443,10 @@
     readout: readout,
     scrub: scrub,
     loop: loop,
+    drag: drag,
+    halo: halo,
+    pace: pace,
+    isCoarsePointer: isCoarsePointer,
     _registry: registry,
     _scan: scan
   };

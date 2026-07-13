@@ -40,6 +40,8 @@ it is that belief's ±1σ spread — how sure the filter is, tick by tick.
 5. Change the **seed** scrub, then reset. A seeded run is a replayable trace: same
    seed, same particles, same story, every time.
 
+<div class="fugue-explorable fv-inline" data-viz="ess-timeline" data-adaptive="off" data-seed="11" data-caption="Resampling off: ESS/N sinks under the 0.5 threshold and never climbs back — degeneracy, the swarm collapsing onto a single lineage."></div>
+
 ## What you just saw
 
 The hidden path is a **random walk**; each observation is a **noisy read** of it:

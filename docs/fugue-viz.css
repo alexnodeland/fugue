@@ -63,7 +63,30 @@ html.dark {
   display: block;
   width: 100%;
   border-radius: 6px;
-  touch-action: none; /* let pointer drags on canvas work on touch */
+  /* Default: allow the page to scroll when a thumb swipes the canvas. Ambient
+     micros keep this so they never eat scroll. A widget that owns the whole
+     canvas for interaction opts into full gesture capture via .fv-touch-none
+     (added automatically by FugueViz.drag with its default fullCapture). */
+  touch-action: pan-y;
+}
+
+/* Belt-and-braces: any canvas inside an explorable defaults to pan-y even if a
+   widget forgot the .fv-canvas class. */
+.fugue-explorable canvas {
+  touch-action: pan-y;
+}
+
+/* Full-capture opt-in: the whole canvas is interactive, so no gesture scrolls
+   the page (FugueViz.drag adds/removes this class around a fullCapture drag). */
+.fv-canvas.fv-touch-none,
+.fugue-explorable canvas.fv-touch-none {
+  touch-action: none;
+}
+
+/* Cursor while a FugueViz.drag grab is active (paired with an on-canvas halo). */
+.fv-canvas.fv-grabbing,
+.fugue-explorable canvas.fv-grabbing {
+  cursor: grabbing;
 }
 
 /* ---- Controls row --------------------------------------------------------- */
@@ -198,8 +221,11 @@ html.rust .fv-btn.fv-primary {
   font-variant-numeric: tabular-nums;
   color: var(--fv-prior);
   user-select: none;
+  -webkit-user-select: none;
   padding: 0 1px;
   white-space: nowrap;
+  /* A horizontal thumb-drag scrubs the number; never let it scroll the page. */
+  touch-action: none;
 }
 
 .fv-scrub:focus-visible {
@@ -311,4 +337,67 @@ html.rust .fv-btn.fv-primary {
   font-size: 0.76rem;
   margin-top: 6px;
   line-height: 1.4;
+}
+
+/* ---- Coarse-pointer (touch) sizing bumps ---------------------------------- */
+/* On touch devices grow the tap targets without changing their layout on
+   mouse/trackpad. Native range inputs get a taller hit box; buttons, checkbox,
+   glyph and scrub all reach the ~44px comfortable-touch neighbourhood. */
+@media (pointer: coarse) {
+  .fv-range {
+    height: 30px;
+    width: 160px;
+  }
+  .fv-btn {
+    padding: 8px 14px;
+    font-size: 0.8rem;
+    line-height: 1.5;
+  }
+  .fv-checkbox {
+    width: 20px;
+    height: 20px;
+  }
+  .fv-toggle {
+    gap: 8px;
+  }
+  /* Enlarge the scrub's tap target vertically without shifting the text. */
+  .fv-scrub {
+    padding: 3px 4px;
+  }
+  .fv-glyph {
+    width: 30px;
+    height: 30px;
+    opacity: 0.5;
+    font-size: 0.85rem;
+  }
+}
+
+/* ---- Phone-width layout (~390px and the 320px floor) ---------------------- */
+/* Controls and readouts already wrap (flex-wrap); here we tighten padding and
+   shrink the range width so nothing overflows the panel at narrow widths. */
+@media (max-width: 420px) {
+  .fugue-explorable {
+    padding: 10px 10px;
+  }
+  .fv-controls {
+    gap: 8px 12px;
+  }
+  .fv-readouts {
+    gap: 10px 14px;
+  }
+  .fv-range {
+    width: 130px;
+  }
+}
+
+@media (max-width: 340px) {
+  /* Last resort at the 320px floor: let a range take the full row so it never
+     pushes the panel wider than the viewport. */
+  .fv-control {
+    flex: 1 1 100%;
+  }
+  .fv-range {
+    width: 100%;
+    min-width: 0;
+  }
 }

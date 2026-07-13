@@ -112,6 +112,11 @@
     var chipAnims = {};              // idx -> {kind:'flip'|'enter', t, dur, from}
     var playMode = false;            // auto sequential-updating replay running
     var revealTimer = 0;
+    // Cached 90% credible bounds — recomputed only when the posterior TARGET
+    // changes (updateReadouts), NOT per animation frame. betaQuantile is a
+    // Lentz continued fraction inside an 80-step bisection; recomputing it twice
+    // every rAF during a replay tween was a needless per-frame hot spot (§A.3).
+    var credLo = 0, credHi = 1;
 
     function activeN() { var n = Math.min(revealCount, data.length); return n < 0 ? 0 : n; }
     function activeHeads() { var n = 0, m = activeN(); for (var i = 0; i < m; i++) if (data[i]) n++; return n; }
@@ -212,6 +217,7 @@
       roData.set(h + " H / " + t + " T", "data");
       roMean.set((a / (a + b)).toFixed(3), "post");
       var lo = betaQuantile(0.05, a, b), hi = betaQuantile(0.95, a, b);
+      credLo = lo; credHi = hi; // cache for draw()'s credible band (§A.3)
       roCI.set("[" + lo.toFixed(2) + ", " + hi.toFixed(2) + "]", "post");
       var mode = betaMode(a, b);
       roMap.set(mode >= 0 ? mode.toFixed(3) : "—", "hot");
@@ -326,25 +332,38 @@
       onInput: function (v) { seed = v; deal(v); } // reproducible re-deal
     });
 
-    // ---- Pointer: click a coin chip to flip it -------------------------------
-    cv.el.addEventListener("pointerdown", function (e) {
-      var rect = cv.el.getBoundingClientRect();
-      var px = e.clientX - rect.left;
-      var py = e.clientY - rect.top;
+    // ---- Pointer: tap a coin chip to flip it (shared drag manager) -----------
+    // Chips are tap-targets, not drags, but FV.drag gives us exactly the touch
+    // semantics §A wants: it claims the gesture (setPointerCapture + preventDefault)
+    // ONLY when the pointerdown actually lands on a chip — so a thumb on a chip
+    // flips it and never scrolls, while a thumb anywhere else (the whole 400px
+    // plot region) still scrolls the page. fullCapture:false keeps the canvas at
+    // touch-action:pan-y so that ambient plot area stays scrollable (§A.1). The
+    // hit radius comes from `slop`, which the manager inflates to >=22 CSS px on
+    // coarse pointers (§A.2) while the drawn chip stays a crisp 12px.
+    function chipHitTest(x, y, slop) {
+      var best = null, bestD = Infinity;
       for (var i = 0; i < chips.length; i++) {
         var ch = chips[i];
-        var dx = px - ch.x, dy = py - ch.y;
-        if (dx * dx + dy * dy <= ch.r * ch.r) {
-          playMode = false;
-          var was = data[ch.i];
-          data[ch.i] = !was;
-          chipAnims[ch.i] = { kind: "flip", t: 0, dur: 0.4, from: was };
-          setTarget(true, true);
-          syncPlayLabel();
-          if (e.cancelable) e.preventDefault();
-          return;
-        }
+        var dx = x - ch.x, dy = y - ch.y, d = dx * dx + dy * dy;
+        var rr = Math.max(ch.r, slop); // coarse pointers -> >=22px pick radius
+        if (d <= rr * rr && d < bestD) { best = ch; bestD = d; }
       }
+      return best; // truthy chip object on a hit, null on a miss (index 0 is a
+                   // valid chip, so we must return the object, never the index)
+    }
+    function flipChip(ch) {
+      playMode = false;
+      var was = data[ch.i];
+      data[ch.i] = !was;
+      chipAnims[ch.i] = { kind: "flip", t: 0, dur: 0.4, from: was };
+      setTarget(true, true);
+      syncPlayLabel();
+    }
+    FV.drag(cv.el, {
+      fullCapture: false,           // plot area must still scroll on a swipe
+      hitTest: chipHitTest,
+      onStart: function (ch) { flipChip(ch); } // tap = flip on pointerdown
     });
 
     // ---- Drawing -------------------------------------------------------------
@@ -466,8 +485,9 @@
       var a2 = animA, b2 = animB;
 
       // Posterior credible band (green, faint) under the posterior curve.
-      var qLo = betaQuantile(0.05, targetA, targetB);
-      var qHi = betaQuantile(0.95, targetA, targetB);
+      // Bounds are cached (updateReadouts) — targetA/targetB only change on a
+      // user action, so there is no need to re-solve the quantile every frame.
+      var qLo = credLo, qHi = credHi;
       ctx.save();
       ctx.globalAlpha = 0.16;
       ctx.fillStyle = colors.post;

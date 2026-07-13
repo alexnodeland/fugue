@@ -38,6 +38,8 @@ seed and you get the exact same momenta and trajectories every time.
 
 ## What you just saw
 
+<div class="fugue-explorable fv-inline" data-viz="well-1d" data-caption="A ball with momentum leapfrogs across the double-well barrier (coral) while a random-walk ghost stays trapped — HMC's whole advantage in one strip."></div>
+
 The target is an honest Bayesian linear regression — no banana, no toy density. Each
 observation is Gaussian around the line, with **fixed** noise `σ_obs = 0.8`, and both
 parameters get a `Normal(0, 2.5)` prior:
@@ -82,6 +84,8 @@ strip chart. Keep it small (tune `ε`) and acceptance stays high. Let it explode
 the proposal **diverges**: the trajectory shoots off, `ΔH` blows past any sane bound,
 and the sample is thrown away. Divergences are not a bug to hide — real samplers count
 and report them as a warning that the geometry is too sharp for the current step size.
+
+<div class="fugue-explorable fv-inline" data-viz="eps-divergence" data-L="25" data-caption="Energy error |ΔH| vs step size ε accumulating over transitions: past the cliff near ε≈2 the leapfrog integrator diverges (coral line = |ΔH| = 10³)."></div>
 
 ## The fugue code
 

@@ -294,7 +294,10 @@
     function rebuildHeat(iw, ih, col) {
       iw = Math.max(1, Math.round(iw)); ih = Math.max(1, Math.round(ih));
       heatCanvas.width = iw; heatCanvas.height = ih;
-      var step = 4;
+      // §A.3: while a point is being dragged the grid rebuilds every frame, so
+      // compute it at half resolution (8px cells) during the drag and full
+      // resolution (4px) once the point is released (onEnd forces heatDirty).
+      var step = dragIdx >= 0 ? 8 : 4;
       var cols = Math.ceil(iw / step), rows = Math.ceil(ih / step);
       var vals = new Array(cols * rows), maxv = -Infinity, ix, iy;
       for (iy = 0; iy < rows; iy++) {
@@ -395,6 +398,10 @@
       var w = cv.w, h = cv.h;
       cv.clear();
       var th = FV.theme(), C = th.colors;
+      // §A.7: the per-tick proposal arrows/flashes are informative at low speed
+      // but strobe when many steps land per frame — fade that layer as speed
+      // climbs instead of flickering it.
+      var propVis = params.speed <= 16 ? 1 : Math.max(0.15, 1 - (params.speed - 16) / 30);
       layout(w, h);
       var dp = dataPlot, pp = paramPlot;
 
@@ -420,9 +427,9 @@
         var fl = chains[i].flash;
         if (!fl || fl.life <= 0) continue;
         var ax0 = pp.sx(fl.oa), ay0 = pp.sy(fl.ob), ax1 = pp.sx(fl.pa), ay1 = pp.sy(fl.pb);
-        drawArrow(ax0, ay0, ax1, ay1, C.prior, 0.5 * fl.life, [4, 3]);
-        if (fl.accepted) dot(ax1, ay1, 4, C.post, 0.9 * fl.life);
-        else { dot(ax1, ay1, 3.5, C.hot, 0.85 * fl.life); drawArrow(ax1, ay1, ax0, ay0, C.hot, 0.35 * fl.life, [2, 3]); }
+        drawArrow(ax0, ay0, ax1, ay1, C.prior, 0.5 * fl.life * propVis, [4, 3]);
+        if (fl.accepted) dot(ax1, ay1, 4, C.post, 0.9 * fl.life * propVis);
+        else { dot(ax1, ay1, 3.5, C.hot, 0.85 * fl.life * propVis); drawArrow(ax1, ay1, ax0, ay0, C.hot, 0.35 * fl.life * propVis, [2, 3]); }
       }
 
       // param current states — coral with a glow
@@ -451,7 +458,7 @@
       for (i = 0; i < chains.length; i++) {
         var f2 = chains[i].flash;
         if (f2 && f2.life > 0 && !f2.accepted) {
-          fitLine(dp, f2.pa, f2.pb, C.hot, 1.2, 0.5 * f2.life, [5, 4]);
+          fitLine(dp, f2.pa, f2.pb, C.hot, 1.2, 0.5 * f2.life * propVis, [5, 4]);
         }
       }
 
@@ -464,6 +471,8 @@
       for (i = 0; i < pts.length; i++) {
         var px = dp.sx(pts[i].x), py = dp.sy(pts[i].y);
         var active = (dragIdx === i);
+        // §A.2: soft grab-halo on the point being dragged (coral, subtle).
+        if (active) FV.halo(ctx, px, py, 14, C.hot, 0.4);
         ctx.save();
         ctx.globalAlpha = active ? 0.35 : 0.22; dotRaw(px, py, active ? 11 : 8, C.data); ctx.restore();
         dot(px, py, active ? 5.5 : 4.5, C.data, 1);
@@ -473,69 +482,47 @@
         ctx.beginPath(); ctx.arc(px, py, active ? 5.5 : 4.5, 0, 2 * Math.PI); ctx.stroke();
         ctx.restore();
       }
-
-      // decay flashes for the next frame
-      for (i = 0; i < chains.length; i++) if (chains[i].flash) chains[i].flash.life -= 0.05;
+      // NOTE: flash decay is time-based in the loop tick (§A.7), NOT per-frame
+      // here — a per-frame decrement strobes at low fps and freezes on Step.
     }
 
     // ------------------------------------------------------- pointer / dragging
+    // Migrated to the shared FV.drag manager (§A.1/§A.2): it claims the gesture
+    // (setPointerCapture + preventDefault) ONLY when a pointerdown actually lands
+    // on a point, and inflates the hit radius to >=22 CSS px on coarse pointers.
+    // The whole canvas is meaningfully interactive (points move in 2-D, so a
+    // vertical drag must not page-scroll), so we keep fullCapture:true — the
+    // manager sets touch-action:none on the canvas; the page still has ample
+    // scroll surface around this 400px hero.
     var dragIdx = -1;
-    function evtPos(e) {
-      var r = cv.el.getBoundingClientRect();
-      var cx = (e.touches ? e.touches[0].clientX : e.clientX) - r.left;
-      var cy = (e.touches ? e.touches[0].clientY : e.clientY) - r.top;
-      return { x: cx, y: cy };
-    }
-    function hitTest(pos) {
+    function hitTestXY(x, y, slop) {
       if (!dataPlot) return -1;
-      var dp = dataPlot, best = -1, bestD = 15 * 15;
+      var dp = dataPlot, best = -1;
+      var r = Math.max(15, slop);   // coarse pointers pass slop>=22
+      var bestD = r * r;
       for (var i = 0; i < pts.length; i++) {
-        var dx = dp.sx(pts[i].x) - pos.x, dy = dp.sy(pts[i].y) - pos.y;
+        var dx = dp.sx(pts[i].x) - x, dy = dp.sy(pts[i].y) - y;
         var d = dx * dx + dy * dy;
         if (d < bestD) { bestD = d; best = i; }
       }
       return best;
     }
-    function onDown(e) {
-      var pos = evtPos(e);
-      var hit = hitTest(pos);
-      if (hit >= 0) {
-        dragIdx = hit;
-        cv.el.style.cursor = "grabbing";
-        if (e.cancelable) e.preventDefault();
-        window.addEventListener("mousemove", onMove);
-        window.addEventListener("mouseup", onUp);
-        window.addEventListener("touchmove", onMove, { passive: false });
-        window.addEventListener("touchend", onUp);
-      }
-    }
-    function onMove(e) {
-      if (dragIdx < 0 || !dataPlot) return;
-      var pos = evtPos(e), dp = dataPlot;
-      var nx = dp.sx.invert(pos.x), ny = dp.sy.invert(pos.y);
-      if (nx < DX[0]) nx = DX[0]; if (nx > DX[1]) nx = DX[1];
-      if (ny < DY[0]) ny = DY[0]; if (ny > DY[1]) ny = DY[1];
-      pts[dragIdx].x = nx; pts[dragIdx].y = ny;
-      reweightChains();       // posterior moved -> heatDirty + stale lp fixed
-      requestDraw();
-      if (e.cancelable) e.preventDefault();
-    }
-    function onUp() {
-      dragIdx = -1;
-      cv.el.style.cursor = "";
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-      window.removeEventListener("touchmove", onMove);
-      window.removeEventListener("touchend", onUp);
-      requestDraw();
-    }
-    function onHover(e) {
-      if (dragIdx >= 0) return;
-      cv.el.style.cursor = hitTest(evtPos(e)) >= 0 ? "grab" : "";
-    }
-    cv.el.addEventListener("mousedown", onDown);
-    cv.el.addEventListener("touchstart", onDown, { passive: false });
-    cv.el.addEventListener("mousemove", onHover);
+    var dragHandle = FV.drag(cv.el, {
+      inflate: 15,
+      hitTest: hitTestXY,
+      onStart: function (i) { dragIdx = i; requestDraw(); },
+      onDrag: function (i, x, y) {
+        if (i < 0 || !dataPlot) return;
+        var dp = dataPlot;
+        var nx = dp.sx.invert(x), ny = dp.sy.invert(y);
+        if (nx < DX[0]) nx = DX[0]; if (nx > DX[1]) nx = DX[1];
+        if (ny < DY[0]) ny = DY[0]; if (ny > DY[1]) ny = DY[1];
+        pts[i].x = nx; pts[i].y = ny;
+        reweightChains();     // posterior moved -> heatDirty + stale lp fixed
+        requestDraw();        // heatmap rebuilds at HALF res while dragging
+      },
+      onEnd: function () { dragIdx = -1; heatDirty = true; requestDraw(); }
+    });
 
     // schedule a single draw when paused (during play the loop already draws)
     var drawQueued = false;
@@ -550,12 +537,17 @@
     // autoplay: start walking the moment the widget scrolls into view (the loop
     // honors reduced-motion internally — no animation there, just the pre-warmed
     // static frame below).
+    var FLASH_DUR = 0.35;   // proposal-flash lifetime in seconds (time-based, §A.7)
     var loopApi = FV.loop(root, function (dt) {
       if (dt === 0) { doStep(); }        // Step button (or reduced-motion)
       else {
         acc += dt * params.speed;
         var n = Math.floor(acc);
         if (n > 0) { acc -= n; if (n > 60) n = 60; for (var i = 0; i < n; i++) doStep(); }
+        // Decay proposal flashes by wall-clock time, not frame count, so they
+        // last the same ~0.35s whether rAF runs at 60fps or drops to 30.
+        var dl = dt / FLASH_DUR;
+        for (var ci = 0; ci < chains.length; ci++) if (chains[ci].flash) chains[ci].flash.life -= dl;
       }
       refreshDiag(nowMs());
       draw();

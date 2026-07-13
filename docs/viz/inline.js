@@ -29,6 +29,13 @@
   function clone(o) { var r = {}; for (var k in o) if (o.hasOwnProperty(k)) r[k] = o[k]; return r; }
   function nextSeed(s) { return (Math.imul(s, 1664525) + 1013904223) >>> 0; }
 
+  // Coarse (touch) pointers get inflated hit targets (§A.2: ≥22 CSS px). Cached.
+  var _coarse = null;
+  function coarsePointer() {
+    if (_coarse === null) _coarse = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+    return _coarse;
+  }
+
   // Numerically-stable softplus: log(1 + e^z) = max(z,0) + log1p(e^-|z|).
   function softplus(z) { var az = Math.abs(z); return Math.max(z, 0) + FV.log1p(Math.exp(-az)); }
 
@@ -169,8 +176,14 @@
 
   function evtXY(elm, e) {
     var r = elm.getBoundingClientRect();
-    var cx = e.touches ? e.touches[0].clientX : e.clientX;
-    var cy = e.touches ? e.touches[0].clientY : e.clientY;
+    // On touchend/touchcancel e.touches is empty; the released point lives in
+    // changedTouches. Reading e.touches[0] there threw (undefined.clientX),
+    // which crashed the "up" handler and left drag state stuck.
+    var t = null;
+    if (e.touches && e.touches.length) t = e.touches[0];
+    else if (e.changedTouches && e.changedTouches.length) t = e.changedTouches[0];
+    var cx = t ? t.clientX : e.clientX;
+    var cy = t ? t.clientY : e.clientY;
     return [cx - r.left, cy - r.top];
   }
 
@@ -227,21 +240,70 @@
     });
     root.appendChild(glyph);
 
-    // pointer interactions (mouse + touch)
+    // pointer interactions (mouse + touch). Ambient micros must NEVER eat page
+    // scroll (§A.1): touch gestures are claimed only when they actually engage a
+    // draggable. Two modes:
+    //   • spec.scrub  — the whole canvas is a horizontal control. touch-action
+    //     pan-y keeps native vertical page scrolling; the browser then only
+    //     delivers *cancelable* horizontal-intent moves to us, so a vertical
+    //     swipe scrolls the page and a horizontal drag scrubs.
+    //   • point drag  — claim the gesture only when pointerdown actually hits a
+    //     target (spec.pointer returns truthy on "down"); a miss (empty canvas)
+    //     is left untouched so the page scrolls normally.
     if (spec.pointer) {
-      var down = false;
+      var coarse = coarsePointer();
+      var down = false, claimed = false;
       function fire(e, phase) {
         var p = evtXY(cv.el, e);
-        spec.pointer(S, p[0], p[1], cv.w, cv.h, phase, FV);
+        var r = spec.pointer(S, p[0], p[1], cv.w, cv.h, phase, FV, coarse);
         renderFrame();
+        return r;
       }
+      // Mouse never fights page scroll — wire it straight through.
       cv.el.addEventListener("mousedown", function (e) { down = true; fire(e, "down"); });
       window.addEventListener("mousemove", function (e) { if (down) fire(e, "move"); });
       window.addEventListener("mouseup", function (e) { if (down) { down = false; fire(e, "up"); } });
-      cv.el.addEventListener("touchstart", function (e) { down = true; fire(e, "down"); if (e.cancelable) e.preventDefault(); }, { passive: false });
-      cv.el.addEventListener("touchmove", function (e) { if (down) { fire(e, "move"); if (e.cancelable) e.preventDefault(); } }, { passive: false });
-      cv.el.addEventListener("touchend", function (e) { if (down) { down = false; fire(e, "up"); } });
-      cv.el.style.cursor = "ew-resize";
+      if (spec.scrub) {
+        // The whole canvas is a horizontal control, yet a *vertical* swipe must
+        // still scroll the page (§A.1). touch-action:pan-y asks the browser to
+        // own vertical scrolling, but with a non-passive touchmove listener the
+        // pan-y moves can still arrive `cancelable` (they do under some engines
+        // and headless/emulated touch), so keying off `e.cancelable` alone would
+        // let this control eat the page scroll. Instead latch the gesture axis on
+        // the first move past a small dead-zone: only a horizontally-dominant
+        // drag is claimed for scrubbing; a vertical one is left to the page.
+        cv.el.style.touchAction = "pan-y";
+        var sx0 = 0, sy0 = 0, axis = 0; // 0 undecided, 1 scrub (horizontal), -1 scroll (vertical)
+        cv.el.addEventListener("touchstart", function (e) {
+          down = true; axis = 0;
+          var t = e.touches && e.touches[0];
+          if (t) { sx0 = t.clientX; sy0 = t.clientY; }
+          fire(e, "down");
+        }, { passive: true });
+        cv.el.addEventListener("touchmove", function (e) {
+          if (!down) return;
+          var t = e.touches && e.touches[0]; if (!t) return;
+          if (axis === 0) {
+            var dx = Math.abs(t.clientX - sx0), dy = Math.abs(t.clientY - sy0);
+            if (dx < 6 && dy < 6) return;   // below dead-zone: wait, let native scroll begin
+            axis = dx > dy ? 1 : -1;        // decide once, then latch for the gesture
+          }
+          if (axis === 1 && e.cancelable) { fire(e, "move"); e.preventDefault(); }
+          // axis === -1 (vertical intent): never preventDefault — the page scrolls
+        }, { passive: false });
+        cv.el.addEventListener("touchend", function (e) { if (down) { down = false; fire(e, "up"); } axis = 0; });
+        cv.el.style.cursor = "ew-resize";
+      } else {
+        cv.el.addEventListener("touchstart", function (e) {
+          claimed = !!fire(e, "down"); down = claimed;
+          if (claimed && e.cancelable) e.preventDefault();
+        }, { passive: false });
+        cv.el.addEventListener("touchmove", function (e) {
+          if (down && claimed) { fire(e, "move"); if (e.cancelable) e.preventDefault(); }
+        }, { passive: false });
+        cv.el.addEventListener("touchend", function (e) { if (down) { down = false; fire(e, "up"); } claimed = false; });
+        cv.el.style.cursor = "grab";
+      }
     }
 
     FV.onThemeChange(function () { renderFrame(); });
@@ -331,7 +393,7 @@
     var CAP = 480, BATCH = 6, RANGE = p0Range(name);
 
     mount(root, {
-      height: 150, hz: 5, settleN: 70,
+      height: 150, hz: 5, settleN: 70, scrub: true,
       build: function (S) { S.params = params.slice(); S.buf = []; S.dragX = null; },
       advance: function (S) {
         for (var i = 0; i < BATCH; i++) S.buf.push(distSample(name, S.rng, S.params));
@@ -570,7 +632,7 @@
   function shrinkage(root) {
     var NG = 8;
     mount(root, {
-      height: 170, hz: 4,
+      height: 170, hz: 4, scrub: true,
       staticFrame: function (S) { S.tau = 1.0; },
       build: function (S) {
         S.y = []; S.se = []; var i;
@@ -580,7 +642,10 @@
       },
       advance: function (S) { if (!S.touched) { S.phase += 0.16; S.tau = Math.exp(Math.sin(S.phase) * 1.5 - 0.4); } },
       render: function (g, S, w, h, T, c) { drawShrink(g, S, w, h, c); },
-      pointer: function (S, x, y, w, h, phase) { if (phase !== "up") { S.touched = true; var frac = clamp((x - 12) / (w - 24), 0, 1); S.tau = Math.exp(lerp(-3.2, 1.8, frac)); } }
+      // Only commit on an actual drag ("move"). Under scrub/pan-y a scroll-intent
+      // touch still fires "down"; acting on it would jump τ and permanently kill
+      // the ambient breathing just from swiping past the widget.
+      pointer: function (S, x, y, w, h, phase) { if (phase === "move") { S.touched = true; var frac = clamp((x - 12) / (w - 24), 0, 1); S.tau = Math.exp(lerp(-3.2, 1.8, frac)); } }
     });
 
     function drawShrink(g, S, w, h, c) {
@@ -625,7 +690,7 @@
       },
       advance: function (S) { for (var s = 0; s < 3; s++) mh(S); },
       render: function (g, S, w, h, T, c) { drawReg(g, S, w, h, c); },
-      pointer: function (S, x, y, w, h, phase) { regPtr(S, x, y, w, h, phase); }
+      pointer: function (S, x, y, w, h, phase, FV, coarse) { return regPtr(S, x, y, w, h, phase, coarse); }
     });
 
     function xsOf(w) { return FV.scale(DX, [16, w - 10]); }
@@ -651,13 +716,27 @@
         g.beginPath(); g.moveTo(xs(DX[0]), ys(a * DX[0] + b)); g.lineTo(xs(DX[1]), ys(a * DX[1] + b)); g.stroke(); g.restore();
       }
       for (i = 0; i < S.pts.length; i++) { g.save(); g.fillStyle = c.data; g.beginPath(); g.arc(xs(S.pts[i].x), ys(S.pts[i].y), 4, 0, 6.2832); g.fill(); g.restore(); }
+      // grabbed-point halo (§A.2)
+      if (S.drag >= 0 && S.drag < S.pts.length) {
+        var pd = S.pts[S.drag];
+        g.save(); g.strokeStyle = c.hot; g.globalAlpha = 0.55; g.lineWidth = 2;
+        g.beginPath(); g.arc(xs(pd.x), ys(pd.y), coarsePointer() ? 11 : 9, 0, 6.2832); g.stroke(); g.restore();
+      }
       labelRight(g, "slope " + fmtNum(S.a), w - 10, 2, c, "hot");
     }
-    function regPtr(S, x, y, w, h, phase) {
+    function regPtr(S, x, y, w, h, phase, coarse) {
       var xs = xsOf(w), ys = ysOf(h), i;
-      if (phase === "down") { S.drag = -1; var best = 16 * 16; for (i = 0; i < S.pts.length; i++) { var dx = xs(S.pts[i].x) - x, dy = ys(S.pts[i].y) - y, d = dx * dx + dy * dy; if (d < best) { best = d; S.drag = i; } } }
-      else if (phase === "move" && S.drag >= 0) { S.pts[S.drag].x = clamp(xs.invert(x), DX[0], DX[1]); S.pts[S.drag].y = clamp(ys.invert(y), DY[0], DY[1]); }
+      if (phase === "down") {
+        S.drag = -1;
+        // Inflate the hit target on coarse pointers so a thumb can grab a point
+        // (§A.2: ≥22 CSS px). Visual dots stay 4px; only the test is generous.
+        var hitR = coarse ? 26 : 15, best = hitR * hitR;
+        for (i = 0; i < S.pts.length; i++) { var dx = xs(S.pts[i].x) - x, dy = ys(S.pts[i].y) - y, d = dx * dx + dy * dy; if (d < best) { best = d; S.drag = i; } }
+        return S.drag >= 0; // claim the gesture only on an actual hit
+      }
+      else if (phase === "move" && S.drag >= 0) { S.pts[S.drag].x = clamp(xs.invert(x), DX[0], DX[1]); S.pts[S.drag].y = clamp(ys.invert(y), DY[0], DY[1]); return true; }
       else if (phase === "up") S.drag = -1;
+      return false;
     }
   }
 

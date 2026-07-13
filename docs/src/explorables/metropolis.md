@@ -76,11 +76,15 @@ sits still — again few effective draws. The
 <span class="fv-c-post">effective sample size</span> (ESS) measures exactly this: how
 many *independent* draws your correlated chain is worth.
 
+<div class="fugue-explorable fv-inline" data-viz="sigma-sweep" data-caption="Sweep σ: acceptance (green) falls monotonically while ESS (violet) peaks in the shaded Goldilocks band between too-timid and too-bold — drag the coral marker."></div>
+
 $$\mathrm{ESS} = \frac{mn}{\hat\tau}, \qquad \hat\tau = 1 + 2\sum_{k\ge 1}\hat\rho_k,$$
 
 where $\hat\rho_k$ is the autocorrelation at lag $k$ and $\hat\tau$ the integrated
 autocorrelation time. Fugue estimates $\hat\tau$ with Geyer's initial positive sequence,
 pooled across chains (Vehtari et al. 2021).
+
+<div class="fugue-explorable fv-inline" data-viz="acf-decay" data-sigma="0.05" data-caption="With a tiny proposal σ, consecutive draws barely differ: the autocorrelation bars ρ_k decay slowly, so those thousands of steps are worth only a handful of independent draws."></div>
 
 **Why more than one chain.** A single walker stuck in one corner of parameter space looks
 perfectly converged from the inside. <span class="fv-c-post">Split-R̂</span> compares the

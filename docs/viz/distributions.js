@@ -674,8 +674,11 @@
       // dot on the law
       var dot = def.kind === "disc" ? Math.exp(def.logpmf(qxc, params)) : Math.exp(def.logpdf(qxc, params));
       if (isFinite(dot)) {
+        var dotY = clampY(yscale(dot), plotT, plotB);
+        // §A.2: soft grab-halo on the queried point while actively dragging.
+        if (dragging && FV.halo) FV.halo(ctx, lx, dotY, 11, c.hot, 0.3);
         ctx.fillStyle = c.hot;
-        ctx.beginPath(); ctx.arc(lx, clampY(yscale(dot), plotT, plotB), 4, 0, 2 * Math.PI); ctx.fill();
+        ctx.beginPath(); ctx.arc(lx, dotY, 4, 0, 2 * Math.PI); ctx.fill();
       }
       ctx.restore();
 
@@ -687,10 +690,21 @@
       rN.set(String(total));
     }
 
-    // ---- pointer: drag the query line ------------------------------------
-    function pointerX(ev) {
+    // ---- pointer: drag the query line (horizontal scrub) -----------------
+    // §A.1 scroll-fight fix: the query line is a purely HORIZONTAL scrub, so
+    // the canvas gets touch-action:pan-y — a vertical thumb-swipe scrolls the
+    // PAGE, a horizontal drag queries the density. We never preventDefault
+    // (the old code did, unconditionally, on every touchmove — that ate page
+    // scroll over this 340px canvas, the phone "bugginess"). Pointer capture
+    // keeps a fast drag tracking even off the canvas edge without any window
+    // listeners; if the browser claims the gesture for a vertical scroll it
+    // fires pointercancel and we stop cleanly.
+    cv.el.style.touchAction = "pan-y";
+    cv.el.style.cursor = "ew-resize";
+
+    function pointerX(clientX) {
       var rect = cv.el.getBoundingClientRect();
-      var cx = (ev.touches ? ev.touches[0].clientX : ev.clientX) - rect.left;
+      var cx = clientX - rect.left;
       var plotL = ML, plotR = cv.w - MR;
       var frac = (cx - plotL) / (plotR - plotL || 1);
       if (frac < 0) frac = 0; if (frac > 1) frac = 1;
@@ -700,16 +714,29 @@
       return dom[0] + frac * (dom[1] - dom[0]);
     }
     var dragging = false;
-    function onDown(ev) { dragging = true; qx = pointerX(ev); qxSet = true; render(); ev.preventDefault(); }
-    function onMove(ev) { if (!dragging) return; qx = pointerX(ev); render(); ev.preventDefault(); }
-    function onUp() { dragging = false; }
-    cv.el.addEventListener("mousedown", onDown);
-    cv.el.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    cv.el.addEventListener("touchstart", onDown, { passive: false });
-    cv.el.addEventListener("touchmove", onMove, { passive: false });
-    window.addEventListener("touchend", onUp);
-    cv.el.style.cursor = "ew-resize";
+    function beginQuery(clientX) { dragging = true; qx = pointerX(clientX); qxSet = true; render(); }
+    function moveQuery(clientX) { if (!dragging) return; qx = pointerX(clientX); render(); }
+    function endQuery() { if (!dragging) return; dragging = false; render(); }
+
+    if (typeof window.PointerEvent !== "undefined") {
+      cv.el.addEventListener("pointerdown", function (ev) {
+        if (ev.pointerType === "mouse" && ev.button !== 0) return;
+        try { cv.el.setPointerCapture(ev.pointerId); } catch (e) {}
+        beginQuery(ev.clientX);
+      });
+      cv.el.addEventListener("pointermove", function (ev) { moveQuery(ev.clientX); });
+      cv.el.addEventListener("pointerup", endQuery);
+      cv.el.addEventListener("pointercancel", endQuery);
+    } else {
+      // Legacy fallback (no Pointer Events): touch-action:pan-y still blocks
+      // horizontal page-pan, so no preventDefault is needed to scrub.
+      cv.el.addEventListener("mousedown", function (ev) { beginQuery(ev.clientX); });
+      window.addEventListener("mousemove", function (ev) { moveQuery(ev.clientX); });
+      window.addEventListener("mouseup", endQuery);
+      cv.el.addEventListener("touchstart", function (ev) { if (ev.touches[0]) beginQuery(ev.touches[0].clientX); });
+      cv.el.addEventListener("touchmove", function (ev) { if (ev.touches[0]) moveQuery(ev.touches[0].clientX); });
+      window.addEventListener("touchend", endQuery);
+    }
 
     // ---- animation --------------------------------------------------------
     // autoplay: samples start streaming the moment the widget scrolls into view.

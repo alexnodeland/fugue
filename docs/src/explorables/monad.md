@@ -85,6 +85,8 @@ then feed its value to a function that produces the next node. `pure` is
 score. The score is a linked list of "and then"s ending in a "done", and it does
 not play itself.
 
+<div class="fugue-explorable fv-inline" data-viz="bind-chain" data-caption="`.map` transforms a value in-flight on one node; `.bind` grows the pipeline, spawning a new effect node for the rest of the score."></div>
+
 ## The fugue code
 
 Here is the exact score from the widget. The `sample` line is the

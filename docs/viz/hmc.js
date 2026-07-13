@@ -292,13 +292,14 @@
       };
     }
     function onMainResize(api) {
-      var plotW = api.w - PADL - PADR - GAP;
+      var gap = api.w < 380 ? 16 : GAP;   // tighten the panel gutter on phones (§A.4)
+      var plotW = api.w - PADL - PADR - gap;
       var plotH = api.h - PADT - PADB;
       if (plotW < 40 || plotH < 20) return;
       var dataW = plotW * 0.56;
       var paramW = plotW - dataW;
       dataView = makeView(PADL, PADT, dataW, plotH, DAT_X, DAT_Y);
-      paramView = makeView(PADL + dataW + GAP, PADT, paramW, plotH, DOM_A, DOM_B);
+      paramView = makeView(PADL + dataW + gap, PADT, paramW, plotH, DOM_A, DOM_B);
       bgDirty = true;
       scheduleDraw();
     }
@@ -395,6 +396,8 @@
       for (i = 0; i < N; i++) {
         var px = view.xs(data.xs[i]), py = view.ys(data.ys[i]);
         var isHot = (dragIdx === i);
+        // subtle grab-halo on the point being dragged (§A.2)
+        if (isHot && FV.halo) FV.halo(ctx, px, py, dragHandle.isCoarse ? 22 : 15, colors.hot, 0.3);
         ctx.save();
         ctx.globalAlpha = 0.22; dot(ctx, px, py, isHot ? 11 : 8, colors.data); ctx.restore();
         dot(ctx, px, py, isHot ? 6 : 5, colors.data);
@@ -488,7 +491,9 @@
       ctx.fillStyle = colors.ink; ctx.globalAlpha = 0.8;
       ctx.font = "600 11px var(--mono-font, monospace)";
       ctx.textAlign = "left"; ctx.textBaseline = "top";
-      ctx.fillText("PARAMETER SPACE  (a, b)", view.x0 + 6, view.y0 + 5);
+      var paramTitle = "PARAMETER SPACE  (a, b)";
+      if (ctx.measureText(paramTitle).width > view.w - 12) paramTitle = "PARAMS (a, b)";
+      ctx.fillText(paramTitle, view.x0 + 6, view.y0 + 5);
       ctx.restore();
     }
 
@@ -594,64 +599,47 @@
     });
 
     // ------------------------------------------------------------------
-    // Pointer: drag the yellow data points (mouse + touch).
+    // Pointer: drag the yellow data points — via the shared FV.drag manager
+    // (§A.1 scroll-fight / §A.2 coarse hit targets). The drag is VERTICAL,
+    // i.e. the SAME axis the page scrolls on, so a "claim-on-hit best-effort"
+    // (pan-y) gesture would race the browser's own scroll and feel buggy —
+    // exactly the phone complaint. We therefore take fullCapture
+    // (touch-action:none on this canvas): a hit drags smoothly, a miss is
+    // ignored and does nothing. The ambient energy strip is a SEPARATE canvas
+    // with no drag, so it stays pan-y and the page scrolls when swiped there.
     // ------------------------------------------------------------------
     var dragIdx = -1;
-    function evtPos(e) {
-      var rect = mainApi.el.getBoundingClientRect();
-      var cx = e.touches ? e.touches[0].clientX : e.clientX;
-      var cy = e.touches ? e.touches[0].clientY : e.clientY;
-      return { x: cx - rect.left, y: cy - rect.top };
-    }
-    function hitPoint(px, py) {
+    function hitIndex(x, y, slop) {
       if (!dataView) return -1;
+      var r = Math.max(12, slop), best = -1, bestD = r * r;
       for (var i = 0; i < N; i++) {
-        var dx = px - dataView.xs(data.xs[i]);
-        var dy = py - dataView.ys(data.ys[i]);
-        if (dx * dx + dy * dy <= 144) return i;
+        var dx = x - dataView.xs(data.xs[i]);
+        var dy = y - dataView.ys(data.ys[i]);
+        var d = dx * dx + dy * dy;
+        if (d <= bestD) { bestD = d; best = i; }   // nearest point within slop
       }
-      return -1;
+      return best;
     }
-    function onDown(e) {
-      var pos = evtPos(e);
-      var idx = hitPoint(pos.x, pos.y);
-      if (idx >= 0) {
-        dragIdx = idx;
-        if (e.cancelable) e.preventDefault();
-        window.addEventListener("mousemove", onMove);
-        window.addEventListener("mouseup", onUp);
-        window.addEventListener("touchmove", onMove, { passive: false });
-        window.addEventListener("touchend", onUp);
+    var dragHandle = FV.drag(mainApi.el, {
+      inflate: 12,          // fine-pointer slop; coarse pointers get >=22 (§A.2)
+      fullCapture: true,    // vertical drag == scroll axis: capture for smoothness
+      // Return a TRUTHY target on a hit. NB: a bare index 0 is falsy and would
+      // read as a miss, so wrap the index in an object.
+      hitTest: function (x, y, slop) {
+        var i = hitIndex(x, y, slop);
+        return i >= 0 ? { i: i } : -1;
+      },
+      onStart: function (t) { dragIdx = t.i; scheduleDraw(); },
+      onDrag: function (t, x, y) {
+        var yv = dataView.ys.invert(y);
+        if (yv < DAT_Y[0]) yv = DAT_Y[0];
+        if (yv > DAT_Y[1]) yv = DAT_Y[1];
+        data.ys[t.i] = yv;          // x stays fixed; drag adjusts the response
+        onDataChanged();
         scheduleDraw();
-      }
-    }
-    function onMove(e) {
-      if (dragIdx < 0) return;
-      var pos = evtPos(e);
-      var y = dataView.ys.invert(pos.y);
-      if (y < DAT_Y[0]) y = DAT_Y[0];
-      if (y > DAT_Y[1]) y = DAT_Y[1];
-      data.ys[dragIdx] = y;         // x stays fixed; drag adjusts the response
-      onDataChanged();
-      scheduleDraw();
-      if (e.cancelable) e.preventDefault();
-    }
-    function onUp() {
-      dragIdx = -1;
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-      window.removeEventListener("touchmove", onMove);
-      window.removeEventListener("touchend", onUp);
-      scheduleDraw();
-    }
-    function onHover(e) {
-      if (dragIdx >= 0) return;
-      var pos = evtPos(e);
-      mainApi.el.style.cursor = hitPoint(pos.x, pos.y) >= 0 ? "grab" : "default";
-    }
-    mainApi.el.addEventListener("mousedown", onDown);
-    mainApi.el.addEventListener("touchstart", onDown, { passive: false });
-    mainApi.el.addEventListener("mousemove", onHover);
+      },
+      onEnd: function () { dragIdx = -1; scheduleDraw(); }
+    });
 
     // ------------------------------------------------------------------
     // Animation engine
@@ -698,7 +686,7 @@
     var btns = FV.buttons(controls, [
       { label: "Play", title: "Play / pause the sampler", primary: true, onClick: togglePlay },
       { label: "Step", title: "Run one full HMC transition", onClick: function () { stepOnce(); } },
-      { label: "Reset", title: "Restore the seeded data and restart the chain", onClick: function () { data = makeSeedData(DATA_SEED); resetChain(); bgDirty = true; draw(); } }
+      { label: "Reset", title: "Restore the seeded data and restart the chain", onClick: function () { data = makeSeedData(DATA_SEED); resetChain(); prewarm(40); bgDirty = true; draw(); } }
     ]);
     var playBtn = btns.fvButtons["Play"];
     if (loopApi.reduced) {
@@ -719,7 +707,7 @@
       FV.scrub(seedSpan, {
         min: 1, max: 40, step: 1, value: curSeed,
         fmt: function (v) { return String(v); },
-        onInput: function (v) { curSeed = v >>> 0; resetChain(); scheduleDraw(); }
+        onInput: function (v) { curSeed = v >>> 0; resetChain(); prewarm(40); scheduleDraw(); }
       });
     }
 
