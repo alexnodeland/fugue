@@ -34,7 +34,7 @@ Add Fugue to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-fugue-ppl = "0.1.0"
+fugue-ppl = "0.2.0"
 rand = "0.8"  # For random number generation
 ```
 
@@ -44,7 +44,7 @@ Add Fugue to your existing `Cargo.toml`:
 
 ```toml
 [dependencies]
-fugue-ppl = "0.1.0"
+fugue-ppl = "0.2.0"
 rand = "0.8"
 ```
 

@@ -1,6 +1,6 @@
 [package]
 name = "fugue-ppl"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 # Finding FG-51: the README previously claimed "1.70+" with nothing pinning or
 # verifying it. Verified empirically against real toolchains (not just
