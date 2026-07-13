@@ -67,6 +67,8 @@ Hierarchical models provide **partial pooling**, where:
 - Groups with **less data** → estimates shrink toward population mean  
 - **Automatic regularization** prevents overfitting to small groups
 
+<div class="fugue-explorable fv-inline" data-viz="shrinkage" data-caption="Eight group means sliding between no-pooling and complete-pooling as τ breathes — drag to take over."></div>
+
 ## Mathematical Foundation
 
 ### Basic Hierarchical Structure

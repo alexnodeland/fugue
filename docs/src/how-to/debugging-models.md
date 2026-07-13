@@ -119,7 +119,7 @@ where:
 - $B = \frac{n}{m-1}\sum_{j=1}^m (\bar{\theta}_{j\cdot} - \bar{\theta}_{\cdot\cdot})^2$ (between-chain variance)
 - $\hat{V} = \frac{n-1}{n}W + \frac{1}{n}B$ (marginal posterior variance estimate)
 
-```admonish note title="Split-R-hat (0.2.0)"
+```admonish note title="Split-R-hat"
 `r_hat_f64` (in `fugue::inference::diagnostics`) computes **split-R-hat** (Vehtari et al. 2021), not the 1992 Gelman & Rubin statistic: each chain is split in half first, and the halves are treated as independent chains before the formula above is applied. This catches within-chain non-stationarity (a chain that drifts) that whole-chain R-hat misses. The classic, non-split statistic is still available as `classic_r_hat_f64` for comparison.
 ```
 
@@ -128,6 +128,8 @@ where:
 **Practical Threshold**: $\hat{R} < 1.1$ indicates approximate convergence for most applications.
 **Statistical Interpretation**: $\hat{R} > 1$ suggests the chain hasn't explored the full posterior distribution.
 ```
+
+<div class="fugue-explorable fv-inline" data-viz="rhat-spark" data-mode="bad" data-caption="This is what a broken chain looks like: three chains stuck in separate modes, R̂ pinned well above the 1.1 threshold."></div>
 
 ### Effective Sample Size
 
@@ -141,7 +143,7 @@ where $\rho_t$ is the lag-$t$ autocorrelation and $mn$ is the total number of sa
 {{#include ../../../examples/debugging_models.rs:mcmc_diagnostics}}
 ```
 
-`effective_sample_size_mcmc` (in `fugue::inference::mcmc_utils`, used above) computes ESS for a single chain. 0.2.0 also adds `effective_sample_size_multichain`, which pools autocorrelation and between-chain variance across all chains at once — prefer it over averaging single-chain ESS values when you have more than one chain.
+`effective_sample_size_mcmc` (in `fugue::inference::mcmc_utils`, used above) computes ESS for a single chain. Fugue also provides `effective_sample_size_multichain`, which pools autocorrelation and between-chain variance across all chains at once — prefer it over averaging single-chain ESS values when you have more than one chain.
 
 **Convergence Indicators:**
 

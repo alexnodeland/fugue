@@ -597,6 +597,12 @@
     // ---- Theme + init --------------------------------------------------------
     FV.onThemeChange(function () { draw(); });
     updateReadouts();
+    // Pre-warm: dealt data with a settled posterior painted synchronously — this is
+    // also the reduced-motion static frame (never an empty axis).
     draw();
+    // autoplay: replay the sequential Bayesian updating the moment the widget scrolls
+    // into view. startReplay no-ops the animation under reduced motion — it just
+    // re-shows the settled posterior we already painted — so it is safe either way.
+    startReplay();
   });
 })();

@@ -211,6 +211,8 @@ $$\begin{align}
 y_{ij} \mid \mu_j, \sigma_j &\sim \mathcal{N}(\mu_j, \sigma_j^2)
 \end{align}$$
 
+<div class="fugue-explorable fv-inline" data-viz="shrinkage" data-caption="Partial pooling is this exact shrinkage: group means pulled toward the population mean as τ moves between no-pooling and complete-pooling."></div>
+
 ```rust,ignore
 {{#include ../../../examples/building_complex_models.rs:multilevel_hierarchy}}
 ```

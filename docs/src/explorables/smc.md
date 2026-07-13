@@ -198,3 +198,7 @@ dragging sliders is exactly what the library does under the hood.
   and [`effective_sample_size`](https://docs.rs/fugue-ppl/latest/fugue/inference/smc/fn.effective_sample_size.html).
 - Next explorable: [A Field Guide to Distributions](./distributions.md) — the
   building blocks every model above is made of.
+
+---
+
+Next: [A Field Guide to Distributions](./distributions.md)

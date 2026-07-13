@@ -656,6 +656,8 @@
     // ------------------------------------------------------------------
     // Animation engine
     // ------------------------------------------------------------------
+    // autoplay: begin rolling the moment the widget scrolls into view. The loop
+    // no-ops under reduced motion, where the pre-warmed static frame (below) stands in.
     var loopApi = FV.loop(root, function (dt) {
       if (!active) nextTransition();
       reveal += dt * speed;
@@ -668,7 +670,21 @@
       if (flash) { flash.a -= dt * 1.6; if (flash.a <= 0) flash = null; }
       if (rejLine) { rejLine.life -= dt * 1.4; if (rejLine.life <= 0) rejLine = null; }
       draw();
-    });
+    }, { autoplay: true });
+
+    // Advance N full transitions with no animation — used to pre-warm the chain so
+    // first paint already carries a trail + spaghetti.
+    function prewarm(nSteps) {
+      for (var i = 0; i < nSteps; i++) {
+        if (!active) nextTransition();
+        if (applied) nextTransition();
+        reveal = active.qs.length - 1;
+        applyDecision();
+        applied = true;
+      }
+      nextTransition();          // a fresh trajectory ready for the first visible roll
+      reveal = 0; applied = false;
+    }
 
     function stepOnce() {
       if (!active) nextTransition();
@@ -709,7 +725,14 @@
 
     FV.onThemeChange(function () { bgDirty = true; draw(); });
 
+    // First paint: pre-warm ~40 transitions so the param-space trail and the
+    // data-space spaghetti already exist (and so reduced-motion, which never
+    // animates, shows a rich converged frame instead of an empty axis).
     resetChain();
+    prewarm(40);
     draw();
+    // The loop autoplays itself (FV.loop {autoplay:true}); reflect it on the button
+    // unless reduced motion (where play() was a no-op and Play is disabled below).
+    if (loopApi.playing) playBtn.textContent = "Pause";
   });
 })();

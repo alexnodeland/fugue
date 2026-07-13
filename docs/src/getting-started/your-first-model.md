@@ -103,6 +103,8 @@ Understanding the Output
 - **`log_probability`** - How likely this particular execution was
 ```
 
+<div class="fugue-explorable fv-inline" data-viz="trace-ticker" data-caption="A trace is a recording: every address, value, and log-weight, typed in as the model runs."></div>
+
 ## Step 4: Type Safety in Action
 
 Fugue's type safety really shines with discrete distributions:

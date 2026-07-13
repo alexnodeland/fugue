@@ -24,14 +24,14 @@ A point in the right panel *is* a line in the left panel — watch them move tog
 The model is honest Bayesian linear regression:
 $y \sim \mathcal{N}(a\,x + b,\ \sigma_{\text{obs}})$ with $\sigma_{\text{obs}}$ fixed at
 $0.8$, and priors $a, b \sim \mathcal{N}(0, 2.5)$. The
-<span class="fv-c-post">split-R̂</span> and ESS readouts are fugue 0.2.0's real
+<span class="fv-c-post">split-R̂</span> and ESS readouts are fugue's real
 convergence diagnostics, computed live on the samples accruing on screen.
 
 ## Things to try
 
-1. **Press Play, then drag a point far off the line.** The right-hand heatmap morphs
-   and the whole chain migrates to the new best fit — same frame. This is the moment:
-   the data *is* the posterior, and you are reshaping it with your cursor.
+1. **The chains are already walking — drag a point far off the line.** The right-hand
+   heatmap morphs and the whole chain migrates to the new best fit — same frame. This
+   is the moment: the data *is* the posterior, and you are reshaping it with your cursor.
 2. **Drag `PROPOSAL σ` down to `0.02`.** Acceptance climbs toward 100% — every tiny
    step is safe — yet the coral dot barely crawls and R̂ stays stubbornly above 1. High
    acceptance is not the goal.
@@ -149,8 +149,8 @@ fn main() {
         chains.push(draws.into_iter().map(|(_, trace)| trace).collect());
     }
 
-    // Split-R-hat (Vehtari et al. 2021) and ESS — 0.2.0's diagnostics, the same
-    // numbers the widget shows.
+    // Split-R-hat (Vehtari et al. 2021) and ESS — the same convergence
+    // diagnostics the widget shows.
     let rhat = r_hat_f64(&chains, &addr!("slope"));
     let slope_chain0: Vec<f64> = chains[0]
         .iter()
@@ -179,3 +179,7 @@ full recording behind it. `r_hat_f64` is the coral/green R̂ readout;
   a chain misbehaves.
 - **API:** [`adaptive_mcmc_chain`](https://docs.rs/fugue-ppl/latest/fugue/fn.adaptive_mcmc_chain.html)
   · [`r_hat_f64`](https://docs.rs/fugue-ppl/latest/fugue/fn.r_hat_f64.html)
+
+---
+
+Next: [Rolling, Not Guessing: Hamiltonian Monte Carlo](./hmc.md)

@@ -722,5 +722,13 @@
     });
 
     reset();
+    // Pre-warm: run 3 filter steps with no tween so the swarm is already partway
+    // through its story at first paint — and so the reduced-motion frame is rich
+    // (three columns of particles + a filtered mean), never an empty axis.
+    for (var pw = 0; pw < 3; pw++) { if (beginStep()) finalizeStep(); }
+    draw();
+    // autoplay the filter (onPlay is a no-op under reduced motion, which keeps the
+    // pre-warmed frame and leaves stepping to the Step button).
+    onPlay();
   });
 })();

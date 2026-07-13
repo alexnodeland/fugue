@@ -127,6 +127,8 @@ graph TB
 
 **Fugue** makes this safe, fast, and composable in Rust.
 
+<div class="fugue-explorable fv-inline" data-viz="posterior-morph" data-kind="beta" data-caption="Step 3, Infer, in miniature: each yellow observation sharpens the green posterior around the blue prior."></div>
+
 ## Next Steps
 
 Ready to dive in?

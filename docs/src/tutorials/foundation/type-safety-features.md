@@ -8,7 +8,7 @@ A comprehensive exploration of Fugue's revolutionary type-safe distribution syst
 
 ```admonish tip title="Try it live"
 [**A Field Guide to Distributions**](../../explorables/distributions.md) lets
-you page through every distribution in 0.2.0 and see each one's natural
+you page through every distribution Fugue ships and see each one's natural
 return type (`bool`, `u64`, `usize`, `f64`) next to its live pdf/pmf.
 ```
 
@@ -83,12 +83,10 @@ This ensures that sampling operations return values in their natural mathematica
 | Normal($\mu, \sigma^2$), Beta, Gamma, ... | $\mathbb{R}$ (or a subset) | `f64` | Continuous values |
 
 ```admonish note title="17 distributions, 5 natural return types"
-Fugue 0.2.0 ships 17 distributions total (7 added in this release: `StudentT`,
-`Cauchy`, `Laplace`, `Weibull`, `ChiSquared`, `InverseGamma`,
-`DiscreteUniform`), every one returning its mathematically natural type —
-`bool`, `u64`, `usize`, `i64`, or `f64`. `DiscreteUniform` is the one
-distribution in the crate with `i64` support, since it's the only distribution
-whose domain can go negative.
+Fugue ships 17 distributions total, every one returning its mathematically
+natural type — `bool`, `u64`, `usize`, `i64`, or `f64`. `DiscreteUniform` is
+the one distribution in the crate with `i64` support, since it's the only
+distribution whose domain can go negative.
 ```
 
 ### Type-Theoretic Properties
@@ -124,6 +122,8 @@ Fugue eliminates the `f64`-everything problem by returning mathematically approp
 - **Returns**: `u64` - natural counting numbers
 - **Benefit**: Direct arithmetic without casting or precision loss
 - **Performance**: Integer operations are faster than float conversions
+
+<div class="fugue-explorable fv-inline" data-viz="dist-strip" data-dist="poisson" data-params="4" data-caption="Poisson draws land as u64 counts — no cast, no round, no precision loss."></div>
 
 ### Categorical Distributions
 

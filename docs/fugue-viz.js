@@ -6,7 +6,7 @@
  * (docs/viz/*.js) call FugueViz.register("name", fn) and consume this API; they
  * MUST NOT duplicate what lives here.
  *
- * The distribution math mirrors fugue 0.2.0's src/core/distribution.rs EXACTLY
+ * The distribution math mirrors fugue's src/core/distribution.rs EXACTLY
  * (parameterizations, support, boundary limits). See the RETURN contract in the
  * foundation agent's report for the full per-distribution parameter list.
  */
@@ -131,7 +131,7 @@
   }
 
   // ==========================================================================
-  // Distribution math — parameterizations match fugue 0.2.0 exactly.
+  // Distribution math — parameterizations match fugue exactly.
   // logpdf/logpmf are pure log-space (no exp), finite for every finite input.
   // ==========================================================================
 
@@ -990,7 +990,21 @@
     } catch (e) {}
   }
 
-  function loop(widgetRootEl, tickFn) {
+  // loop(widgetRootEl, tickFn, opts) -> {play(), pause(), step(), playing, reduced}.
+  //
+  // Drives a rAF animation of tickFn(dt). Auto-pauses when the widget scrolls
+  // offscreen (IntersectionObserver) or the tab is hidden, and resumes on return.
+  //
+  // opts.autoplay (boolean): when true, the widget begins playing the moment it
+  // initializes — init is already lazy on scroll-into-view, so nobody lands on a
+  // dead canvas. Autoplay routes through play(), which is a no-op under
+  // prefers-reduced-motion and under the offscreen/hidden guards; so a
+  // reduced-motion visitor never gets autoplaying animation (the widget should
+  // render a fully-formed static frame instead), and an offscreen autoplay simply
+  // resumes once scrolled into view. The returned API is identical with or without
+  // opts — autoplay only changes whether play() is invoked once at the end of setup.
+  function loop(widgetRootEl, tickFn, opts) {
+    opts = opts || {};
     var raf = null;
     var playing = false;
     var onscreen = true;
@@ -1061,6 +1075,8 @@
         }
       });
     }
+    // Autoplay on init (respects reduced-motion / offscreen guards inside play()).
+    if (opts.autoplay) play();
     return api;
   }
 

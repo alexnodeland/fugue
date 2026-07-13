@@ -26,6 +26,8 @@ By the end of this tutorial, you will understand:
 
 Traditional programming languages execute once and discard their execution history. In probabilistic programming, we need to **record, manipulate, and reason about random choices** to enable sophisticated inference algorithms. Fugue's trace system solves this fundamental challenge.
 
+<div class="fugue-explorable fv-inline" data-viz="trace-ticker" data-caption="A trace is a recording — addr · value · log w typing themselves in, live."></div>
+
 ```mermaid
 graph TD
     A["Model Specification"] --> B["Handler Selection"]

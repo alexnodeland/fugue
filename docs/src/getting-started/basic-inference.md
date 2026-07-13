@@ -342,7 +342,7 @@ fn inference_workflow() {
     let ess = inference::diagnostics::effective_sample_size(&bias_samples);
     println!("  Effective Sample Size: {:.1}", ess);
     // For multiple chains, also check split-R̂ (inference::diagnostics::r_hat_f64)
-    // and inference::mcmc_utils::effective_sample_size_multichain — both new in 0.2.0.
+    // and inference::mcmc_utils::effective_sample_size_multichain.
 
     if ess > 100.0 {
         println!("  ✅ Good mixing!");
@@ -356,6 +356,8 @@ fn inference_workflow() {
         bias_samples.iter().filter(|&&b| b > 0.5).count() as f64 / bias_samples.len() as f64);
 }
 ```
+
+<div class="fugue-explorable fv-inline" data-viz="rhat-spark" data-mode="good" data-caption="Split-R̂ falling toward 1.00 across three chains — the convergence check from step 5, live."></div>
 
 ## Choosing the Right Algorithm
 

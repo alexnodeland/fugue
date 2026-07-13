@@ -52,6 +52,8 @@
     var autoPlay = false;
     var stepClock = 0;        // seconds since last auto-advance
     var STEP_GAP = 0.55;
+    var holdClock = 0;        // seconds resting on a finished performance
+    var HOLD = 1.4;           // pause on Pure before the ambient reloop
 
     // ---- rain (Perform x200) ----
     var rainTicks = null;     // array of mu draws, or null
@@ -134,12 +136,24 @@
     // ------------------------------------------------------------------ tick
     function tick(dt) {
       if (autoPlay) {
-        stepClock += dt;
-        while (stepClock >= STEP_GAP && cursor < NODES) {
-          stepClock -= STEP_GAP;
-          stepOnce();
+        if (cursor >= NODES) {
+          // A full performance is on the strip — rest on it, then reloop with a
+          // fresh improvisation so the widget stays quietly alive on the page.
+          holdClock += dt;
+          if (holdClock >= HOLD) {
+            holdClock = 0;
+            committed = newBoolArray(NODES);
+            cursor = 0; walkActive = -1; stepClock = 0;
+            muCurrent = drawMu();
+            updateReadouts();
+          }
+        } else {
+          stepClock += dt;
+          while (stepClock >= STEP_GAP && cursor < NODES) {
+            stepClock -= STEP_GAP;
+            stepOnce();
+          }
         }
-        if (cursor >= NODES) { autoPlay = false; updatePlayLabel(); loopApi.pause(); }
       }
       render();
     }
@@ -522,8 +536,16 @@
     var loopApi = FV.loop(root, tick);
     FV.onThemeChange(function () { render(); });
 
-    // Start fully interpreted (filled tallies, coral tick present); Reset then
-    // replays the chain node by node.
+    // Pre-warm: start fully interpreted — one full performance already on the strip
+    // (filled tallies, coral tick present). This is also the reduced-motion frame.
     runAllInstant();
+    // autoplay: gently reloop the walk when motion is allowed. runAllInstant left
+    // the chain at Pure, so the first thing the loop does is hold on the completed
+    // performance, then walk a fresh one — never a dead canvas.
+    if (!loopApi.reduced) {
+      autoPlay = true; holdClock = 0; stepClock = 0;
+      updatePlayLabel();
+      loopApi.play();
+    }
   });
 })();

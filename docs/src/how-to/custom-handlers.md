@@ -60,8 +60,10 @@ where the **carrier type** varies by handler implementation.
 - **Trace construction**: Build execution traces with choices and log-weights
 - **Resource cleanup**: Properly finalize and return traces
 
-```admonish note title="i64 sample sites (0.2.0)"
-The `Handler` trait also has `on_sample_i64`/`on_observe_i64` for signed discrete distributions (`DiscreteUniform`, new in 0.2.0). Both have default implementations that panic with a precise message, so handlers written against the four types above keep compiling unchanged — override them only if your model actually samples an `i64`-valued distribution.
+<div class="fugue-explorable fv-inline" data-viz="trace-ticker" data-caption="Every Handler call ends here: a trace is the recording of addr · value · log-weight this widget types out live."></div>
+
+```admonish note title="i64 sample sites"
+The `Handler` trait also has `on_sample_i64`/`on_observe_i64` for signed discrete distributions (`DiscreteUniform`). Both have default implementations that panic with a precise message, so handlers written against the four types above keep compiling unchanged — override them only if your model actually samples an `i64`-valued distribution.
 ```
 
 ## Decorator Pattern for Handler Composition

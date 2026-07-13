@@ -122,3 +122,7 @@ explorable.
 - **Next explorable:** [The Model Is a Score](./monad.md) — step through the
   interpreter that actually runs this program.
 - **API:** [`Beta`](https://docs.rs/fugue-ppl/latest/fugue/), [`adaptive_mcmc_chain`](https://docs.rs/fugue-ppl/latest/fugue/inference/mh/fn.adaptive_mcmc_chain.html).
+
+---
+
+Next: [The Model Is a Score](./monad.md)

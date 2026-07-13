@@ -201,3 +201,7 @@ with 100 000 sample sites is interpreted without overflowing the stack.
 - Next explorable: [Random Walks in Posterior Space](./metropolis.md) — now that
   the score has a value and a weight, how do we *listen* our way back to the
   posterior you just watched form?
+
+---
+
+Next: [Random Walks in Posterior Space](./metropolis.md)

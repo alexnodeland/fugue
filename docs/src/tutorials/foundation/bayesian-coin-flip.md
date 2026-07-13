@@ -74,6 +74,8 @@ For the Beta-Bernoulli model, the posterior is:
 
 $$p \mid \mathbf{x} \sim \text{Beta}(\alpha_0 + k, \beta_0 + n - k)$$
 
+<div class="fugue-explorable fv-inline" data-viz="posterior-morph" data-kind="beta" data-caption="The exact Beta posterior sharpening as flips arrive: Beta(α₀+k, β₀+n−k)."></div>
+
 ```admonish important title="Conjugate Prior Theorem"
 The **Beta distribution** is **conjugate** to the **Bernoulli likelihood**, meaning:
 - **Prior**: $\text{Beta}(\alpha_0, \beta_0)$

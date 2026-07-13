@@ -85,6 +85,8 @@ This **data augmentation** approach enables efficient MCMC inference.
 
 The most common mixture model uses Gaussian components, ideal for continuous data clustering.
 
+<div class="fugue-explorable fv-inline" data-viz="mixture-resp" data-caption="Points colored by real EM responsibility as two Gaussian components compete for the data."></div>
+
 ### Mathematical Model
 
 For $K$ Gaussian components:
@@ -354,7 +356,7 @@ Use heavy-tailed distributions for outlier resistance:
 ```rust,ignore
 # use fugue::*;
 
-// Fugue does provide `StudentT` directly (new in 0.2.0) — no Normal
+// Fugue provides `StudentT` directly — no Normal
 // approximation needed. `StudentT::new(df, loc, scale)`, see
 // `src/core/distribution.rs`.
 fn robust_mixture_model(

@@ -1,6 +1,6 @@
 // docs/viz/distributions.js — "A Field Guide to Distributions" explorable.
 // Self-contained IIFE. Consumes window.FugueViz (loaded first via book.toml).
-// Every distribution here maps 1:1 onto a fugue 0.2.0 constructor; the pdf/pmf
+// Every distribution here maps 1:1 onto a fugue constructor; the pdf/pmf
 // and sampler come straight from FugueViz.dist so the widget and the crate
 // agree by construction.
 (function () {
@@ -182,9 +182,9 @@
       sample: function (r, p) { return FV.dist.poisson.sample(r, p.lambda); },
       stats: function (p) { return { mean: p.lambda, variance: p.lambda, median: null, mode: Math.floor(p.lambda) }; }
     },
-    // ---- new in 0.2.0 -------------------------------------------------------
+    // ---- additional families ------------------------------------------------
     studentt: {
-      name: "StudentT(df, loc, scale)", group: "new", kind: "cont", ret: "f64", isNew: true,
+      name: "StudentT(df, loc, scale)", group: "cont", kind: "cont", ret: "f64", isNew: true,
       support: "ℝ", reach: "a heavier-tailed Normal; small df tolerates outliers. Robust regression noise.",
       params: [
         { key: "df", label: "df ν > 0", min: 1, max: 30, step: 0.5, value: 3 },
@@ -204,7 +204,7 @@
       }
     },
     cauchy: {
-      name: "Cauchy(loc, scale)", group: "new", kind: "cont", ret: "f64", isNew: true,
+      name: "Cauchy(loc, scale)", group: "cont", kind: "cont", ret: "f64", isNew: true,
       support: "ℝ", reach: "pathologically heavy tails — no mean, no variance. StudentT with df = 1.",
       params: [
         { key: "loc", label: "loc (median)", min: -3, max: 3, step: 0.1, value: 0 },
@@ -216,7 +216,7 @@
       stats: function (p) { return { mean: null, variance: null, median: p.loc, mode: p.loc }; }
     },
     laplace: {
-      name: "Laplace(loc, scale)", group: "new", kind: "cont", ret: "f64", isNew: true,
+      name: "Laplace(loc, scale)", group: "cont", kind: "cont", ret: "f64", isNew: true,
       support: "ℝ", reach: "a sharp peak with exponential tails; the prior behind L1 / lasso shrinkage.",
       params: [
         { key: "loc", label: "loc", min: -3, max: 3, step: 0.1, value: 0 },
@@ -228,7 +228,7 @@
       stats: function (p) { return { mean: p.loc, variance: 2 * p.scale * p.scale, median: p.loc, mode: p.loc }; }
     },
     weibull: {
-      name: "Weibull(shape, scale)", group: "new", kind: "cont", ret: "f64", isNew: true,
+      name: "Weibull(shape, scale)", group: "cont", kind: "cont", ret: "f64", isNew: true,
       support: "[0, ∞)", reach: "time-to-failure and survival; shape < 1 ages out early, shape > 1 wears out late.",
       params: [
         { key: "shape", label: "shape k > 0", min: 0.5, max: 5, step: 0.1, value: 1.5 },
@@ -251,7 +251,7 @@
       }
     },
     chisquared: {
-      name: "ChiSquared(k)", group: "new", kind: "cont", ret: "f64", isNew: true,
+      name: "ChiSquared(k)", group: "cont", kind: "cont", ret: "f64", isNew: true,
       support: "(0, ∞)", reach: "sums of k squared standard Normals; goodness-of-fit and variance tests. = Gamma(k/2, ½).",
       params: [{ key: "k", label: "df k > 0", min: 1, max: 15, step: 0.5, value: 4 }],
       domain: function (p) { return [0, p.k + 4 * Math.sqrt(2 * p.k) + 2]; },
@@ -263,7 +263,7 @@
       }
     },
     inversegamma: {
-      name: "InverseGamma(shape, rate)", group: "new", kind: "cont", ret: "f64", isNew: true,
+      name: "InverseGamma(shape, rate)", group: "cont", kind: "cont", ret: "f64", isNew: true,
       support: "(0, ∞)", reach: "the conjugate prior for a Normal's variance; α = shape, β = rate.",
       params: [
         { key: "shape", label: "shape α > 0", min: 1.5, max: 6, step: 0.1, value: 3 },
@@ -285,7 +285,7 @@
       }
     },
     discreteuniform: {
-      name: "DiscreteUniform(low, high)", group: "new", kind: "disc", ret: "i64", isNew: true,
+      name: "DiscreteUniform(low, high)", group: "disc", kind: "disc", ret: "i64", isNew: true,
       support: "{low … high} inclusive → i64", reach: "a fair die over an integer range; every value equally likely.",
       params: [
         { key: "low", label: "low", min: 0, max: 6, step: 1, value: 1, int: true },
@@ -307,9 +307,8 @@
 
   // Menu order, grouped for the <optgroup>s.
   var GROUPS = [
-    { label: "Continuous", keys: ["normal", "uniform", "lognormal", "exponential", "beta", "gamma"] },
-    { label: "Discrete", keys: ["bernoulli", "categorical", "binomial", "poisson"] },
-    { label: "New in 0.2.0", keys: ["studentt", "cauchy", "laplace", "weibull", "chisquared", "inversegamma", "discreteuniform"] }
+    { label: "Continuous", keys: ["normal", "uniform", "lognormal", "exponential", "beta", "gamma", "studentt", "cauchy", "laplace", "weibull", "chisquared", "inversegamma"] },
+    { label: "Discrete", keys: ["bernoulli", "categorical", "binomial", "poisson", "discreteuniform"] }
   ];
 
   var MAX_SAMPLES = 60000; // cap the continuous sample buffer
@@ -498,8 +497,8 @@
       var plotL = ML, plotR = W - MR, plotT = MT, plotB = H - MB;
       var plotW = plotR - plotL, plotH = plotB - plotT;
 
-      // return-type + new badge
-      rRet.set(def.ret + (def.isNew ? "  · new in 0.2.0" : ""), def.isNew ? "flow" : null);
+      // return-type badge (fugue's natural sample type)
+      rRet.set(def.ret);
 
       // invalid parameters: show fugue's validation story, no draw
       if (def.validate) {
@@ -713,11 +712,13 @@
     cv.el.style.cursor = "ew-resize";
 
     // ---- animation --------------------------------------------------------
+    // autoplay: samples start streaming the moment the widget scrolls into view.
+    // Under reduced motion the loop no-ops and the pre-warmed histogram (below) stands in.
     var lp = FV.loop(root, function () {
       var batch = def.kind === "disc" ? 24 : 40;
       addBatch(batch);
       render();
-    });
+    }, { autoplay: true });
     function togglePlay() {
       if (lp.playing) { lp.pause(); playBtn.textContent = "Play"; }
       else { lp.play(); playBtn.textContent = lp.playing ? "Pause" : "Play"; }
@@ -728,7 +729,12 @@
     // ---- go ---------------------------------------------------------------
     sel.value = defKey;
     selectDist(defKey);
-    if (!lp.reduced) { lp.play(); playBtn.textContent = "Pause"; }
-    else { playBtn.textContent = "Play"; hint.textContent = "reduced-motion is on — tap Step to draw a batch of samples and watch them accumulate."; }
+    // Pre-warm ~200 samples so the green histogram is already forming at first paint
+    // (and so the reduced-motion frame shows a partly-built histogram, not a bare curve).
+    addBatch(200);
+    render();
+    // The loop autoplays itself (FV.loop {autoplay:true}); reflect that on the button.
+    if (lp.reduced) { playBtn.textContent = "Play"; hint.textContent = "reduced-motion is on — tap Step to draw a batch of samples and watch them accumulate."; }
+    else { playBtn.textContent = "Pause"; }
   });
 })();

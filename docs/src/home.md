@@ -26,13 +26,15 @@
 
 ---
 
+<div class="fugue-explorable fv-inline" data-viz="dist-strip" data-dist="normal" data-params="0,1" data-caption="This page is alive — most figures in these docs run live. Touch them."></div>
+
 ```admonish tip title="🎮 New: Fugue Explorables"
 Learn Fugue by **playing**, not just reading. The [Explorables](./explorables/README.md) are interactive, touchable diagrams — drag a slider and watch a posterior re-form, step an interpreter one effect at a time, roll a Hamiltonian trajectory across a density. In the tradition of Bret Victor's explorable explanations and 3Blue1Brown.
 
 - [**Anatomy of a Probabilistic Program**](./explorables/anatomy.md) — the coin-flip Bayes loop, fully touchable
 - [**The Model Is a Score**](./explorables/monad.md) — a step-debugger for the `Model` monad
 - [**Random Walks in Posterior Space**](./explorables/metropolis.md) — Metropolis–Hastings by hand
-- [**Rolling, Not Guessing: HMC**](./explorables/hmc.md) — Hamiltonian Monte Carlo, new in 0.2.0
+- [**Rolling, Not Guessing: HMC**](./explorables/hmc.md) — Hamiltonian Monte Carlo, rolling a ball across the posterior landscape
 - [**Particles That Tell Stories**](./explorables/smc.md) — sequential Monte Carlo, resampling made visible
 - [**A Field Guide to Distributions**](./explorables/distributions.md) — all 17 distributions, sampled live
 ```

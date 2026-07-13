@@ -51,6 +51,8 @@ Traditional machine learning gives you point predictions. Bayesian classificatio
 
 The foundation of Bayesian classification is **logistic regression**, which models the probability of binary outcomes.
 
+<div class="fugue-explorable fv-inline" data-viz="logistic-boundary" data-caption="Posterior draws of the decision boundary wobble as the sampler explores — that spread is your uncertainty."></div>
+
 ### Mathematical Model
 
 For binary classification, we model:

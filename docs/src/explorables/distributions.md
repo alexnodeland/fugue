@@ -108,8 +108,7 @@ let model = prob!(
 
 ## The full field guide
 
-Every distribution in fugue 0.2.0. The `sample →` column is the natural return
-type; the seven marked **new in 0.2.0** arrived with this release.
+Every distribution in fugue. The `sample →` column is the natural return type.
 
 ### Continuous
 
@@ -121,6 +120,12 @@ type; the seven marked **new in 0.2.0** arrived with this release.
 | `Exponential` | [0, ∞) | `rate` > 0 | `f64` | the wait until the next memoryless event; mean = 1/rate. |
 | `Beta` | [0, 1] | `alpha`, `beta` > 0 | `f64` | a probability about a probability — the coin-bias prior. |
 | `Gamma` | (0, ∞) | `shape`, `rate` > 0 | `f64` | positive quantities; **rate**-parameterized, mean = shape/rate. |
+| `StudentT` | (−∞, ∞) | `df`, `loc`, `scale` > 0 | `f64` | a heavier-tailed Normal that tolerates outliers. |
+| `Cauchy` | (−∞, ∞) | `loc`, `scale` > 0 | `f64` | pathological tails — no mean, no variance. `StudentT(df=1)`. |
+| `Laplace` | (−∞, ∞) | `loc`, `scale` > 0 | `f64` | a sharp peak with exponential tails; the L1 / lasso prior. |
+| `Weibull` | [0, ∞) | `shape`, `scale` > 0 | `f64` | time-to-failure and survival modeling. |
+| `ChiSquared` | (0, ∞) | `k` > 0 | `f64` | sums of squared Normals; = `Gamma(k/2, ½)`. |
+| `InverseGamma` | (0, ∞) | `shape`, `rate` > 0 | `f64` | the conjugate prior for a Normal's variance. |
 
 ### Discrete
 
@@ -130,17 +135,6 @@ type; the seven marked **new in 0.2.0** arrived with this release.
 | `Categorical` | {0 … K−1} | `probs` sum to 1 | `usize` | picking one of K labels; index arrays safely. |
 | `Binomial` | {0 … n} | `n`, `p` ∈ [0, 1] | `u64` | successes in n independent trials. |
 | `Poisson` | {0, 1, 2, …} | `lambda` > 0 | `u64` | rare-event counts; mean = variance = λ. |
-
-### New in 0.2.0
-
-| Distribution | Support | Parameters | `sample →` | Reach for it when |
-|---|---|---|---|---|
-| `StudentT` | (−∞, ∞) | `df`, `loc`, `scale` > 0 | `f64` | a heavier-tailed Normal that tolerates outliers. |
-| `Cauchy` | (−∞, ∞) | `loc`, `scale` > 0 | `f64` | pathological tails — no mean, no variance. `StudentT(df=1)`. |
-| `Laplace` | (−∞, ∞) | `loc`, `scale` > 0 | `f64` | a sharp peak with exponential tails; the L1 / lasso prior. |
-| `Weibull` | [0, ∞) | `shape`, `scale` > 0 | `f64` | time-to-failure and survival modeling. |
-| `ChiSquared` | (0, ∞) | `k` > 0 | `f64` | sums of squared Normals; = `Gamma(k/2, ½)`. |
-| `InverseGamma` | (0, ∞) | `shape`, `rate` > 0 | `f64` | the conjugate prior for a Normal's variance. |
 | `DiscreteUniform` | {low … high} | `low` ≤ `high` | `i64` | a fair die over an integer range. |
 
 ```admonish note title="Gamma is rate-parameterized"
@@ -157,3 +151,7 @@ rate convention. If a value looks inverted, check whether you meant scale = 1/ra
   every constructor, its constraints, and its `log_prob`.
 - Next explorable: [Anatomy of a Probabilistic Program](anatomy.md) — put a
   `Beta` prior and `Bernoulli` data together and watch Bayes multiply them.
+
+---
+
+Next: [Explorables](./README.md)

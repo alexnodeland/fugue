@@ -27,6 +27,8 @@ By the end of this tutorial, you will understand:
 
 Linear regression is the cornerstone of statistical modeling. In the Bayesian framework, we treat regression parameters as random variables with prior distributions, allowing us to quantify uncertainty in our estimates and make probabilistic predictions.
 
+<div class="fugue-explorable fv-inline" data-viz="regression-mini" data-caption="Ambient posterior spaghetti under a slow MH chain — drag a point and the fits migrate."></div>
+
 ```mermaid
 graph TB
     A["Data: (x₁,y₁), (x₂,y₂), ..., (xₙ,yₙ)"] --> B["Linear Model<br/>y = β₀ + β₁x + ε"]
@@ -417,7 +419,7 @@ fn regression_diagnostics(samples: &[(f64, f64, f64)], x_data: &[f64], y_data: &
 }
 ```
 
-````admonish note title="Convergence diagnostics (0.2.0)"
+````admonish note title="Convergence diagnostics"
 Residuals check the *model*; `fugue::inference::diagnostics` checks the *sampler*. Run at
 least two chains and pass their traces to [`r_hat_f64`](https://docs.rs/fugue-ppl/latest/fugue/inference/diagnostics/fn.r_hat_f64.html)
 (split-R̂, Vehtari et al. 2021 — splits each chain in half so it also catches within-chain

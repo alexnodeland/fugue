@@ -273,7 +273,7 @@
 
     var hint = document.createElement("div");
     hint.className = "fv-hint";
-    hint.textContent = "try: press Play, then drag a point far from the line — the heatmap morphs and the whole chain migrates to the new best fit, live.";
+    hint.textContent = "try: the chains are already walking — drag a point far from the line and the heatmap morphs and the whole chain migrates to the new best fit, live.";
     root.appendChild(hint);
 
     function renderReadouts() {
@@ -547,6 +547,9 @@
     }
 
     // ------------------------------------------------------------------- loop
+    // autoplay: start walking the moment the widget scrolls into view (the loop
+    // honors reduced-motion internally — no animation there, just the pre-warmed
+    // static frame below).
     var loopApi = FV.loop(root, function (dt) {
       if (dt === 0) { doStep(); }        // Step button (or reduced-motion)
       else {
@@ -556,7 +559,7 @@
       }
       refreshDiag(nowMs());
       draw();
-    });
+    }, { autoplay: true });
 
     function nowMs() { return (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now(); }
 
@@ -574,12 +577,17 @@
 
     FV.onThemeChange(function () { heatDirty = true; draw(); });
 
-    // first paint + autoplay (no-op under reduced motion)
+    // first paint: pre-warm ~40 burn-in steps so the posterior spaghetti and the
+    // param-space trails already exist at first paint (and so reduced-motion, which
+    // never animates, still shows a rich converged frame — never an empty axis).
     makeData();
     newChains();
+    for (var pw = 0; pw < 40; pw++) doStep();
+    refreshDiag(nowMs());
     renderReadouts();
     draw();
-    loopApi.play();
+    // The loop autoplays itself (see FV.loop {autoplay:true}); reflect that on the
+    // button. play() already ran and is a no-op under reduced motion.
     if (loopApi.playing) btns.fvButtons["Play"].textContent = "Pause";
   });
 })();

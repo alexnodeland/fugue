@@ -254,3 +254,61 @@ html.rust .fv-btn.fv-primary {
     animation: none !important;
   }
 }
+
+/* ---- The micro-widget family (docs/viz/inline.js) ------------------------- */
+/* Ambient inline figures embeddable on any page. Tighter chrome than the
+   full-width hero explorables; a single pause/play glyph; an optional caption. */
+
+.fv-inline {
+  position: relative; /* anchor the pause/play glyph */
+  padding: 8px 10px;
+  border-radius: 6px;
+  margin: 1.1rem 0;
+}
+
+.fv-inline .fv-canvas {
+  border-radius: 5px;
+}
+
+/* The single unobtrusive pause/play glyph, top-right of the panel. */
+.fv-glyph {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 2;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--fv-ink);
+  opacity: 0.35;
+  cursor: pointer;
+  font-size: 0.72rem;
+  line-height: 1;
+  font-family: inherit;
+  transition: opacity 0.15s ease;
+}
+
+.fv-glyph:hover {
+  opacity: 1;
+}
+
+.fv-glyph:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--fv-prior);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Caption rendered under a micro-widget's canvas (data-caption). */
+.fv-caption {
+  font-style: italic;
+  opacity: 0.7;
+  font-size: 0.76rem;
+  margin-top: 6px;
+  line-height: 1.4;
+}

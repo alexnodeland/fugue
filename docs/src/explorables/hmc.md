@@ -20,9 +20,10 @@ seed and you get the exact same momenta and trajectories every time.
 
 ## Things to try
 
-1. Press **Play**. Watch one violet **leapfrog trajectory** roll across parameter
-   space — a single proposal travelling much farther than a random-walk hop — while
-   its coral **fit line** swings across the data on the left.
+1. Watch the violet **leapfrog trajectory** roll across parameter space — a single
+   proposal travelling much farther than a random-walk hop — while its coral **fit
+   line** swings across the data on the left. (It is already rolling; the controls
+   let you pause, step, and steer.)
 2. **Drag the rightmost yellow point far up.** The posterior heatmap tilts toward
    steeper slopes and the coral ball rolls after it within a few transitions. This
    linked deformation is the whole point of the page.
@@ -140,7 +141,7 @@ fn main() {
 ```
 
 The same **ESS** you watch converge in the widget is a real diagnostic. Run a few
-chains and combine them with the multi-chain estimators (new in 0.2.0):
+chains and combine them with the multi-chain estimators:
 
 ```rust,ignore
 use fugue::*;
@@ -169,3 +170,7 @@ discrete latents.
   and [`HMCConfig`](https://docs.rs/fugue-ppl/latest/fugue/inference/hmc/struct.HMCConfig.html).
 - **Next:** [Particles That Tell Stories](./smc.md) — inference that moves through
   time instead of space.
+
+---
+
+Next: [Particles That Tell Stories](./smc.md)

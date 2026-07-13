@@ -48,6 +48,8 @@ graph LR
 - **Replay** (MCMC proposals)
 - **Scoring** (compute probabilities)
 
+<div class="fugue-explorable fv-inline" data-viz="trace-ticker" data-caption="The Trace box above, alive: addr · value · log-weight rows fill in as a real 3-site model runs."></div>
+
 ## Addresses: The Key to Advanced Inference
 
 Every `sample` and `observe` site needs a **unique address**:
