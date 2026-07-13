@@ -53,7 +53,7 @@ Fugue is 0.1.x: pre-1.0, actively developed, with no SemVer stability guarantee 
 
 ```toml
 [dependencies]
-fugue-ppl = "0.1.0"
+fugue-ppl = "0.2.0"
 ```
 
 ### Quickstart
@@ -133,12 +133,12 @@ Licensed under the [MIT License](LICENSE).
 If you use Fugue in your research, please cite:
 
 ```bibtex
-@software{fugue2025,
+@software{fugue2026,
   title = {Fugue: Monadic Probabilistic Programming for Rust},
   author = {Alexander Nodeland},
   url = {https://github.com/alexnodeland/fugue},
-  version = {0.1.0},
-  year = {2025}
+  version = {0.2.0},
+  year = {2026}
 }
 ```
 

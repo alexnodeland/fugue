@@ -10,6 +10,8 @@ For the initial 0.1.0 release notes, see `.github/CHANGELOG.md`.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-13
+
 The entries below summarize a full-crate audit remediation (170 findings,
 tracked as `FG-01` .. `FG-64` in the project's audit record) organized by
 area. Each bullet range names the finding IDs addressed in that area; a later
