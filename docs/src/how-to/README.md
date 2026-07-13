@@ -51,8 +51,7 @@ These guides are designed to be **example-first** and **immediately actionable**
 **What you'll learn**:
 
 - Numerical stability with log-space computations
-- Choosing an efficient inference algorithm for large-scale workloads
-- Batch processing patterns
+- Batch processing and vectorized model patterns
 - Performance monitoring and measurement
 
 **Key patterns**: Numerical stability, batch processing

@@ -6,6 +6,10 @@
 
 Sequential Monte Carlo (SMC) maintains a *population* of weighted particles and moves them through a sequence of intermediate target distributions, resampling and rejuvenating along the way, until the population approximates the posterior. Unlike MCMC's single evolving chain, SMC gives you many (weakly correlated) draws per run *and* an unbiased estimate of the log marginal likelihood — useful for model comparison, which no single-chain MCMC method provides directly.
 
+```admonish tip title="Try it live"
+The **[Particles That Tell Stories](../../explorables/smc.md)** explorable animates propagate → weight → resample on a 1D state-space model. Drop the particle count to 10 and watch degeneracy happen before you read a line of the theory below.
+```
+
 ## The model
 
 ```rust,ignore

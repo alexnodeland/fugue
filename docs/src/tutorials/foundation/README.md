@@ -79,7 +79,7 @@ Explore Fugue's revolutionary type system that eliminates runtime errors while p
 
 **Key Concepts:**
 
-- Natural return types for distributions (`bool`, `u64`, `f64`, `usize`)
+- Natural return types for distributions (`bool`, `u64`, `f64`, `usize`, `i64`)
 - Compile-time safety guarantees
 - Safe array indexing with categorical distributions
 - Parameter validation at construction time

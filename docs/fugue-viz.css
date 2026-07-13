@@ -1,0 +1,256 @@
+/*
+ * fugue-viz.css — styling for the Fugue Explorables shared infrastructure.
+ *
+ * Defines the semantic color algebra (blue x yellow = green) as CSS custom
+ * properties, theme-switched via mdbook's <html> theme class:
+ *   light family  -> html.light, html.rust
+ *   dark family   -> html.coal, html.navy, html.ayu, html.dark, and ALSO the
+ *                    default (no theme class), since the book default is dark.
+ * The dark palette is the :root default so the absent-class case is dark.
+ */
+
+:root {
+  --fv-prior: #58a6ff;
+  --fv-data: #f2cc60;
+  --fv-post: #56d364;
+  --fv-hot: #ff7b72;
+  --fv-flow: #bc8cff;
+  --fv-ink: rgba(230, 237, 243, 0.9);
+  --fv-grid: rgba(230, 237, 243, 0.08);
+  --fv-panel: rgba(110, 118, 129, 0.08);
+}
+
+/* Light theme families */
+html.light,
+html.rust {
+  --fv-prior: #0969da;
+  --fv-data: #9a6700;
+  --fv-post: #1a7f37;
+  --fv-hot: #cf222e;
+  --fv-flow: #8250df;
+  --fv-ink: rgba(31, 35, 40, 0.9);
+  --fv-grid: rgba(31, 35, 40, 0.08);
+  --fv-panel: rgba(175, 184, 193, 0.12);
+}
+
+/* Explicit dark families (redundant with :root default, but future-proof) */
+html.coal,
+html.navy,
+html.ayu,
+html.dark {
+  --fv-prior: #58a6ff;
+  --fv-data: #f2cc60;
+  --fv-post: #56d364;
+  --fv-hot: #ff7b72;
+  --fv-flow: #bc8cff;
+  --fv-ink: rgba(230, 237, 243, 0.9);
+  --fv-grid: rgba(230, 237, 243, 0.08);
+  --fv-panel: rgba(110, 118, 129, 0.08);
+}
+
+/* ---- The widget panel (full-width) ---------------------------------------- */
+
+.fugue-explorable {
+  border: 1px solid var(--fv-grid);
+  border-radius: 8px;
+  background: var(--fv-panel);
+  padding: 12px 14px;
+  margin: 1.4rem 0;
+  font-size: 0.8rem;
+}
+
+.fv-canvas {
+  display: block;
+  width: 100%;
+  border-radius: 6px;
+  touch-action: none; /* let pointer drags on canvas work on touch */
+}
+
+/* ---- Controls row --------------------------------------------------------- */
+
+.fv-controls {
+  display: flex;
+  flex-flow: row wrap;
+  gap: 10px;
+  align-items: flex-end;
+  margin-bottom: 10px;
+}
+
+.fv-control {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 0.8rem;
+}
+
+.fv-control-label {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.65;
+  font-size: 0.68rem;
+}
+
+.fv-control-value {
+  font-family: var(--mono-font, "Source Code Pro", monospace);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.9;
+}
+
+.fv-range {
+  width: 140px;
+  accent-color: var(--fv-prior);
+  cursor: pointer;
+}
+
+.fv-range:focus-visible {
+  outline: 2px solid var(--fv-prior);
+  outline-offset: 2px;
+}
+
+/* Toggle */
+.fv-toggle {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.fv-checkbox {
+  accent-color: var(--fv-post);
+  cursor: pointer;
+}
+
+/* Buttons */
+.fv-buttons {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.fv-btn {
+  font-size: 0.75rem;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--fv-grid);
+  background: transparent;
+  color: var(--fv-ink);
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1.4;
+}
+
+.fv-btn:hover {
+  border-color: var(--fv-prior);
+}
+
+.fv-btn:focus-visible {
+  outline: 2px solid var(--fv-prior);
+  outline-offset: 2px;
+}
+
+.fv-btn.fv-primary {
+  background: var(--fv-prior);
+  border-color: var(--fv-prior);
+  color: #0d1117;
+  font-weight: 600;
+}
+
+html.light .fv-btn.fv-primary,
+html.rust .fv-btn.fv-primary {
+  color: #ffffff;
+}
+
+/* ---- Readouts row --------------------------------------------------------- */
+
+.fv-readouts {
+  display: flex;
+  flex-flow: row wrap;
+  gap: 16px;
+  margin-top: 10px;
+  align-items: baseline;
+}
+
+.fv-readout {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.fv-readout-label {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.65;
+  font-size: 0.66rem;
+}
+
+.fv-readout-value {
+  font-family: var(--mono-font, "Source Code Pro", monospace);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.95rem;
+}
+
+/* ---- The Victor scrub number (in prose) ----------------------------------- */
+
+.fv-scrub {
+  border-bottom: 1px dashed var(--fv-prior);
+  cursor: ew-resize;
+  font-family: var(--mono-font, "Source Code Pro", monospace);
+  font-variant-numeric: tabular-nums;
+  color: var(--fv-prior);
+  user-select: none;
+  padding: 0 1px;
+  white-space: nowrap;
+}
+
+.fv-scrub:focus-visible {
+  outline: 2px solid var(--fv-prior);
+  outline-offset: 2px;
+}
+
+.fv-scrub-active {
+  color: var(--fv-hot);
+  border-bottom-color: var(--fv-hot);
+}
+
+/* ---- Inline prose color classes (the color algebra in text) --------------- */
+
+.fv-c-prior { color: var(--fv-prior); }
+.fv-c-data { color: var(--fv-data); }
+.fv-c-post { color: var(--fv-post); }
+.fv-c-hot { color: var(--fv-hot); }
+.fv-c-flow { color: var(--fv-flow); }
+
+/* ---- The "try this" hint -------------------------------------------------- */
+
+.fv-hint {
+  font-style: italic;
+  opacity: 0.7;
+  font-size: 0.78rem;
+  margin-top: 8px;
+}
+
+.fv-hint::before {
+  content: "try: ";
+  font-style: normal;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.7;
+  font-size: 0.66rem;
+}
+
+/* Canvas instruction line (drag/paint affordances) */
+.fv-instruction {
+  font-size: 0.72rem;
+  opacity: 0.6;
+  margin-top: 4px;
+  text-align: center;
+}
+
+/* ---- Reduced motion ------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .fugue-explorable * {
+    transition: none !important;
+    animation: none !important;
+  }
+}

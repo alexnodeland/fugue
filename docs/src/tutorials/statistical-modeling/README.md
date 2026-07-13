@@ -76,13 +76,15 @@ let model = prob! {
     let intercept <- sample(addr!("intercept"), Normal::new(0.0, 10.0).unwrap());
     let slope <- sample(addr!("slope"), Normal::new(0.0, 10.0).unwrap());
     let sigma <- sample(addr!("sigma"), Gamma::new(1.0, 1.0).unwrap());
-    
-    // Observations with uncertainty
-    for (i, (x_i, y_i)) in x_data.iter().zip(y_data.iter()).enumerate() {
-        let mu_i = intercept + slope * x_i;
-        observe(addr!("y", i), Normal::new(mu_i, sigma).unwrap(), *y_i);
-    }
-    
+
+    // Observations with uncertainty. `prob!`'s `<-` bind syntax only munches
+    // top-level `let` statements, so a per-observation loop must go through
+    // `plate!` (it sequences one `observe` per address via `traverse_vec`).
+    let _observations <- plate!(i in 0..x_data.len() => {
+        let mu_i = intercept + slope * x_data[i];
+        observe(addr!("y", i), Normal::new(mu_i, sigma).unwrap(), y_data[i])
+    });
+
     pure((intercept, slope, sigma))
 };
 ```
@@ -156,17 +158,22 @@ let model = prob! {
     let mu_alpha <- sample(addr!("mu_alpha"), Normal::new(0.0, 5.0).unwrap());
     let sigma_alpha <- sample(addr!("sigma_alpha"), Gamma::new(1.0, 1.0).unwrap());
     let beta <- sample(addr!("beta"), Normal::new(0.0, 2.0).unwrap());
-    
-    // Group-specific intercepts via partial pooling
-    let _observations <- plate!(i in 0..x_data.len() => {
-        let group_j = group_ids[i];
-        sample(addr!("alpha", group_j), Normal::new(mu_alpha, sigma_alpha).unwrap())
-            .bind(move |alpha_j| {
-                let mu_i = alpha_j + beta * x_data[i];
-                observe(addr!("y", i), Normal::new(mu_i, sigma_y).unwrap(), y_data[i])
-            })
+    let sigma_y <- sample(addr!("sigma_y"), Gamma::new(1.0, 1.0).unwrap());
+
+    // One intercept per group, sampled once each (partial pooling). Sampling
+    // it again inside the per-observation loop below would hit the same
+    // address twice and panic — sample it here, then reuse the value.
+    let alphas <- plate!(g in 0..n_groups => {
+        sample(addr!("alpha", g), Normal::new(mu_alpha, sigma_alpha).unwrap())
     });
-    
+
+    // Observations reuse their group's already-sampled intercept.
+    let _observations <- plate!(i in 0..x_data.len() => {
+        let alpha_j = alphas[group_ids[i]];
+        let mu_i = alpha_j + beta * x_data[i];
+        observe(addr!("y", i), Normal::new(mu_i, sigma_y).unwrap(), y_data[i])
+    });
+
     pure((mu_alpha, sigma_alpha, beta, sigma_y))
 };
 ```
@@ -210,12 +217,12 @@ graph LR
 let model = prob! {
     // 1. Prior specification
     let parameter <- sample(addr!("param"), Normal::new(0.0, 1.0).unwrap());
-    
-    // 2. Likelihood specification
-    for (i, observation) in data.iter().enumerate() {
-        observe(addr!("obs", i), distribution, *observation);
-    }
-    
+
+    // 2. Likelihood specification — plate! sequences one `observe` per point
+    let _observations <- plate!(i in 0..data.len() => {
+        observe(addr!("obs", i), Normal::new(parameter, 1.0).unwrap(), data[i])
+    });
+
     // 3. Return parameters of interest
     pure(parameter)
 };
@@ -434,9 +441,12 @@ let value: f64 = normal.sample(&mut rng);  // Explicit numeric type!
 
 ```rust,ignore
 # use fugue::runtime::handler::run;
-# use fugue::runtime::interpreters::PriorHandler;
+# use fugue::runtime::interpreters::{PriorHandler, ReplayHandler, ScoreGivenTrace};
+# use fugue::runtime::trace::Trace;
 
-// Seamless integration with Fugue's runtime system:
+// Seamless integration with Fugue's runtime system. Handlers are plain
+// structs run through the same `run(handler, model)` entry point — there is
+// no `.score()`/`.replay()` method, and no `::new()` constructor.
 
 // 1. Prior sampling for model validation
 let (result, trace) = run(
@@ -444,12 +454,19 @@ let (result, trace) = run(
     your_model()
 );
 
-// 2. Scoring for model comparison
-let scored_trace = ScoreGivenTrace::new(trace).score(&mut rng, your_model());
+// 2. Scoring for model comparison — replays `trace`'s choices and rescores
+// them under (possibly different) model parameters
+let (_, scored_trace) = run(
+    ScoreGivenTrace { base: trace.clone(), trace: Trace::default() },
+    your_model()
+);
 
-// 3. Replay for debugging
-let replay_trace = ReplayHandler::new(previous_trace)
-    .replay(&mut rng, your_model());
+// 3. Replay for debugging — reuses recorded values where present, samples
+// fresh at any address not in `previous_trace`
+let (_, replay_trace) = run(
+    ReplayHandler { rng: &mut rng, base: previous_trace, trace: Trace::default() },
+    your_model()
+);
 ```
 
 ## Common Statistical Tasks

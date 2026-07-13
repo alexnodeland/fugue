@@ -26,6 +26,17 @@
 
 ---
 
+```admonish tip title="🎮 New: Fugue Explorables"
+Learn Fugue by **playing**, not just reading. The [Explorables](./explorables/README.md) are interactive, touchable diagrams — drag a slider and watch a posterior re-form, step an interpreter one effect at a time, roll a Hamiltonian trajectory across a density. In the tradition of Bret Victor's explorable explanations and 3Blue1Brown.
+
+- [**Anatomy of a Probabilistic Program**](./explorables/anatomy.md) — the coin-flip Bayes loop, fully touchable
+- [**The Model Is a Score**](./explorables/monad.md) — a step-debugger for the `Model` monad
+- [**Random Walks in Posterior Space**](./explorables/metropolis.md) — Metropolis–Hastings by hand
+- [**Rolling, Not Guessing: HMC**](./explorables/hmc.md) — Hamiltonian Monte Carlo, new in 0.2.0
+- [**Particles That Tell Stories**](./explorables/smc.md) — sequential Monte Carlo, resampling made visible
+- [**A Field Guide to Distributions**](./explorables/distributions.md) — all 17 distributions, sampled live
+```
+
 ```admonish info title="👋 Welcome"
 
 Check out these resources to get started:
@@ -38,22 +49,23 @@ Check out these resources to get started:
 
 ## About Fugue
 
-- 🧩 **Monadic PPL**: Compose probabilistic programs using pure functional abstractions
-- 🔒 **Type-Safe Distributions**: 17 built-in probability distributions with natural return types
-- 📊 **Multiple Inference Methods**: MCMC, HMC, SMC, Variational Inference, ABC (see [Advanced Inference](./tutorials/advanced-inference/README.md))
-- 🔍 **Comprehensive Diagnostics**: R-hat convergence, effective sample size, validation
-- ⚡ **Numerically Stable**: Log-space computations throughout for robust probability arithmetic
+- 🧩 **Monadic PPL**: Compose probabilistic programs as pure `Model` values, then interpret them with pluggable handlers — effects are *interpreted*, never performed by the model itself
+- 🔒 **Type-Safe Distributions**: 17 built-in distributions with natural return types (`Bernoulli` → `bool`, `Poisson` → `u64`, `Categorical` → `usize`) — the type system tracks what each draw *is*
+- 📊 **Multiple Inference Methods**: adaptive Metropolis–Hastings, **Hamiltonian Monte Carlo**, Sequential Monte Carlo (with an unbiased log-evidence estimate), Variational Inference (support-matched guide families), and importance-weighted ABC-SMC (see [Advanced Inference](./tutorials/advanced-inference/README.md))
+- 🔍 **Comprehensive Diagnostics**: split-R̂ convergence, autocorrelation-based effective sample size, Geweke, and closed-form validation
+- 🌀 **Stack-Safe Interpreter**: a trampolined runtime evaluates models in O(1) stack depth — 100 000-site programs run without overflowing
+- ⚡ **Numerically Stable**: log-space computations throughout for robust probability arithmetic
 - ✨ **Ergonomic Macros**: Do-notation (`prob!`), vectorization (`plate!`), addressing (`addr!`)
 
 ```admonish note title="🧪 Where Fugue stands today"
-Fugue is 0.1.x: pre-1.0, actively developed, with no SemVer stability guarantee yet and a single primary maintainer. It's extensively tested (unit, integration, and statistical regression tests against closed-form posteriors), but that's a different claim from "production-ready" — pin an exact version and expect breaking API changes between 0.1.x releases as the design settles.
+Fugue is 0.2.x: pre-1.0, actively developed, with no SemVer stability guarantee yet and a single primary maintainer. It's extensively tested (unit, integration, and statistical regression tests against closed-form posteriors), but that's a different claim from "production-ready" — pin an exact version and expect breaking API changes between 0.x releases as the design settles.
 ```
 
 ## Installation
 
 ```toml
 [dependencies]
-fugue-ppl = "0.1.0"
+fugue-ppl = "0.2.0"
 ```
 
 ---

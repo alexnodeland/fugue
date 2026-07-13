@@ -6,6 +6,12 @@
 
 A comprehensive introduction to Bayesian inference through the classic coin flip problem. This tutorial demonstrates core Bayesian concepts including prior beliefs, likelihood functions, posterior distributions, and conjugate analysis using Fugue's type-safe probabilistic programming framework.
 
+```admonish tip title="Try it live"
+[**Anatomy of a Probabilistic Program**](../../explorables/anatomy.md) is this
+exact prior/likelihood/posterior loop, fully touchable — drag the prior's
+$\alpha, \beta$, flip coins, and watch the Beta posterior update in real time.
+```
+
 ```admonish info title="Learning Objectives"
 By the end of this tutorial, you will understand:
 - **Bayesian Inference**: How to combine prior beliefs with data
@@ -148,6 +154,10 @@ The **Effective Sample Size (ESS)** measures how many independent samples we hav
 - **ESS > 400**: Generally adequate for inference
 - **ESS < 100**: May indicate poor mixing or autocorrelation
 - **ESS/Total < 0.1**: Consider increasing chain length or improving proposals
+
+`fugue::inference::diagnostics::effective_sample_size` (used below) computes
+this from the *normalized* autocorrelation, so it's dimensionless and
+comparable across parameters regardless of their scale.
 ```
 
 ## Diagnostics & Validation

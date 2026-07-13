@@ -15,6 +15,10 @@ Fugue models form a **monad** $\mathcal{M}$ with:
 This categorical structure ensures that model composition is **mathematically sound** and **computationally tractable**.
 ```
 
+```admonish tip title="Try it live"
+The regression and hierarchical models built below are exactly what [Random Walks in Posterior Space](../explorables/metropolis.md) samples from — watch a chain explore a posterior like the ones you're about to compose.
+```
+
 ## Do-Notation with `prob!`
 
 The `prob!` macro implements **monadic do-notation** for probabilistic computations, providing a natural syntax for sequential dependence. Formally, it translates:
@@ -132,7 +136,7 @@ The computational challenge lies in maintaining **state consistency** while enab
 - Mixed probabilistic and deterministic updates
 
 ```admonish warning
-Sequential models can create large traces. Consider using memory-efficient handlers for long sequences.
+Sequential models can create large traces — every site's `Choice` lives in the returned `Trace`'s `BTreeMap` for the life of the run. For very long sequences, consider a custom `Handler` that summarizes or streams state instead of retaining every choice (see [Custom Handlers](./custom-handlers.md)).
 ```
 
 ## Composable Model Functions

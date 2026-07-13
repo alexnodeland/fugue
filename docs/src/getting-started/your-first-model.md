@@ -18,6 +18,10 @@ In 5 minutes, you'll understand:
 **Time**: ~5 minutes
 ```
 
+```admonish tip title="Try it live"
+Before diving into code, play with **[Anatomy of a Probabilistic Program](../explorables/anatomy.md)** — a touchable coin-flip Bayes loop that shows prior, data, and posterior updating in real time.
+```
+
 ## Step 1: The Simplest Model
 
 Let's start with the simplest possible model - one that always returns the same value:

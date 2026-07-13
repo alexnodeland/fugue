@@ -78,7 +78,7 @@ Separate model specification from execution strategy through handlers.
 
 ### 📊 **Diagnostics Built In**
 
-R-hat, effective sample size, memory-optimized traces, and a structured error taxonomy.
+Split-R̂, autocorrelation-based and multi-chain effective sample size, and a structured error taxonomy.
 
 ## Architecture Overview
 
@@ -94,11 +94,12 @@ graph TB
     subgraph "Core System"
         C[Distributions & Types]
         H[Handlers & Interpreters]
-        T[Traces & Memory]
+        T[Traces]
     end
 
     subgraph "Inference Engines"
         MCMC[MCMC Sampling]
+        HMC[Hamiltonian Monte Carlo]
         SMC[Particle Filtering]
         VI[Variational Inference]
         ABC[ABC Methods]
@@ -109,6 +110,7 @@ graph TB
     C --> H
     H --> T
     T --> MCMC
+    T --> HMC
     T --> SMC
     T --> VI
     T --> ABC

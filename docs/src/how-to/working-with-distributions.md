@@ -10,6 +10,12 @@ Fugue's type-safe distribution system represents a principled approach to probab
 Fugue's distribution system is grounded in **dependent type theory**, where each distribution $D$ is parameterized not just by its parameters $\theta$, but by its **support type** $\mathcal{S}$. This ensures that $\text{sample}(D_\theta) : \mathcal{S}$ and eliminates the need for runtime type checking or unsafe casting operations.
 ```
 
+Fugue 0.2.0 ships **17 distributions** in `fugue::core::distribution`: 12 continuous (`Normal`, `Uniform`, `LogNormal`, `Exponential`, `Beta`, `Gamma`, and the six added in 0.2.0 — `StudentT`, `Cauchy`, `Laplace`, `Weibull`, `ChiSquared`, `InverseGamma`) and 5 discrete/other (`Bernoulli`, `Categorical`, `Binomial`, `Poisson`, and the 0.2.0 addition `DiscreteUniform`).
+
+```admonish tip title="Try it live"
+Play with every one of these — parameter sliders, a live sampling histogram racing the true curve — in the [Field Guide to Distributions](../explorables/distributions.md) explorable.
+```
+
 ## Type Safety in Practice
 
 Traditional probabilistic programming libraries return `f64` for everything, leading to casting overhead and runtime errors. Fugue distributions return their natural types:

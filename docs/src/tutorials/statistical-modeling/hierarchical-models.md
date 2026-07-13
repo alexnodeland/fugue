@@ -20,6 +20,12 @@ After completing this tutorial, you will be able to:
 - Handle partial pooling vs complete pooling trade-offs
 ```
 
+```admonish tip title="Try it live"
+[**Random Walks in Posterior Space**](../../explorables/metropolis.md) shows the sampler behind
+every model on this page hunting a 2D posterior by hand — watch acceptance rate, split-R̂, and
+ESS respond as you change the proposal step size.
+```
+
 ## Introduction
 
 **Hierarchical models** (also called multi-level or mixed-effects models) are essential for analyzing **grouped or clustered data** where observations within groups are more similar to each other than to observations in other groups. Examples include:

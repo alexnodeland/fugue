@@ -166,14 +166,14 @@ Fugue comes with comprehensive examples to explore:
 
 ```bash
 # Clone the repository to access examples
-git clone https://github.com/your-org/fugue-ppl
-cd fugue-ppl
+git clone https://github.com/alexnodeland/fugue
+cd fugue
 
 # List available examples
 ls examples/
 
 # Run a simple example
-cargo run --example gaussian_mean -- --obs 2.5 --seed 42
+cargo run --example bayesian_coin_flip
 
 # Try a more complex one
 cargo run --example working_with_distributions
@@ -213,8 +213,8 @@ ls examples/
 
 If you encounter issues:
 
-1. Check the [GitHub Issues](https://github.com/alexnodeland/fugue-ppl/issues)
-2. Review the [examples](https://github.com/alexnodeland/fugue-ppl/tree/main/examples) for working code
+1. Check the [GitHub Issues](https://github.com/alexnodeland/fugue/issues)
+2. Review the [examples](https://github.com/alexnodeland/fugue/tree/main/examples) for working code
 3. Read the [API documentation](https://docs.rs/fugue-ppl)
 
 ## Next Steps
