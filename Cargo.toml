@@ -65,3 +65,7 @@ harness = false
 [[bench]]
 name = "f_perf"
 harness = false
+
+[[bench]]
+name = "sequence_vec"
+harness = false

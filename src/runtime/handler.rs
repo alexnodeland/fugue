@@ -287,4 +287,30 @@ mod tests {
             .join()
             .expect("deep model interpretation overflowed the stack");
     }
+
+    // Companion regression from PR #34: the same stack-safety guarantee through
+    // the `sequence_vec` + `observe` path (the deep test above covers
+    // sample+bind). 100k observations interpreted through `sequence_vec` must
+    // complete without overflowing the stack.
+    #[test]
+    fn run_handles_large_observe_sequence() {
+        use crate::core::model::{observe, sequence_vec};
+
+        let n = 100_000usize;
+        let models: Vec<Model<()>> = (0..n)
+            .map(|i| observe(addr!("obs", i), Bernoulli::new(0.5).unwrap(), true))
+            .collect();
+        let model = sequence_vec(models).map(|_| ());
+
+        let mut rng = StdRng::seed_from_u64(123);
+        let (_a, trace) = crate::runtime::handler::run(
+            PriorHandler {
+                rng: &mut rng,
+                trace: Trace::default(),
+            },
+            model,
+        );
+
+        assert!(trace.log_likelihood.is_finite());
+    }
 }
