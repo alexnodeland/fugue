@@ -508,9 +508,7 @@ let replay_trace = ReplayHandler::new(previous_trace)
 
 ### Advanced Topics
 
-- [Advanced Applications](../advanced-applications/README.md) - Specialized modeling domains
-- [Time Series Forecasting](../advanced-applications/time-series-forecasting.md) - Temporal modeling
-- [Model Comparison](../advanced-applications/model-comparison-selection.md) - Advanced selection methods
+- [Advanced Inference](../advanced-inference/README.md) - SMC, ABC, and Variational Inference beyond adaptive MCMC
 
 ---
 

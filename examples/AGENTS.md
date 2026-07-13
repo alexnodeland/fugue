@@ -8,6 +8,7 @@ The `examples/` directory contains comprehensive, real-world examples demonstrat
 
 ```text
 examples/
+├── abc_inference.rs                   # Approximate Bayesian Computation (ABC-SMC)
 ├── advanced_distribution_patterns.rs  # Complex distribution composition
 ├── bayesian_coin_flip.rs              # Basic Bayesian inference
 ├── building_complex_models.rs         # Model composition patterns
@@ -19,8 +20,10 @@ examples/
 ├── mixture_models.rs                  # Gaussian mixture models
 ├── optimizing_performance.rs          # Performance optimization techniques
 ├── production_deployment.rs           # Production-ready patterns
+├── smc_inference.rs                   # Sequential Monte Carlo
 ├── trace_manipulation.rs              # Trace inspection and modification
 ├── type_safety.rs                     # Type system demonstrations
+├── vi_inference.rs                    # Variational Inference (mean-field)
 └── working_with_distributions.rs      # Distribution library usage
 ```
 
@@ -42,6 +45,15 @@ examples/
 - `classification.rs` - Probabilistic classification
 - `hierarchical_models.rs` - Multi-level data structures
 - `mixture_models.rs` - Clustering and density estimation
+
+### Inference Methods Beyond Adaptive MCMC
+
+**Purpose**: Demonstrate SMC, ABC, and VI end-to-end against a known posterior
+(see the mdBook "Advanced Inference" tutorial section for the walkthrough)
+
+- `smc_inference.rs` - Sequential Monte Carlo (`adaptive_smc`)
+- `abc_inference.rs` - Approximate Bayesian Computation (`abc_smc_weighted`)
+- `vi_inference.rs` - Variational Inference (`optimize_meanfield_vi_with_config`)
 
 ### Advanced Techniques
 
@@ -172,21 +184,19 @@ fn analyze_posterior_samples(samples: &[(f64, Trace)]) -> Result<(), Box<dyn std
 //! memory management, and performance optimization.
 
 use fugue::prelude::*;
-use fugue::runtime::memory::{TracePool, PooledPriorHandler};
+use fugue::runtime::interpreters::PriorHandler;
 
 fn production_inference_pipeline(
     data: &[f64],
     config: &InferenceConfig,
 ) -> Result<PosteriorSummary, InferenceError> {
-    // Use memory pooling for high-throughput scenarios
-    let mut trace_pool = TracePool::new(config.pool_capacity);
     let mut rng = StdRng::seed_from_u64(config.random_seed);
-    
+
     // Model with comprehensive error handling
     let model = create_validated_model(data)?;
-    
-    // Run inference with pooled memory management
-    let handler = PooledPriorHandler::new(&mut rng, &mut trace_pool);
+
+    // Run inference with the shipped PriorHandler
+    let handler = PriorHandler { rng: &mut rng, trace: Trace::default() };
     let samples = run_inference_with_diagnostics(handler, model, config)?;
     
     // Validate results before returning
@@ -317,7 +327,7 @@ let prior = Normal::new(0.0, 2.5)?;
 
 ### Memory Management
 
-- Use `TracePool` for high-frequency inference
+- `Address` keys clone allocation-free (`Arc<str>` + cached hash)
 - Consider streaming processing for large datasets
 - Monitor memory usage in long-running examples
 - Demonstrate memory cleanup patterns

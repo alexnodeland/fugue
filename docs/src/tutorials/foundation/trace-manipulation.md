@@ -225,23 +225,23 @@ For production workloads, efficient memory management is crucial:
 
 ```rust,ignore
 # use fugue::*;
-# use fugue::runtime::{interpreters::PriorHandler, memory::*};
+# use fugue::runtime::interpreters::PriorHandler;
 # use rand::{SeedableRng, rngs::StdRng};
 {{#include ../../../../examples/trace_manipulation.rs:memory_optimization}}
 ```
 
 ### Production Memory Strategies
 
-1. **Copy-on-Write Traces**: Share read-only data, copy only when modified
-2. **Trace Pooling**: Reuse allocated memory across multiple inferences
-3. **Pre-sized Allocation**: Reserve space for expected number of choices
-4. **Batch Processing**: Amortize allocation costs across many executions
+1. **Fresh Trace Per Run**: Each handler run accumulates into its own `Trace`
+2. **Pre-sized Collections**: Reserve space for expected result vectors
+3. **Batch Processing**: Amortize per-request setup across many executions
+4. **Choose the Right Algorithm**: Prefer a gradient-based kernel when the number of latent sites is large
 
 ```admonish tip title="Memory Benchmarking"
 For high-throughput scenarios:
-- Use `TracePool` for batch processing
-- Pre-size trace builders when choice count is predictable
+- Reuse immutable configuration/model builders across requests
 - Profile memory allocation patterns in your specific use case
+- Measure end-to-end with the actual inference entry points you ship
 ```
 
 ## Diagnostic Tools
@@ -391,10 +391,9 @@ impl<R: rand::Rng> CustomMCMC<R> {
 
 ```rust,ignore
 # use fugue::*;
-# use fugue::runtime::memory::TracePool;
+# use fugue::runtime::interpreters::PriorHandler;
 
 struct InferencePipeline {
-    pool: TracePool,
     diagnostics: Vec<f64>,
 }
 
@@ -407,13 +406,11 @@ impl InferencePipeline {
         let mut results = Vec::with_capacity(n_samples);
         
         for _ in 0..n_samples {
-            // Get pooled trace to avoid allocation
-            let pooled_trace = self.pool.get_trace();
-            
             let mut rng = rand::thread_rng();
+            // Each run accumulates into its own fresh Trace.
             let handler = PriorHandler { 
                 rng: &mut rng, 
-                trace: pooled_trace 
+                trace: Trace::default(),
             };
             
             let (result, trace) = runtime::handler::run(handler, model_fn());
@@ -453,8 +450,8 @@ impl InferencePipeline {
 
 ```admonish tip title="Production Optimization"
 1. **Profile First**: Measure actual memory usage patterns
-2. **Pool Strategically**: Use `TracePool` for repeated operations
-3. **Size Appropriately**: Pre-size traces when choice count is predictable
+2. **Reuse Immutable State**: Share model builders/config across repeated runs
+3. **Size Appropriately**: Pre-size result collections when the count is predictable
 4. **Monitor Growth**: Watch for memory leaks in long-running processes
 ```
 
@@ -508,16 +505,16 @@ where F: Fn() -> Model<f64> + Copy
 }
 ```
 
-### Exercise 3: Memory-Optimized Batch Processing
+### Exercise 3: Batch Processing
 
 Design a system for processing thousands of similar models efficiently:
 
 ```rust,ignore
-# use fugue::runtime::memory::*;
+# use fugue::*;
+# use fugue::runtime::interpreters::PriorHandler;
 
 struct BatchProcessor {
-    pool: TracePool,
-    // TODO: Add fields for efficient batch processing
+    // TODO: Add fields for shared, immutable batch configuration
 }
 
 impl BatchProcessor {
@@ -525,7 +522,8 @@ impl BatchProcessor {
                        models: Vec<F>) -> Vec<(f64, Trace)>
     where F: Fn() -> Model<f64>
     {
-        // TODO: Implement memory-efficient batch processing
+        // TODO: Run each model with a fresh `PriorHandler`/`Trace`, reusing
+        // shared configuration across iterations.
         unimplemented!()
     }
 }
@@ -548,7 +546,7 @@ impl BatchProcessor {
 - ✅ **Flexible interpretation** through the handler system
 - ✅ **MCMC foundation** via deterministic replay mechanics
 - ✅ **Custom inference** algorithms through handler extensibility  
-- ✅ **Production optimization** with memory pooling and efficient allocation
+- ✅ **Production optimization** with fresh-trace execution and efficient allocation
 - ✅ **Comprehensive diagnostics** for convergence assessment and debugging
 
 ## Further Reading

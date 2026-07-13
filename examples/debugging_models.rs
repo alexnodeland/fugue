@@ -298,7 +298,7 @@ fn main() {
     // Analyze model structure
     let mut address_analysis = BTreeMap::new();
     for (addr, choice) in &complex_trace.choices {
-        let addr_str = addr.0.clone();
+        let addr_str = addr.as_str().to_string();
         let category = if addr_str.contains("global") {
             "Global Parameters"
         } else if addr_str.contains("group") {
@@ -449,7 +449,7 @@ fn main() {
     // Pattern 2: Address collision detection
     fn check_address_collisions(trace: &Trace) -> Vec<String> {
         let mut collisions = Vec::new();
-        let addresses: Vec<&str> = trace.choices.keys().map(|addr| addr.0.as_str()).collect();
+        let addresses: Vec<&str> = trace.choices.keys().map(|addr| addr.as_str()).collect();
 
         for (i, addr1) in addresses.iter().enumerate() {
             for addr2 in addresses.iter().skip(i + 1) {

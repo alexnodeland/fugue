@@ -1,7 +1,5 @@
 use fugue::core::numerical::*;
 use fugue::runtime::interpreters::PriorHandler;
-use fugue::runtime::memory::{CowTrace, PooledPriorHandler, TraceBuilder, TracePool};
-use fugue::runtime::trace::{Choice, ChoiceValue};
 use fugue::*;
 use rand::thread_rng;
 use std::time::Instant;
@@ -9,46 +7,7 @@ use std::time::Instant;
 fn main() {
     println!("=== Optimizing Performance in Fugue ===\n");
 
-    println!("1. Memory-Optimized Inference with Object Pooling");
-    println!("-----------------------------------------------");
-    // ANCHOR: memory_pooling
-    // Create trace pool for zero-allocation inference
-    let mut pool = TracePool::new(50); // Pool up to 50 traces
-    let mut rng = thread_rng();
-
-    // Define a model that would normally cause many allocations
-    let make_model = || {
-        prob!(
-            let x <- sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
-            let y <- sample(addr!("y"), Normal::new(x, 0.5).unwrap());
-            observe(addr!("obs"), Normal::new(y, 0.1).unwrap(), 1.5);
-            pure(x)
-        )
-    };
-
-    // Time pooled vs non-pooled execution
-    let start = Instant::now();
-    for _iteration in 0..1000 {
-        // Use pooled handler for efficient memory reuse
-        let (_result, trace) =
-            runtime::handler::run(PooledPriorHandler::new(&mut rng, &mut pool), make_model());
-        // Return trace to pool for reuse
-        pool.return_trace(trace);
-    }
-    let pooled_time = start.elapsed();
-
-    let stats = pool.stats();
-    println!("✅ Completed 1000 iterations with memory pooling");
-    println!("   - Execution time: {:?}", pooled_time);
-    println!("   - Hit ratio: {:.1}%", stats.hit_ratio());
-    println!(
-        "   - Pool stats - hits: {}, misses: {}",
-        stats.hits, stats.misses
-    );
-    // ANCHOR_END: memory_pooling
-    println!();
-
-    println!("2. Numerical Stability with Log-Space Computations");
+    println!("1. Numerical Stability with Log-Space Computations");
     println!("------------------------------------------------");
     // ANCHOR: numerical_stability
     // Demonstrate stable log-probability computations
@@ -78,80 +37,9 @@ fn main() {
     // ANCHOR_END: numerical_stability
     println!();
 
-    println!("3. Efficient Trace Construction");
-    println!("------------------------------");
-    // ANCHOR: efficient_construction
-    // Use TraceBuilder for efficient trace creation
-    let mut builder = TraceBuilder::new();
+    let mut rng = thread_rng();
 
-    let start = Instant::now();
-    for i in 0..100 {
-        // Add choices efficiently without reallocations
-        builder.add_sample(
-            addr!("param", i),
-            i as f64,
-            0.0, // log_prob
-        );
-    }
-
-    // Build final trace efficiently
-    let constructed_trace = builder.build();
-    let construction_time = start.elapsed();
-
-    println!("✅ Efficient trace construction");
-    println!(
-        "   - Built trace with {} choices in {:?}",
-        constructed_trace.choices.len(),
-        construction_time
-    );
-    println!(
-        "   - Total log weight: {:.2}",
-        constructed_trace.total_log_weight()
-    );
-    // ANCHOR_END: efficient_construction
-    println!();
-
-    println!("4. Copy-on-Write for MCMC Efficiency");
-    println!("-----------------------------------");
-    // ANCHOR: cow_traces
-    // Create base trace manually for MCMC
-    let mut builder = TraceBuilder::new();
-    builder.add_sample(addr!("mu"), 0.5, -0.5);
-    builder.add_sample(addr!("sigma"), 1.0, -1.0);
-    builder.add_sample_bool(addr!("component"), true, -0.69);
-    let base_trace = builder.build();
-
-    // Create COW trace for efficient copying
-    let cow_base = CowTrace::from_trace(base_trace);
-
-    let start = Instant::now();
-    let mut mcmc_traces = Vec::new();
-
-    for _proposal in 0..1000 {
-        // Clone is O(1) until modification
-        let mut proposal_trace = cow_base.clone();
-
-        // Modify only one parameter (triggers COW)
-        proposal_trace.insert_choice(
-            addr!("mu"),
-            Choice {
-                addr: addr!("mu"),
-                value: ChoiceValue::F64(0.6),
-                logp: -0.4,
-            },
-        );
-
-        mcmc_traces.push(proposal_trace);
-    }
-    let cow_time = start.elapsed();
-
-    println!("✅ Copy-on-write MCMC proposals");
-    println!("   - Created 1000 proposal traces in {:?}", cow_time);
-    println!("   - Memory sharing until modification");
-    // ANCHOR_END: cow_traces
-    println!();
-
-    println!("5. Optimized Model Patterns");
+    println!("2. Optimized Model Patterns");
     println!("---------------------------");
     // ANCHOR: optimized_patterns
     // Pre-allocate data structures for repeated use
@@ -189,7 +77,7 @@ fn main() {
     // ANCHOR_END: optimized_patterns
     println!();
 
-    println!("6. Performance Monitoring and Profiling");
+    println!("3. Performance Monitoring and Profiling");
     println!("--------------------------------------");
     // ANCHOR: performance_monitoring
     // Monitor trace characteristics for optimization insights
@@ -257,43 +145,7 @@ fn main() {
     // ANCHOR_END: performance_monitoring
     println!();
 
-    println!("7. Batch Processing Optimization");
-    println!("-------------------------------");
-    // ANCHOR: batch_processing
-    // Efficient batch inference using memory pooling
-    let batch_size = 100;
-    let mut batch_pool = TracePool::new(batch_size);
-
-    let start = Instant::now();
-    let mut batch_results = Vec::with_capacity(batch_size);
-
-    for _batch in 0..batch_size {
-        let (result, trace) = runtime::handler::run(
-            PooledPriorHandler::new(&mut rng, &mut batch_pool),
-            make_model(),
-        );
-        // Return trace to pool for reuse
-        batch_pool.return_trace(trace);
-        batch_results.push(result);
-    }
-
-    let batch_time = start.elapsed();
-    let batch_stats = batch_pool.stats();
-
-    println!("✅ Batch processing complete");
-    println!("   - Processed {} samples in {:?}", batch_size, batch_time);
-    println!(
-        "   - Average time per sample: {:?}",
-        batch_time / batch_size as u32
-    );
-    println!(
-        "   - Memory efficiency: {:.1}% hit ratio",
-        batch_stats.hit_ratio()
-    );
-    // ANCHOR_END: batch_processing
-    println!();
-
-    println!("8. Numerical Precision Testing");
+    println!("4. Numerical Precision Testing");
     println!("-----------------------------");
     // ANCHOR: precision_testing
     // Test numerical stability across different scales
@@ -324,30 +176,6 @@ mod tests {
 
     // ANCHOR: performance_testing
     #[test]
-    fn test_memory_pool_efficiency() {
-        let mut pool = TracePool::new(10);
-        let mut rng = thread_rng();
-
-        // Test pool reuse with PooledPriorHandler
-        for _i in 0..20 {
-            let (_, trace) = runtime::handler::run(
-                PooledPriorHandler::new(&mut rng, &mut pool),
-                sample(addr!("test"), Normal::new(0.0, 1.0).unwrap()),
-            );
-            // Return trace to pool for reuse
-            pool.return_trace(trace);
-        }
-
-        let stats = pool.stats();
-        assert!(
-            stats.hit_ratio() > 50.0,
-            "Pool should have good hit ratio, got {:.1}%",
-            stats.hit_ratio()
-        );
-        assert!(stats.hits + stats.misses > 0, "Pool should have been used");
-    }
-
-    #[test]
     fn test_numerical_stability() {
         // Test log_sum_exp with extreme values
         let extreme_vals = vec![700.0, 701.0, 699.0];
@@ -372,39 +200,6 @@ mod tests {
             weighted_result.is_finite(),
             "Weighted log_sum_exp should be finite"
         );
-    }
-
-    #[test]
-    fn test_trace_builder_efficiency() {
-        let mut builder = TraceBuilder::new();
-
-        // Add many choices efficiently
-        for i in 0..100 {
-            builder.add_sample(addr!("param", i), i as f64, -0.5);
-        }
-
-        let trace = builder.build();
-        assert_eq!(trace.choices.len(), 100);
-        assert!(trace.total_log_weight().is_finite());
-    }
-
-    #[test]
-    fn test_cow_trace_sharing() {
-        // Create base trace using builder
-        let mut builder = TraceBuilder::new();
-        builder.add_sample(addr!("x"), 1.0, -0.5);
-        let base = builder.build();
-        let cow_trace = CowTrace::from_trace(base);
-
-        // Clone should be fast
-        let clone1 = cow_trace.clone();
-        let clone2 = cow_trace.clone();
-
-        // Should share data until modification - convert to regular trace to test
-        let trace1 = clone1.to_trace();
-        let trace2 = clone2.to_trace();
-        assert_eq!(trace1.get_f64(&addr!("x")), Some(1.0));
-        assert_eq!(trace2.get_f64(&addr!("x")), Some(1.0));
     }
     // ANCHOR_END: performance_testing
 }

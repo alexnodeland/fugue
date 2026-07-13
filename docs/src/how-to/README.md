@@ -50,14 +50,12 @@ These guides are designed to be **example-first** and **immediately actionable**
 
 **What you'll learn**:
 
-- Memory pooling with `TracePool` and `PooledPriorHandler`
 - Numerical stability with log-space computations
-- Efficient trace construction with `TraceBuilder`
-- Copy-on-write traces for MCMC optimization
+- Choosing an efficient inference algorithm for large-scale workloads
 - Batch processing patterns
 - Performance monitoring and measurement
 
-**Key patterns**: Memory optimization, numerical stability, batch processing
+**Key patterns**: Numerical stability, batch processing
 
 ---
 
@@ -182,7 +180,7 @@ All code examples in these guides are:
 | ------------------------ | ------------------------------------------------------------- | ---------------------------- |
 | Understand distributions | [Working with Distributions](./working-with-distributions.md) | Type safety, validation      |
 | Build complex models     | [Building Complex Models](./building-complex-models.md)       | Macros, composition          |
-| Optimize performance     | [Optimizing Performance](./optimizing-performance.md)         | Memory pooling, numerics     |
+| Optimize performance     | [Optimizing Performance](./optimizing-performance.md)         | Numerical stability, batch processing |
 | Debug model issues       | [Debugging Models](./debugging-models.md)                     | Trace analysis, diagnostics  |
 | Extend functionality     | [Custom Handlers](./custom-handlers.md)                       | Handler patterns, decorators |
 | Deploy to production     | [Production Deployment](./production-deployment.md)           | Fault tolerance, monitoring  |

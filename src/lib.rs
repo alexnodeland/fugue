@@ -16,12 +16,13 @@ pub mod runtime;
 pub use core::address::Address;
 // `addr!` macro is exported at the crate root via #[macro_export]
 pub use core::distribution::{
-    Bernoulli, Beta, Binomial, Categorical, Distribution, Exponential, Gamma, LogNormal, Normal,
-    Poisson, Uniform,
+    Bernoulli, Beta, Binomial, Categorical, Cauchy, ChiSquared, DiscreteUniform, Distribution,
+    Exponential, Gamma, InverseGamma, Laplace, LogNormal, Normal, Poisson, StudentT, Uniform,
+    Weibull,
 };
 pub use core::model::{
-    factor, guard, observe, pure, sample, sample_bool, sample_f64, sample_u64, sample_usize,
-    sequence_vec, traverse_vec, zip, Model, ModelExt, SampleType,
+    factor, guard, observe, pure, sample, sample_bool, sample_f64, sample_i64, sample_u64,
+    sample_usize, sequence_vec, traverse_vec, zip, Model, ModelExt, SampleType,
 };
 pub use runtime::handler::Handler;
 pub use runtime::interpreters::{
@@ -36,19 +37,23 @@ pub use inference::abc::{
     abc_rejection, abc_scalar_summary, abc_smc, DistanceFunction, EuclideanDistance,
 };
 pub use inference::diagnostics::{
-    extract_bool_values, extract_f64_values, extract_i64_values, extract_u64_values,
-    extract_usize_values, print_diagnostics, r_hat_f64, summarize_f64_parameter, Diagnostics,
-    ParameterSummary,
+    classic_r_hat_f64, extract_bool_values, extract_f64_values, extract_i64_values,
+    extract_u64_values, extract_usize_values, print_diagnostics, r_hat_f64,
+    summarize_f64_parameter, Diagnostics, ParameterSummary,
 };
+pub use inference::hmc::{hmc_chain, HMCConfig};
 pub use inference::mcmc_utils::{
-    effective_sample_size_mcmc, geweke_diagnostic, DiminishingAdaptation,
+    effective_sample_size_mcmc, effective_sample_size_multichain, geweke_diagnostic,
+    DiminishingAdaptation,
 };
-pub use inference::mh::{adaptive_mcmc_chain, adaptive_single_site_mh};
+pub use inference::mh::{
+    adaptive_mcmc_chain, adaptive_mcmc_chain_with_overrides, adaptive_single_site_mh, SiteProposal,
+};
 pub use inference::smc::{
     adaptive_smc, effective_sample_size, Particle, ResamplingMethod, SMCConfig,
 };
 pub use inference::validation::{
-    ks_test_distribution, test_conjugate_normal_model, ValidationResult,
+    ks_test_distribution, test_conjugate_beta_bernoulli_model, test_conjugate_normal_model,
+    ConjugateBetaBernoulliConfig, ConjugateNormalConfig, ValidationResult,
 };
 pub use inference::vi::{elbo_with_guide, optimize_meanfield_vi, MeanFieldGuide, VariationalParam};
-pub use runtime::memory::{CowTrace, PooledPriorHandler, TraceBuilder, TracePool};

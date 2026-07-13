@@ -9,7 +9,7 @@ Getting Fugue set up in your Rust project takes just 2 minutes. Let's get you ru
 ````admonish note
 Prerequisites
 
-Fugue requires **Rust 1.70+**. If you don't have Rust installed:
+Fugue requires **Rust 1.87+**. If you don't have Rust installed:
 
 ```bash
 # Install Rust via rustup
@@ -186,7 +186,7 @@ cargo run --example working_with_distributions
 **Build fails with dependency errors:**
 
 ```bash
-# Make sure you're using Rust 1.70+
+# Make sure you're using Rust 1.87+
 rustc --version
 
 # Update your dependencies

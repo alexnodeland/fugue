@@ -204,13 +204,13 @@ Practical guidance for specific tasks:
 - [Optimizing Performance](../../how-to/optimizing-performance.md)
 - [Debugging Models](../../how-to/debugging-models.md)
 
-### 🚀 [Advanced Applications](../advanced-applications/README.md)
+### 🚀 [Advanced Inference](../advanced-inference/README.md)
 
-Cutting-edge probabilistic programming:
+Inference methods beyond adaptive MCMC, all demonstrated on one worked example so you can compare them directly:
 
-- Advanced inference techniques
-- Model comparison and selection
-- Large-scale distributed inference
+- Sequential Monte Carlo (particle filtering with a log-evidence estimate)
+- Approximate Bayesian Computation (likelihood-free inference)
+- Variational Inference (fast, optimization-based approximation)
 
 ## Getting Help
 

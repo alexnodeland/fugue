@@ -4,11 +4,11 @@
 
 <img src="fugue-logo.svg" alt="Fugue Logo" width="200" height="200">
 
-**A production-ready, monadic probabilistic programming library for Rust**
+**A type-safe, monadic probabilistic programming library for Rust — pre-1.0 and actively developed**
 
 *Write elegant probabilistic programs by composing `Model` values in direct style; execute them with pluggable interpreters and state-of-the-art inference algorithms.*
 
-[![Rust](https://img.shields.io/badge/rust-1.70%2B-blue.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.87%2B-blue.svg)](https://www.rust-lang.org)
 [![Crates.io](https://img.shields.io/crates/v/fugue-ppl.svg)](https://crates.io/crates/fugue-ppl)
 [![Dev Docs](https://docs.rs/fugue-ppl/badge.svg)](https://docs.rs/fugue-ppl)
 [![User Docs](https://img.shields.io/badge/guides-fugue.run-blue)](https://fugue.run)
@@ -20,7 +20,7 @@
 [![Discord](https://img.shields.io/discord/1412802057437712426?logo=discord&label=discord)](https://discord.gg/QAcF7Nwr)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/alexnodeland/fugue)
 
-**Supported Rust:** 1.70+ • **Platforms:** Linux / macOS / Windows • **Crate:** [`fugue-ppl` on crates.io](https://crates.io/crates/fugue-ppl)
+**Supported Rust:** 1.87+ • **Platforms:** Linux / macOS / Windows • **Crate:** [`fugue-ppl` on crates.io](https://crates.io/crates/fugue-ppl)
 
 </div>
 
@@ -39,11 +39,15 @@ Check out these resources to get started:
 ## About Fugue
 
 - 🧩 **Monadic PPL**: Compose probabilistic programs using pure functional abstractions
-- 🔒 **Type-Safe Distributions**: 10+ built-in probability distributions with natural return types  
-- 📊 **Multiple Inference Methods**: MCMC, SMC, Variational Inference, ABC
+- 🔒 **Type-Safe Distributions**: 17 built-in probability distributions with natural return types
+- 📊 **Multiple Inference Methods**: MCMC, HMC, SMC, Variational Inference, ABC (see [Advanced Inference](./tutorials/advanced-inference/README.md))
 - 🔍 **Comprehensive Diagnostics**: R-hat convergence, effective sample size, validation
-- 🚀 **Production Ready**: Numerically stable algorithms with memory optimization
+- ⚡ **Numerically Stable**: Log-space computations throughout for robust probability arithmetic
 - ✨ **Ergonomic Macros**: Do-notation (`prob!`), vectorization (`plate!`), addressing (`addr!`)
+
+```admonish note title="🧪 Where Fugue stands today"
+Fugue is 0.1.x: pre-1.0, actively developed, with no SemVer stability guarantee yet and a single primary maintainer. It's extensively tested (unit, integration, and statistical regression tests against closed-form posteriors), but that's a different claim from "production-ready" — pin an exact version and expect breaking API changes between 0.1.x releases as the design settles.
+```
 
 ## Installation
 

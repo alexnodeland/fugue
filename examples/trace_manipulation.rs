@@ -2,7 +2,6 @@ use fugue::inference::diagnostics::{extract_f64_values, r_hat_f64, summarize_f64
 use fugue::runtime::{
     handler::Handler,
     interpreters::{PriorHandler, ReplayHandler, ScoreGivenTrace},
-    memory::{CowTrace, TraceBuilder},
     trace::{Choice, ChoiceValue, Trace},
 };
 use fugue::*;
@@ -471,20 +470,17 @@ fn memory_optimization_demo() {
         )
     };
 
-    println!("🏭 Batch Processing with Memory Pool:");
+    println!("🏭 Batch Processing:");
 
-    // Simulate batch inference with trace reuse
+    // Simulate batch inference over several observations
     let observations = [1.0, 1.2, 0.8, 1.5, 0.9];
     let mut results = Vec::new();
-
-    // Use copy-on-write traces for efficiency
-    let base_trace = CowTrace::new();
 
     for (i, &obs) in observations.iter().enumerate() {
         let mut rng = StdRng::seed_from_u64(200 + i as u64);
         let handler = PriorHandler {
             rng: &mut rng,
-            trace: base_trace.to_trace(), // Convert to regular trace
+            trace: Trace::default(),
         };
 
         let (result, trace) = runtime::handler::run(handler, make_model(obs));
@@ -516,12 +512,7 @@ fn memory_optimization_demo() {
     println!("   - Average log-probability: {:.3}", logp_mean);
     println!();
 
-    println!("🔧 Trace Builder Demo:");
-
-    // Demonstrate efficient trace building
-    let _builder = TraceBuilder::new();
-    // Note: TraceBuilder API may not have reserve_choices method
-    // This is a conceptual example of memory pre-allocation
+    println!("🔧 Manual Trace Construction Demo:");
 
     // Manually construct a trace (rarely needed, but shows internals)
     let demo_trace = Trace {
@@ -1079,19 +1070,5 @@ mod tests {
         let values = extract_f64_values(&traces, &addr!("param"));
 
         assert_eq!(values, vec![1.0, 2.0]);
-    }
-
-    #[test]
-    fn test_memory_trace_operations() {
-        // Test CowTrace basic operations
-        let cow_trace = CowTrace::new();
-
-        assert_eq!(cow_trace.choices().len(), 0);
-        assert_eq!(cow_trace.total_log_weight(), 0.0);
-
-        // Test conversion to regular trace
-        let regular_trace = cow_trace.to_trace();
-        assert_eq!(regular_trace.choices.len(), 0);
-        assert_eq!(regular_trace.total_log_weight(), 0.0);
     }
 }

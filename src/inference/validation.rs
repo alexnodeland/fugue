@@ -100,36 +100,109 @@ pub fn test_conjugate_normal_model<R: Rng>(
 
     let posterior_precision = prior_precision + likelihood_precision;
     let posterior_variance = 1.0 / posterior_precision;
-    let posterior_sigma = posterior_variance.sqrt();
     let posterior_mu = posterior_variance
         * (prior_precision * config.prior_mu + likelihood_precision * config.observation);
 
-    // Run MCMC
     let samples = mcmc_fn(rng, config.n_samples, config.n_warmup);
-    let mu_samples: Vec<f64> = samples
+    validate_against_analytical_posterior(
+        &samples,
+        &addr!("mu"),
+        posterior_mu,
+        posterior_variance,
+        config.n_samples,
+    )
+}
+
+/// Configuration for conjugate Beta-Bernoulli model validation.
+///
+/// FG-15: complements [`ConjugateNormalConfig`] with the other textbook
+/// conjugate pair (a bounded-support, non-symmetric posterior) so the
+/// harness isn't validated on Normal-Normal alone.
+#[derive(Debug, Clone)]
+pub struct ConjugateBetaBernoulliConfig {
+    /// Prior alpha (pseudo-count of prior successes).
+    pub prior_alpha: f64,
+    /// Prior beta (pseudo-count of prior failures).
+    pub prior_beta: f64,
+    /// Observed i.i.d. Bernoulli outcomes.
+    pub observations: Vec<bool>,
+    /// Number of MCMC samples.
+    pub n_samples: usize,
+    /// Number of warmup/burn-in samples.
+    pub n_warmup: usize,
+}
+
+/// Test MCMC implementation against the known analytical Beta-Bernoulli
+/// conjugate posterior.
+///
+/// For `theta ~ Beta(a, b)` and `n` i.i.d. `Bernoulli(theta)` observations
+/// with `s` successes, the exact posterior is `Beta(a + s, b + n - s)`, with
+/// mean `(a+s)/(a+b+n)` and variance `(a+s)(b+n-s) / ((a+b+n)^2 (a+b+n+1))`.
+/// `mcmc_fn`'s model is expected to sample the success probability at
+/// address `"theta"` (mirroring [`test_conjugate_normal_model`]'s use of
+/// `"mu"`).
+pub fn test_conjugate_beta_bernoulli_model<R: Rng>(
+    rng: &mut R,
+    mcmc_fn: impl Fn(&mut R, usize, usize) -> Vec<(f64, Trace)>,
+    config: ConjugateBetaBernoulliConfig,
+) -> ValidationResult {
+    let successes = config.observations.iter().filter(|&&b| b).count() as f64;
+    let n = config.observations.len() as f64;
+    let post_alpha = config.prior_alpha + successes;
+    let post_beta = config.prior_beta + (n - successes);
+    let post_sum = post_alpha + post_beta;
+
+    let posterior_mu = post_alpha / post_sum;
+    let posterior_variance = (post_alpha * post_beta) / (post_sum * post_sum * (post_sum + 1.0));
+
+    let samples = mcmc_fn(rng, config.n_samples, config.n_warmup);
+    validate_against_analytical_posterior(
+        &samples,
+        &addr!("theta"),
+        posterior_mu,
+        posterior_variance,
+        config.n_samples,
+    )
+}
+
+/// Shared scoring logic for the conjugate-model validation harnesses:
+/// extract the `f64` trace values at `address`, compare their sample
+/// mean/variance to the supplied analytical posterior mean/variance within
+/// 2 Monte Carlo standard errors (computed from the effective sample size),
+/// and check the chain achieved at least 10% sampling efficiency.
+fn validate_against_analytical_posterior(
+    samples: &[(f64, Trace)],
+    address: &crate::core::address::Address,
+    posterior_mu: f64,
+    posterior_variance: f64,
+    n_samples: usize,
+) -> ValidationResult {
+    let posterior_sigma = posterior_variance.sqrt();
+
+    let param_samples: Vec<f64> = samples
         .iter()
-        .filter_map(|(_, trace)| trace.choices.get(&addr!("mu")))
+        .filter_map(|(_, trace)| trace.choices.get(address))
         .filter_map(|choice| match choice.value {
             ChoiceValue::F64(val) => Some(val),
             _ => None,
         })
         .collect();
 
-    if mu_samples.is_empty() {
+    if param_samples.is_empty() {
         return ValidationResult::Failed("No samples extracted".to_string());
     }
 
     // Compute sample statistics
-    let sample_mean = mu_samples.iter().sum::<f64>() / mu_samples.len() as f64;
-    let sample_var = mu_samples
+    let sample_mean = param_samples.iter().sum::<f64>() / param_samples.len() as f64;
+    let sample_var = param_samples
         .iter()
         .map(|&x| (x - sample_mean).powi(2))
         .sum::<f64>()
-        / (mu_samples.len() - 1) as f64;
+        / (param_samples.len() - 1) as f64;
     let sample_sigma = sample_var.sqrt();
 
     // Compute effective sample size
-    let ess = effective_sample_size_mcmc(&mu_samples);
+    let ess = effective_sample_size_mcmc(&param_samples);
 
     // Check if estimates are within reasonable bounds (2 standard errors)
     let se_mean = posterior_sigma / (ess.sqrt());
@@ -140,7 +213,7 @@ pub fn test_conjugate_normal_model<R: Rng>(
 
     let mean_ok = mean_error < 2.0 * se_mean;
     let var_ok = var_error < 2.0 * se_var;
-    let ess_ok = ess > config.n_samples as f64 * 0.1; // At least 10% efficiency
+    let ess_ok = ess > n_samples as f64 * 0.1; // At least 10% efficiency
 
     ValidationResult::Success {
         mean_error,

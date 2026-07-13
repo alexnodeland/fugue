@@ -8,7 +8,7 @@ fn varying_intercepts_model(
     x_data: Vec<f64>,
     y_data: Vec<f64>,
     group_ids: Vec<usize>,
-    _n_groups: usize,
+    n_groups: usize,
 ) -> Model<(f64, f64, f64, f64, f64)> {
     prob! {
         // Population-level parameters
@@ -17,16 +17,16 @@ fn varying_intercepts_model(
         let beta <- sample(addr!("beta"), fugue::Normal::new(0.0, 2.0).unwrap());
         let sigma_y <- sample(addr!("sigma_y"), Gamma::new(1.0, 1.0).unwrap());
 
-        // Observations with group-specific intercepts
+        // Group-specific intercepts: sampled once per group (partial pooling)
+        let alphas <- plate!(g in 0..n_groups => {
+            sample(addr!("alpha", g), fugue::Normal::new(mu_alpha, sigma_alpha).unwrap())
+        });
+
+        // Observations reuse their group's intercept
         let _observations <- plate!(i in 0..x_data.len() => {
-            let group_j = group_ids[i];
-            let x_i = x_data[i];
-            let y_i = y_data[i];
-            sample(addr!("alpha", group_j), fugue::Normal::new(mu_alpha, sigma_alpha).unwrap())
-                .bind(move |alpha_j| {
-                    let mu_i = alpha_j + beta * x_i;
-                    observe(addr!("y", i), fugue::Normal::new(mu_i, sigma_y).unwrap(), y_i)
-                })
+            let alpha_j = alphas[group_ids[i]];
+            let mu_i = alpha_j + beta * x_data[i];
+            observe(addr!("y", i), fugue::Normal::new(mu_i, sigma_y).unwrap(), y_data[i])
         });
 
         pure((mu_alpha, sigma_alpha, beta, sigma_y, 0.0))
@@ -123,7 +123,7 @@ fn _varying_slopes_model(
     x_data: Vec<f64>,
     y_data: Vec<f64>,
     group_ids: Vec<usize>,
-    _n_groups: usize,
+    n_groups: usize,
 ) -> Model<(f64, f64, f64, f64)> {
     prob! {
         // Population-level parameters
@@ -132,16 +132,16 @@ fn _varying_slopes_model(
         let sigma_beta <- sample(addr!("sigma_beta"), Gamma::new(1.0, 1.0).unwrap());
         let sigma_y <- sample(addr!("sigma_y"), Gamma::new(1.0, 1.0).unwrap());
 
-        // Observations with group-specific slopes
+        // Group-specific slopes: sampled once per group (partial pooling)
+        let betas <- plate!(g in 0..n_groups => {
+            sample(addr!("beta", g), fugue::Normal::new(mu_beta, sigma_beta).unwrap())
+        });
+
+        // Observations reuse their group's slope
         let _observations <- plate!(i in 0..x_data.len() => {
-            let group_j = group_ids[i];
-            let x_i = x_data[i];
-            let y_i = y_data[i];
-            sample(addr!("beta", group_j), fugue::Normal::new(mu_beta, sigma_beta).unwrap())
-                .bind(move |beta_j| {
-                    let mu_i = alpha + beta_j * x_i;
-                    observe(addr!("y", i), fugue::Normal::new(mu_i, sigma_y).unwrap(), y_i)
-                })
+            let beta_j = betas[group_ids[i]];
+            let mu_i = alpha + beta_j * x_data[i];
+            observe(addr!("y", i), fugue::Normal::new(mu_i, sigma_y).unwrap(), y_data[i])
         });
 
         pure((alpha, mu_beta, sigma_beta, sigma_y))
@@ -156,7 +156,7 @@ fn mixed_effects_model(
     x_data: Vec<f64>,
     y_data: Vec<f64>,
     group_ids: Vec<usize>,
-    _n_groups: usize,
+    n_groups: usize,
 ) -> Model<(f64, f64, f64, f64, f64)> {
     prob! {
         // Population-level means
@@ -168,19 +168,19 @@ fn mixed_effects_model(
         let sigma_beta <- sample(addr!("sigma_beta"), Gamma::new(1.0, 1.0).unwrap());
         let sigma_y <- sample(addr!("sigma_y"), Gamma::new(1.0, 1.0).unwrap());
 
-        // Observations with group-specific intercepts and slopes
+        // Group-specific intercepts and slopes: sampled once per group
+        let alphas <- plate!(g in 0..n_groups => {
+            sample(addr!("alpha", g), fugue::Normal::new(mu_alpha, sigma_alpha).unwrap())
+        });
+        let betas <- plate!(g in 0..n_groups => {
+            sample(addr!("beta", g), fugue::Normal::new(mu_beta, sigma_beta).unwrap())
+        });
+
+        // Observations reuse their group's intercept and slope
         let _observations <- plate!(i in 0..x_data.len() => {
             let group_j = group_ids[i];
-            let x_i = x_data[i];
-            let y_i = y_data[i];
-            sample(addr!("alpha", group_j), fugue::Normal::new(mu_alpha, sigma_alpha).unwrap())
-                .bind(move |alpha_j| {
-                    sample(addr!("beta", group_j), fugue::Normal::new(mu_beta, sigma_beta).unwrap())
-                        .bind(move |beta_j| {
-                            let mu_i = alpha_j + beta_j * x_i;
-                            observe(addr!("y", i), fugue::Normal::new(mu_i, sigma_y).unwrap(), y_i)
-                        })
-                })
+            let mu_i = alphas[group_j] + betas[group_j] * x_data[i];
+            observe(addr!("y", i), fugue::Normal::new(mu_i, sigma_y).unwrap(), y_data[i])
         });
 
         pure((mu_alpha, mu_beta, sigma_alpha, sigma_beta, sigma_y))
@@ -194,7 +194,7 @@ fn _correlated_effects_model(
     x_data: Vec<f64>,
     y_data: Vec<f64>,
     group_ids: Vec<usize>,
-    _n_groups: usize,
+    n_groups: usize,
 ) -> Model<(f64, f64, f64, f64, f64, f64)> {
     prob! {
         // Population-level means
@@ -209,19 +209,19 @@ fn _correlated_effects_model(
         // Correlation parameter (simplified)
         let rho <- sample(addr!("rho"), fugue::Uniform::new(-0.9, 0.9).unwrap());
 
-        // Observations with correlated group-specific effects (simplified implementation)
+        // Group-specific effects: sampled once per group (simplified implementation)
+        let alphas <- plate!(g in 0..n_groups => {
+            sample(addr!("alpha", g), fugue::Normal::new(mu_alpha, sigma_alpha).unwrap())
+        });
+        let betas <- plate!(g in 0..n_groups => {
+            sample(addr!("beta", g), fugue::Normal::new(mu_beta, sigma_beta).unwrap())
+        });
+
+        // Observations reuse their group's effects
         let _observations <- plate!(i in 0..x_data.len() => {
             let group_j = group_ids[i];
-            let x_i = x_data[i];
-            let y_i = y_data[i];
-            sample(addr!("alpha", group_j), fugue::Normal::new(mu_alpha, sigma_alpha).unwrap())
-                .bind(move |alpha_j| {
-                    sample(addr!("beta", group_j), fugue::Normal::new(mu_beta, sigma_beta).unwrap())
-                        .bind(move |beta_j| {
-                            let mu_i = alpha_j + beta_j * x_i;
-                            observe(addr!("y", i), fugue::Normal::new(mu_i, sigma_y).unwrap(), y_i)
-                        })
-                })
+            let mu_i = alphas[group_j] + betas[group_j] * x_data[i];
+            observe(addr!("y", i), fugue::Normal::new(mu_i, sigma_y).unwrap(), y_data[i])
         });
 
         pure((mu_alpha, mu_beta, sigma_alpha, sigma_beta, sigma_y, rho))
@@ -235,7 +235,7 @@ fn _hierarchical_priors_model(
     x_data: Vec<f64>,
     y_data: Vec<f64>,
     group_ids: Vec<usize>,
-    _n_groups: usize,
+    n_groups: usize,
 ) -> Model<(f64, f64, f64, f64, f64, f64)> {
     prob! {
         // Hyperpriors on variance parameters
@@ -248,16 +248,16 @@ fn _hierarchical_priors_model(
         let beta <- sample(addr!("beta"), fugue::Normal::new(0.0, 2.0).unwrap());
         let sigma_y <- sample(addr!("sigma_y"), Gamma::new(2.0, lambda_y).unwrap());
 
-        // Observations with hierarchical group-specific intercepts
+        // Hierarchical group-specific intercepts: sampled once per group
+        let alphas <- plate!(g in 0..n_groups => {
+            sample(addr!("alpha", g), fugue::Normal::new(mu_alpha, sigma_alpha).unwrap())
+        });
+
+        // Observations reuse their group's intercept
         let _observations <- plate!(i in 0..x_data.len() => {
-            let group_j = group_ids[i];
-            let x_i = x_data[i];
-            let y_i = y_data[i];
-            sample(addr!("alpha", group_j), fugue::Normal::new(mu_alpha, sigma_alpha).unwrap())
-                .bind(move |alpha_j| {
-                    let mu_i = alpha_j + beta * x_i;
-                    observe(addr!("y", i), fugue::Normal::new(mu_i, sigma_y).unwrap(), y_i)
-                })
+            let alpha_j = alphas[group_ids[i]];
+            let mu_i = alpha_j + beta * x_data[i];
+            observe(addr!("y", i), fugue::Normal::new(mu_i, sigma_y).unwrap(), y_data[i])
         });
 
         pure((beta, mu_alpha, sigma_alpha, sigma_y, lambda_alpha, lambda_y))
@@ -409,7 +409,7 @@ fn _time_varying_hierarchical(
     y_data: Vec<f64>,
     _time_data: Vec<f64>,
     group_ids: Vec<usize>,
-    _n_groups: usize,
+    n_groups: usize,
     _n_times: usize,
 ) -> Model<(f64, f64, f64, f64)> {
     prob! {
@@ -419,16 +419,16 @@ fn _time_varying_hierarchical(
         let sigma_alpha <- sample(addr!("sigma_alpha"), Gamma::new(1.0, 1.0).unwrap());
         let sigma_y <- sample(addr!("sigma_y"), Gamma::new(1.0, 1.0).unwrap());
 
-        // Observations with time-varying group effects (simplified)
+        // Group effects: sampled once per group (simplified time-varying)
+        let alphas <- plate!(g in 0..n_groups => {
+            sample(addr!("alpha", g), fugue::Normal::new(mu_alpha0, sigma_alpha).unwrap())
+        });
+
+        // Observations reuse their group's effect
         let _observations <- plate!(i in 0..x_data.len() => {
-            let group_j = group_ids[i];
-            let x_i = x_data[i];
-            let y_i = y_data[i];
-            sample(addr!("alpha", group_j), fugue::Normal::new(mu_alpha0, sigma_alpha).unwrap())
-                .bind(move |alpha_j| {
-                    let mu_i = alpha_j + beta * x_i;
-                    observe(addr!("y", i), fugue::Normal::new(mu_i, sigma_y).unwrap(), y_i)
-                })
+            let alpha_j = alphas[group_ids[i]];
+            let mu_i = alpha_j + beta * x_data[i];
+            observe(addr!("y", i), fugue::Normal::new(mu_i, sigma_y).unwrap(), y_data[i])
         });
 
         pure((beta, mu_alpha0, sigma_alpha, sigma_y))
@@ -443,7 +443,7 @@ fn _nested_hierarchical(
     y_data: Vec<f64>,
     class_ids: Vec<usize>,
     _school_ids: Vec<usize>,
-    _n_classes: usize,
+    n_classes: usize,
     _n_schools: usize,
 ) -> Model<(f64, f64, f64, f64, f64)> {
     prob! {
@@ -455,16 +455,16 @@ fn _nested_hierarchical(
         let sigma_class <- sample(addr!("sigma_class"), Gamma::new(1.0, 1.0).unwrap());
         let sigma_y <- sample(addr!("sigma_y"), Gamma::new(1.0, 1.0).unwrap());
 
-        // Observations with nested class effects
+        // Nested class effects: sampled once per class
+        let class_effects <- plate!(c in 0..n_classes => {
+            sample(addr!("class", c), fugue::Normal::new(0.0, sigma_class).unwrap())
+        });
+
+        // Observations reuse their class effect
         let _observations <- plate!(i in 0..x_data.len() => {
-            let class_c = class_ids[i];
-            let x_i = x_data[i];
-            let y_i = y_data[i];
-            sample(addr!("class", class_c), fugue::Normal::new(0.0, sigma_class).unwrap())
-                .bind(move |class_effect| {
-                    let mu_i = mu + class_effect + beta * x_i;
-                    observe(addr!("y", i), fugue::Normal::new(mu_i, sigma_y).unwrap(), y_i)
-                })
+            let class_effect = class_effects[class_ids[i]];
+            let mu_i = mu + class_effect + beta * x_data[i];
+            observe(addr!("y", i), fugue::Normal::new(mu_i, sigma_y).unwrap(), y_data[i])
         });
 
         pure((mu, beta, sigma_class, sigma_y, sigma_y))

@@ -2,6 +2,19 @@
 
 /// Probabilistic programming macro, used to define probabilistic programs with do-notation.
 ///
+/// The left-hand side of a monadic bind (`let <pat> <- <model>;`) accepts any
+/// irrefutable pattern, not just a bare identifier, so tuples and structs can be
+/// destructured directly (FG-61):
+///
+/// ```rust
+/// # use fugue::*;
+/// let model = prob! {
+///     let (a, b) <- pure((1, 2));   // tuple destructuring bind
+///     let mut total <- pure(a + b); // `mut` bindings work too
+///     pure(total)
+/// };
+/// ```
+///
 /// Example:
 /// ```rust
 /// # use fugue::*;
@@ -14,23 +27,45 @@
 /// ```
 #[macro_export]
 macro_rules! prob {
-    // Simple cases first
-    ($e:expr) => { $e };
+    // ---- internal pattern muncher -----------------------------------------
+    // Accumulates the tokens of a `let` binding pattern until it reaches the
+    // `<-` (monadic bind) or `=` (plain let) that terminates the pattern. This
+    // lets the left-hand side be an arbitrary irrefutable pattern: `$p:pat`
+    // cannot be followed by `<` in a matcher (Rust's fragment follow-set
+    // restriction), so we cannot write `let $p:pat <- ...` directly.
 
-    // let var <- expr; rest
-    (let $var:ident <- $expr:expr; $($rest:tt)*) => {
-        $expr.bind(move |$var| prob!($($rest)*))
+    // Pattern bind: `let <pat> <- <model>; rest`
+    (@let [$($pat:tt)+] <- $expr:expr; $($rest:tt)*) => {
+        $crate::core::model::ModelExt::bind($expr, move |__prob_bound| {
+            let $($pat)+ = __prob_bound;
+            $crate::prob!($($rest)*)
+        })
     };
 
-    // let var = expr; rest
-    (let $var:ident = $expr:expr; $($rest:tt)*) => {
-        { let $var = $expr; prob!($($rest)*) }
+    // Plain let: `let <pat> = <value>; rest`
+    (@let [$($pat:tt)+] = $expr:expr; $($rest:tt)*) => {
+        { let $($pat)+ = $expr; $crate::prob!($($rest)*) }
     };
 
-    // expr; rest
+    // Keep munching pattern tokens one at a time.
+    (@let [$($pat:tt)*] $next:tt $($rest:tt)*) => {
+        $crate::prob!(@let [$($pat)* $next] $($rest)*)
+    };
+
+    // ---- public entry points ----------------------------------------------
+
+    // Any `let` binding routes into the pattern muncher.
+    (let $($rest:tt)*) => {
+        $crate::prob!(@let [] $($rest)*)
+    };
+
+    // expr; rest  (discard the bound value)
     ($expr:expr; $($rest:tt)*) => {
-        $expr.bind(move |_| prob!($($rest)*))
+        $crate::core::model::ModelExt::bind($expr, move |_| $crate::prob!($($rest)*))
     };
+
+    // Final expression.
+    ($e:expr) => { $e };
 }
 
 /// Plate notation for replicating models over ranges.
@@ -52,6 +87,11 @@ macro_rules! plate {
 
 /// Enhanced address macro with scoping support.
 ///
+/// The scope is joined to the name with the reserved `"::"` separator, and any
+/// index is joined with the reserved `'#'` separator. Literal `'#'`/`'\'`
+/// characters inside the name or index are escaped (see [`Address`](crate::Address))
+/// so an indexed scoped address can never alias a differently-written one.
+///
 /// Example:
 /// ```rust
 /// # use fugue::*;
@@ -62,10 +102,19 @@ macro_rules! plate {
 #[macro_export]
 macro_rules! scoped_addr {
     ($scope:expr, $name:expr) => {
-        $crate::core::address::Address(format!("{}::{}", $scope, $name))
+        $crate::core::address::Address::new(format!(
+            "{}::{}",
+            $scope,
+            $crate::core::address::escape_addr_segment(&format!("{}", $name))
+        ))
     };
     ($scope:expr, $name:expr, $($indices:expr),+) => {
-        $crate::core::address::Address(format!("{}::{}#{}", $scope, $name, format!("{}", format_args!($($indices),+))))
+        $crate::core::address::Address::new(format!(
+            "{}::{}#{}",
+            $scope,
+            $crate::core::address::escape_addr_segment(&format!("{}", $name)),
+            $crate::core::address::escape_addr_segment(&format!("{}", format_args!($($indices),+)))
+        ))
     };
 }
 
@@ -120,8 +169,72 @@ mod tests {
     #[test]
     fn scoped_addr_formats_with_scope_and_indices() {
         let a = scoped_addr!("scope", "name");
-        assert_eq!(a.0, "scope::name");
+        assert_eq!(a.as_str(), "scope::name");
         let b = scoped_addr!("scope", "name", "{}", 3);
-        assert_eq!(b.0, "scope::name#3");
+        assert_eq!(b.as_str(), "scope::name#3");
+    }
+
+    // Regression for FG-61: `prob!` binds accept irrefutable patterns on the
+    // left of `<-`, not just bare identifiers.
+    #[test]
+    fn prob_macro_binds_tuple_patterns() {
+        let model = prob! {
+            let (a, b) <- pure((1i32, 2i32));
+            let c <- pure(a + b);
+            pure(c)
+        };
+        let (val, _t) = run(
+            PriorHandler {
+                rng: &mut StdRng::seed_from_u64(40),
+                trace: Trace::default(),
+            },
+            model,
+        );
+        assert_eq!(val, 3);
+    }
+
+    // Regression for FG-61: struct-destructuring patterns and `mut` bindings.
+    #[test]
+    fn prob_macro_binds_struct_and_mut_patterns() {
+        struct Point {
+            x: i32,
+            y: i32,
+        }
+        let model = prob! {
+            let Point { x, y } <- pure(Point { x: 3, y: 4 });
+            let mut acc <- pure(x);
+            let sum = {
+                acc += y;
+                acc
+            };
+            pure(sum)
+        };
+        let (val, _t) = run(
+            PriorHandler {
+                rng: &mut StdRng::seed_from_u64(41),
+                trace: Trace::default(),
+            },
+            model,
+        );
+        assert_eq!(val, 7);
+    }
+
+    // Regression for FG-61: nested tuple pattern with a real sampling bind in
+    // between, to confirm the muncher composes with model effects.
+    #[test]
+    fn prob_macro_tuple_pattern_with_sampling() {
+        let model = prob! {
+            let x <- sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
+            let (lo, hi) <- pure((x - 1.0, x + 1.0));
+            pure(hi - lo)
+        };
+        let (val, _t) = run(
+            PriorHandler {
+                rng: &mut StdRng::seed_from_u64(42),
+                trace: Trace::default(),
+            },
+            model,
+        );
+        assert!((val - 2.0).abs() < 1e-12);
     }
 }

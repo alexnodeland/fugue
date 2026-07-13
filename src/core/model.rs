@@ -56,6 +56,16 @@ pub enum Model<A> {
         /// Continuation function to apply to the sampled value.
         k: Box<dyn FnOnce(usize) -> Model<A> + Send + 'static>,
     },
+    /// Sample from an i64 distribution (signed discrete distributions, e.g. a
+    /// future `DiscreteUniform` over a signed range).
+    SampleI64 {
+        /// Unique identifier for this sampling site.
+        addr: Address,
+        /// Distribution to sample from.
+        dist: Box<dyn Distribution<i64>>,
+        /// Continuation function to apply to the sampled value.
+        k: Box<dyn FnOnce(i64) -> Model<A> + Send + 'static>,
+    },
     /// Observe/condition on an f64 value.
     ObserveF64 {
         /// Unique identifier for this observation site.
@@ -97,6 +107,17 @@ pub enum Model<A> {
         dist: Box<dyn Distribution<usize>>,
         /// The observed value to condition on.
         value: usize,
+        /// Continuation function (always receives unit).
+        k: Box<dyn FnOnce(()) -> Model<A> + Send + 'static>,
+    },
+    /// Observe/condition on an i64 value.
+    ObserveI64 {
+        /// Unique identifier for this observation site.
+        addr: Address,
+        /// Distribution that generates the observed value.
+        dist: Box<dyn Distribution<i64>>,
+        /// The observed value to condition on.
+        value: i64,
         /// Continuation function (always receives unit).
         k: Box<dyn FnOnce(()) -> Model<A> + Send + 'static>,
     },
@@ -178,6 +199,33 @@ pub fn sample_u64(addr: Address, dist: impl Distribution<u64> + 'static) -> Mode
 /// ```
 pub fn sample_usize(addr: Address, dist: impl Distribution<usize> + 'static) -> Model<usize> {
     Model::SampleUsize {
+        addr,
+        dist: Box::new(dist),
+        k: Box::new(pure),
+    }
+}
+
+/// Sample from an i64 distribution (signed discrete distributions).
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// # use fugue::core::model::sample_i64;
+/// # use fugue::core::distribution::Distribution;
+/// # use rand::RngCore;
+/// // A tiny signed-discrete distribution (a real `DiscreteUniform` lands in a
+/// // later work package); shown here only to illustrate the i64 sample path.
+/// #[derive(Clone)]
+/// struct AlwaysZero;
+/// impl Distribution<i64> for AlwaysZero {
+///     fn sample(&self, _rng: &mut dyn RngCore) -> i64 { 0 }
+///     fn log_prob(&self, x: &i64) -> f64 { if *x == 0 { 0.0 } else { f64::NEG_INFINITY } }
+///     fn clone_box(&self) -> Box<dyn Distribution<i64>> { Box::new(self.clone()) }
+/// }
+/// let model = sample_i64(addr!("k"), AlwaysZero);
+/// ```
+pub fn sample_i64(addr: Address, dist: impl Distribution<i64> + 'static) -> Model<i64> {
+    Model::SampleI64 {
         addr,
         dist: Box::new(dist),
         k: Box::new(pure),
@@ -301,6 +349,27 @@ impl SampleType for usize {
         value: usize,
     ) -> Model<()> {
         Model::ObserveUsize {
+            addr,
+            dist,
+            value,
+            k: Box::new(pure),
+        }
+    }
+}
+impl SampleType for i64 {
+    fn make_sample_model(addr: Address, dist: Box<dyn Distribution<i64>>) -> Model<i64> {
+        Model::SampleI64 {
+            addr,
+            dist,
+            k: Box::new(pure),
+        }
+    }
+    fn make_observe_model(
+        addr: Address,
+        dist: Box<dyn Distribution<i64>>,
+        value: i64,
+    ) -> Model<()> {
+        Model::ObserveI64 {
             addr,
             dist,
             value,
@@ -443,6 +512,11 @@ impl<A: 'static> ModelExt<A> for Model<A> {
                 dist,
                 k: Box::new(move |x| k1(x).bind(k)),
             },
+            Model::SampleI64 { addr, dist, k: k1 } => Model::SampleI64 {
+                addr,
+                dist,
+                k: Box::new(move |x| k1(x).bind(k)),
+            },
             Model::ObserveF64 {
                 addr,
                 dist,
@@ -482,6 +556,17 @@ impl<A: 'static> ModelExt<A> for Model<A> {
                 value,
                 k: k1,
             } => Model::ObserveUsize {
+                addr,
+                dist,
+                value,
+                k: Box::new(move |()| k1(()).bind(k)),
+            },
+            Model::ObserveI64 {
+                addr,
+                dist,
+                value,
+                k: k1,
+            } => Model::ObserveI64 {
                 addr,
                 dist,
                 value,
@@ -536,12 +621,40 @@ pub fn zip<A: Send + 'static, B: Send + 'static>(ma: Model<A>, mb: Model<B>) -> 
 /// let results = sequence_vec(mixed_models);
 /// ```
 pub fn sequence_vec<A: Send + 'static>(models: Vec<Model<A>>) -> Model<Vec<A>> {
-    models.into_iter().fold(pure(Vec::new()), |acc, m| {
-        zip(acc, m).map(|(mut v, a)| {
-            v.push(a);
-            v
-        })
-    })
+    // FG-19: assemble a model that THREADS the growing result `Vec` forward
+    // through a right-nested bind chain — `m0.bind(|a0| { acc.push(a0);
+    // m1.bind(|a1| { acc.push(a1); … pure(acc) }) })`. The interpreter's
+    // trampoline then advances exactly one site per O(1) step, so a large
+    // `plate!` / `sequence_vec` no longer overflows the stack.
+    //
+    // Two shapes are specifically AVOIDED here because both recurse once per
+    // element at *interpretation* time even though the trampoline itself is
+    // iterative:
+    //   * the old left fold `zip(zip(zip(pure, m0), m1), …)`, whose first
+    //     continuation is a left-associated tower; and
+    //   * a right fold that accumulates with `acc.map(push)`, which instead
+    //     defers a left-nested chain of `push` maps into the continuation.
+    // Threading the `Vec` through the bind (pushing eagerly inside each
+    // continuation, then tail-calling the next model) keeps every continuation
+    // O(1): it yields the next `Sample` node directly with no wrapper build-up.
+    //
+    // The chain is assembled iteratively (a plain `for` loop, O(1) build stack)
+    // by folding the models in reverse into a continuation `cont_k: Vec<A> ->
+    // Model<Vec<A>>` = "given the results of `m0..m_{k-1}`, finish the vector".
+    // `cont_0(vec![])` executes `m0` first, preserving input/address order with no
+    // terminal reverse.
+    let n = models.len();
+    let mut cont: Box<dyn FnOnce(Vec<A>) -> Model<Vec<A>> + Send> = Box::new(pure);
+    for m in models.into_iter().rev() {
+        let next = cont;
+        cont = Box::new(move |mut acc: Vec<A>| {
+            m.bind(move |a| {
+                acc.push(a);
+                next(acc)
+            })
+        });
+    }
+    cont(Vec::with_capacity(n))
 }
 
 /// Apply a function, `f`, that produces models to each item in a vector, `items`, collecting the results.

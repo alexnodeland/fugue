@@ -1,6 +1,5 @@
 use fugue::runtime::handler::Handler;
 use fugue::runtime::interpreters::PriorHandler;
-use fugue::runtime::memory::{PooledPriorHandler, TracePool};
 use fugue::runtime::trace::{ChoiceValue, Trace};
 use fugue::*;
 use rand::thread_rng;
@@ -49,7 +48,7 @@ impl<H: Handler> RobustProductionHandler<H> {
 
     fn get_fallback_f64(&self, addr: &Address) -> f64 {
         // In production, this might come from a cache, configuration, or ML model
-        match addr.0.as_str() {
+        match addr.as_str() {
             s if s.contains("temperature") => 20.0,
             s if s.contains("price") => 100.0,
             s if s.contains("probability") => 0.5,
@@ -250,14 +249,12 @@ impl Default for ModelConfig {
 
 struct ConfigurableModelRunner {
     config: ModelConfig,
-    pool: TracePool,
     metrics: ProductionMetrics,
 }
 
 impl ConfigurableModelRunner {
     fn new(config: ModelConfig) -> Self {
         Self {
-            pool: TracePool::new(config.memory_pool_size),
             metrics: ProductionMetrics::new(config.enable_metrics),
             config,
         }
@@ -292,7 +289,10 @@ impl ConfigurableModelRunner {
         let model = self.create_model(); // Create model before borrowing
         let result = if self.config.environment == "production" {
             // Use safe, fault-tolerant execution in production
-            let base_handler = PooledPriorHandler::new(&mut rng, &mut self.pool);
+            let base_handler = PriorHandler {
+                rng: &mut rng,
+                trace: Trace::default(),
+            };
             let robust_handler =
                 RobustProductionHandler::new(base_handler, self.config.error_threshold);
 
@@ -562,18 +562,7 @@ impl ProductionHealthChecker {
             }
         }
 
-        // Check 2: Memory usage
-        if let Some(pool_stats) = self.check_memory_health() {
-            let hit_ratio = pool_stats.hit_ratio();
-            details.insert("memory_hit_ratio".to_string(), format!("{:.2}%", hit_ratio));
-
-            if hit_ratio < 50.0 {
-                overall_status = HealthStatus::Degraded;
-                messages.push("Low memory pool hit ratio".to_string());
-            }
-        }
-
-        // Check 3: Error rates
+        // Check 2: Error rates
         if let Ok(metrics) = self.metrics.lock() {
             let stats = metrics.get_stats();
             let error_rate = stats.get("error_rate").unwrap_or(&0.0) * 100.0;
@@ -659,13 +648,6 @@ impl ProductionHealthChecker {
             }
             Err(_) => Err("Model execution panicked".to_string()),
         }
-    }
-
-    fn check_memory_health(&self) -> Option<fugue::runtime::memory::PoolStats> {
-        // In a real implementation, this would check the actual memory pool
-        // For demonstration, we'll create a temporary pool
-        let pool = TracePool::new(10);
-        Some(pool.stats().clone())
     }
 }
 // ANCHOR_END: health_checks
@@ -907,7 +889,6 @@ fn main() {
             println!("✅ Configured inference completed");
             println!("   - Environment: {}", config.environment);
             println!("   - Result: temp={:.1}°C, valid={}", temp, valid);
-            println!("   - Pool stats: {:?}", runner.pool.stats());
         }
         Err(e) => println!("❌ Inference failed: {}", e),
     }

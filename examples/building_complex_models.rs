@@ -213,8 +213,8 @@ mod tests {
         let addr2 = scoped_addr!("test", "param", "{}", 42);
 
         // Addresses should be different
-        assert_ne!(addr1.0, addr2.0);
-        assert!(addr2.0.contains("42"));
+        assert_ne!(addr1.as_str(), addr2.as_str());
+        assert!(addr2.as_str().contains("42"));
 
         // Test hierarchical model construction
         let _hierarchical = prob! {
