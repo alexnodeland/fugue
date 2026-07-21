@@ -572,12 +572,40 @@
   }
 
   // ==========================================================================
-  // 4. rhat-spark — three chains, a live split-R̂ falling to 1.00 (or stuck).
+  // 4. rhat-spark — three over-dispersed chains COLLAPSE onto a shared band and
+  //    the live split-R̂ falls past 1.1 (coral→green) as they merge — or, in
+  //    "bad" mode, stay trapped in three separate modes with R̂ pinned high.
+  //
+  //    The convergence STORY has to be visible: chains start well separated with
+  //    a tight wiggle (three distinct threads), then relax toward one shared
+  //    stationary Normal(0,1) — mean pulled to 0 while the wiggle grows to full
+  //    scale — merging within roughly the first third of the window, then mixing
+  //    indistinguishably. That relaxation-to-a-shared-target is exactly what an
+  //    AR(1)/Langevin move toward N(0,1) does in expectation (mean decays
+  //    geometrically, variance settles), so we drive the mean-collapse and the
+  //    mixing wiggle with separate rates: a clean fall, a clean green flip.
+  //
+  //    The readout R̂ is real split-R̂ (same rhatCore as everywhere) computed on
+  //    the recent (post-warmup) draws — a trailing window — so it falls to ~1.00
+  //    and turns green when the chains actually merge, instead of dragging the
+  //    over-dispersed warmup along forever. A thin R̂-over-time sparkline under
+  //    the traces re-tells the same fall, crossing the dashed 1.1 threshold.
   // ==========================================================================
 
   function rhatSpark(root) {
     var mode = (root.getAttribute("data-mode") || "good").toLowerCase();
-    var NCH = 3, MAXN = 140, PHI = 0.82;
+    var GOOD = mode !== "bad";
+    var NCH = 3, MAXN = 140;
+    var MIXN = Math.round(MAXN / 3);   // over-dispersed chains merge by ~here
+    var NPHI = 0.2;                    // mixing autocorrelation (low → clean R̂)
+    var SD0 = 0.65, SD1 = 1.0;         // wiggle grows tight→full as chains merge
+    var DWIN = 38;                     // trailing window for the live (post-warmup) R̂
+    var BPHI = 0.82;                   // bad-mode within-mode autocorrelation
+
+    // smoothstep-eased schedules for the "good" collapse.
+    function ease(u) { return u * u * (3 - 2 * u); }
+    function collapse(k) { return k >= MIXN ? 0 : 1 - ease(k / MIXN); } // 1→0 mean scale
+    function sdScale(k) { return k >= MIXN ? SD1 : SD0 + (SD1 - SD0) * ease(k / MIXN); }
 
     mount(root, {
       height: 150, hz: 6,
@@ -588,40 +616,84 @@
     });
 
     function resetR(S) {
-      S.k = 0; S.hold = 0; S.ch = [[], [], []]; S.cur = [];
-      // good: one shared target, dispersed starts -> chains mix, R̂ falls to ~1.
-      // bad:  chains trapped in three separate modes -> split-R̂ stuck ~1.4.
-      var starts = mode === "good" ? [-3.2, 0.1, 3.0] : [-1.7, 0.1, 1.7];
-      S.centers = mode === "good" ? [0, 0, 0] : [-1.0, 0.0, 1.0];
-      for (var i = 0; i < NCH; i++) S.cur[i] = starts[i];
+      S.k = 0; S.hold = 0; S.ch = [[], [], []]; S.rhat = 1; S.rhist = [];
+      S.eta = []; S.cur = [];
+      // good: dispersed starts, one shared Normal(0,1) target → chains mix.
+      // bad:  chains trapped in three separate modes → split-R̂ stuck ≫ 1.1.
+      S.starts = GOOD ? [-2.2, 0.0, 2.2] : [-1.7, 0.1, 1.7];
+      S.centers = GOOD ? [0, 0, 0] : [-1.5, 0.0, 1.5];
+      for (var i = 0; i < NCH; i++) { S.eta[i] = FV.randn(S.rng); S.cur[i] = S.starts[i]; }
     }
     function stepR(S) {
-      var sd = 1.0;
-      for (var i = 0; i < NCH; i++) {
-        var noise = FV.randn(S.rng) * Math.sqrt(1 - PHI * PHI);
-        S.cur[i] = S.centers[i] + PHI * (S.cur[i] - S.centers[i]) + sd * noise;
-        S.ch[i].push(S.cur[i]);
+      var k = S.k, i;
+      if (GOOD) {
+        // x = (collapsing separated mean) + (growing stationary N(0,1) wiggle).
+        for (i = 0; i < NCH; i++) {
+          S.eta[i] = NPHI * S.eta[i] + Math.sqrt(1 - NPHI * NPHI) * FV.randn(S.rng);
+          S.ch[i].push(S.starts[i] * collapse(k) + sdScale(k) * S.eta[i]);
+        }
+      } else {
+        // AR(1) trapped in its own mode: never leaves, so chains never agree.
+        for (i = 0; i < NCH; i++) {
+          S.cur[i] = S.centers[i] + BPHI * (S.cur[i] - S.centers[i]) + FV.randn(S.rng) * Math.sqrt(1 - BPHI * BPHI);
+          S.ch[i].push(S.cur[i]);
+        }
       }
       S.k++;
+      // live split-R̂ over the most recent DWIN draws (drop the warmup).
+      var lo = Math.max(0, S.ch[0].length - DWIN);
+      S.rhat = splitRhat([S.ch[0].slice(lo), S.ch[1].slice(lo), S.ch[2].slice(lo)]);
+      S.rhist.push(S.rhat);
     }
     function drawR(g, S, w, h, c) {
-      var pad = { l: 8, r: 8, t: 16, b: 8 };
+      var pad = { l: 8, r: 8, t: 16 };
+      var sparkH = 18, sparkGap = 6, sparkBot = h - 6, sparkTop = sparkBot - sparkH;
+      var plotTop = pad.t, plotBot = sparkTop - sparkGap;
       var xs = FV.scale([0, MAXN], [pad.l, w - pad.r]);
-      var ys = FV.scale([-5, 5], [h - pad.b, pad.t]);
+      var ys = FV.scale([-5, 5], [plotBot, plotTop]);
       baseline(g, pad.l, w - pad.r, ys(0), c);
       var roleFor = ["prior", "post", "flow"];
-      for (var i = 0; i < 3; i++) {
+      for (var i = 0; i < NCH; i++) {
         var pts = [], v = S.ch[i], k;
         for (k = 0; k < v.length; k++) pts.push([xs(k), ys(clamp(v[k], -5, 5))]);
         FV.curve(g, pts, { color: c[roleFor[i]], width: 1.2 });
       }
-      var rh = splitRhat(S.ch);
-      var good = isFinite(rh) && rh < 1.1;
-      label(g, "3 chains", pad.l, pad.t - 6, c);
-      g.save(); g.font = "13px var(--mono-font, monospace)"; g.textAlign = "right"; g.textBaseline = "top";
-      g.fillStyle = good ? c.post : c.hot;
-      g.fillText("R̂ " + (isFinite(rh) ? rh.toFixed(2) : "—"), w - pad.r, pad.t - 8);
+      var rh = S.rhat;
+      var conv = isFinite(rh) && rh <= 1.1;
+      // R̂ readout, top-right, drawn INSIDE the canvas and cleared of the pause
+      // glyph (a ~20–30px DOM button top-right): reserve glyphClear px so the
+      // number never hides under it at narrow (phone) widths.
+      g.save();
+      g.font = "13px var(--mono-font, monospace)"; g.textAlign = "right"; g.textBaseline = "top";
+      var rtxt = "R̂ " + (isFinite(rh) ? rh.toFixed(2) : "—");
+      var glyphClear = coarsePointer() ? 34 : 24;
+      var rRight = w - pad.r - glyphClear;
+      var rtxtW = g.measureText(rtxt).width;
+      g.fillStyle = conv ? c.post : c.hot;
+      g.fillText(rtxt, rRight, 3);
       g.restore();
+      // "3 chains" label — only if it clears the readout at this width.
+      g.save(); g.font = "11px var(--mono-font, monospace)";
+      var labW = g.measureText("3 chains").width; g.restore();
+      if (pad.l + labW + 10 < rRight - rtxtW) label(g, "3 chains", pad.l, plotTop - 8, c);
+      drawSpark(g, S, w, sparkTop, sparkBot, c, conv);
+    }
+    // Thin R̂-over-time sparkline: fall past the dashed 1.1 threshold, segments
+    // recolored coral→green so the crossing reads at a glance.
+    function drawSpark(g, S, w, top, bot, c, conv) {
+      var pl = 8, pr = 8, rLo = 1.0, rHi = 1.85;
+      var sx = FV.scale([0, MAXN], [pl, w - pr]);
+      var sy = FV.scale([rLo, rHi], [bot, top]);
+      g.save(); g.strokeStyle = c.ink; g.globalAlpha = 0.18; g.lineWidth = 1; g.setLineDash([3, 3]);
+      g.beginPath(); g.moveTo(pl, sy(1.1)); g.lineTo(w - pr, sy(1.1)); g.stroke(); g.restore();
+      var hh = S.rhist; if (hh.length < 2) return;
+      for (var i = 1; i < hh.length; i++) {
+        var a = clamp(hh[i - 1], rLo, rHi), b = clamp(hh[i], rLo, rHi);
+        g.save(); g.strokeStyle = hh[i] > 1.1 ? c.hot : c.post; g.globalAlpha = 0.85; g.lineWidth = 1.4;
+        g.beginPath(); g.moveTo(sx(i - 1), sy(a)); g.lineTo(sx(i), sy(b)); g.stroke(); g.restore();
+      }
+      var last = clamp(hh[hh.length - 1], rLo, rHi);
+      g.save(); g.fillStyle = conv ? c.post : c.hot; g.beginPath(); g.arc(sx(hh.length - 1), sy(last), 2, 0, 6.2832); g.fill(); g.restore();
     }
   }
 
