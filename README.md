@@ -1,12 +1,12 @@
 <div align="center">
 
-# 🎼 Fugue
+<img src="assets/fugue-mark.png" alt="Fugue" width="140" height="140">
 
-<img src="assets/fugue-logo.svg" alt="Fugue Logo" width="200" height="200">
+# Fugue
 
 **A type-safe, monadic probabilistic programming library for Rust — pre-1.0 and actively developed**
 
-*Write elegant probabilistic programs by composing `Model` values in direct style; execute them with pluggable interpreters and state-of-the-art inference algorithms.*
+*Compose models in direct style; listen backwards with pluggable interpreters and state-of-the-art inference. Learn it interactively at [fugue.run](https://fugue.run).*
 
 [![Rust](https://img.shields.io/badge/rust-1.87%2B-blue.svg)](https://www.rust-lang.org)
 [![Crates.io](https://img.shields.io/crates/v/fugue-ppl.svg)](https://crates.io/crates/fugue-ppl)
@@ -47,7 +47,7 @@ Bernoulli, Beta, Binomial, Categorical, Cauchy, ChiSquared, DiscreteUniform, Exp
 
 ## 🧪 Where Fugue stands today
 
-Fugue is 0.1.x: pre-1.0, actively developed, with no SemVer stability guarantee yet and a single primary maintainer (see Roadmap, below). It's extensively tested — hundreds of unit, integration, and property-based tests, including statistical regression tests against closed-form posteriors — but that's not the same claim as "production-ready." Treat it as a serious, honestly-scoped research-grade PPL: pin an exact version, read the [CHANGELOG](CHANGELOG.md) before upgrading, and expect breaking API changes between 0.1.x releases as the design settles.
+Fugue is 0.2.x: pre-1.0, actively developed, with no SemVer stability guarantee yet and a single primary maintainer (see Roadmap, below). It's extensively tested — hundreds of unit, integration, and property-based tests, including statistical regression tests against closed-form posteriors — but that's not the same claim as "production-ready." Treat it as a serious, honestly-scoped research-grade PPL: pin an exact version, read the [CHANGELOG](CHANGELOG.md) before upgrading, and expect breaking API changes between 0.x releases as the design settles.
 
 ## 📦 Installation
 
@@ -87,6 +87,8 @@ let mu_values: Vec<f64> = samples.iter()
 ## 📚 Documentation
 
 - **[User Guide](https://fugue.run/)** - Comprehensive tutorials and examples
+- **[Explorables](https://fugue.run/explorables/index.html)** - Interactive, touchable essays: drag a prior and watch the posterior re-form, roll HMC across a landscape
+- **[Playground](https://fugue.run/playground.html)** - Write `prob!` models in the browser and run real inference, compiled to WASM
 - **[API Reference](https://docs.rs/fugue-ppl/latest/fugue/)** - Complete API documentation
 - **Examples** - See the `examples/` directory, including one runnable example per inference method:
   - `adaptive_mcmc_chain` - most foundation/statistical-modeling examples (e.g. `bayesian_coin_flip.rs`)
@@ -95,6 +97,10 @@ let mu_values: Vec<f64> = samples.iter()
   - `abc_smc_weighted` (ABC) - `examples/abc_inference.rs`
   - `optimize_meanfield_vi_with_config` (VI) - `examples/vi_inference.rs`
 - **[References](https://www.zotero.org/groups/6138134/fugue/library)** - Zotero library for Fugue
+
+## 🌱 Ecosystem
+
+- **[Fugue Evo](https://github.com/alexnodeland/fugue-evo)** — evolution as Bayesian inference: CMA-ES, NSGA-II, island models, and estimation-of-distribution algorithms on the same foundations, with its own interactive docs and live playground at [evo.fugue.run](https://evo.fugue.run)
 
 ## 🤝 Community
 
