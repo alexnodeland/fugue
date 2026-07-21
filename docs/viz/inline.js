@@ -576,14 +576,15 @@
   //    the live split-R̂ falls past 1.1 (coral→green) as they merge — or, in
   //    "bad" mode, stay trapped in three separate modes with R̂ pinned high.
   //
-  //    The convergence STORY has to be visible: chains start well separated with
-  //    a tight wiggle (three distinct threads), then relax toward one shared
-  //    stationary Normal(0,1) — mean pulled to 0 while the wiggle grows to full
-  //    scale — merging within roughly the first third of the window, then mixing
-  //    indistinguishably. That relaxation-to-a-shared-target is exactly what an
-  //    AR(1)/Langevin move toward N(0,1) does in expectation (mean decays
-  //    geometrically, variance settles), so we drive the mean-collapse and the
-  //    mixing wiggle with separate rates: a clean fall, a clean green flip.
+  //    The convergence STORY has to be visible, which means the vertical
+  //    ENVELOPE must shrink: three thin threads far apart (dark space between
+  //    them), a held separated phase, then a crisp funnel onto one shared
+  //    stationary Normal(0,1) band. Over-dispersion only reads if the start
+  //    separation is several stationary SDs and the warmup wiggle is tight —
+  //    otherwise "before" and "after" span the same pixels and nothing
+  //    collapses. That relaxation-to-a-shared-target is what an AR(1)/Langevin
+  //    move toward N(0,1) does in expectation (mean decays, variance settles);
+  //    we drive mean-collapse and wiggle-growth on one eased schedule.
   //
   //    The readout R̂ is real split-R̂ (same rhatCore as everywhere) computed on
   //    the recent (post-warmup) draws — a trailing window — so it falls to ~1.00
@@ -596,16 +597,18 @@
     var mode = (root.getAttribute("data-mode") || "good").toLowerCase();
     var GOOD = mode !== "bad";
     var NCH = 3, MAXN = 140;
-    var MIXN = Math.round(MAXN / 3);   // over-dispersed chains merge by ~here
+    var SEPN = Math.round(MAXN * 0.22); // fully separated threads until here…
+    var MIXN = Math.round(MAXN * 0.42); // …then funnel; fully merged by here
     var NPHI = 0.2;                    // mixing autocorrelation (low → clean R̂)
-    var SD0 = 0.65, SD1 = 1.0;         // wiggle grows tight→full as chains merge
+    var SD0 = 0.32, SD1 = 1.0;         // thin warmup threads → full stationary band
     var DWIN = 38;                     // trailing window for the live (post-warmup) R̂
     var BPHI = 0.82;                   // bad-mode within-mode autocorrelation
 
-    // smoothstep-eased schedules for the "good" collapse.
+    // Hold separated, then smoothstep-funnel onto the shared band.
     function ease(u) { return u * u * (3 - 2 * u); }
-    function collapse(k) { return k >= MIXN ? 0 : 1 - ease(k / MIXN); } // 1→0 mean scale
-    function sdScale(k) { return k >= MIXN ? SD1 : SD0 + (SD1 - SD0) * ease(k / MIXN); }
+    function phase01(k) { return k <= SEPN ? 0 : k >= MIXN ? 1 : (k - SEPN) / (MIXN - SEPN); }
+    function collapse(k) { return 1 - ease(phase01(k)); } // 1→0 mean scale
+    function sdScale(k) { return SD0 + (SD1 - SD0) * ease(phase01(k)); }
 
     mount(root, {
       height: 150, hz: 6,
@@ -620,7 +623,7 @@
       S.eta = []; S.cur = [];
       // good: dispersed starts, one shared Normal(0,1) target → chains mix.
       // bad:  chains trapped in three separate modes → split-R̂ stuck ≫ 1.1.
-      S.starts = GOOD ? [-2.2, 0.0, 2.2] : [-1.7, 0.1, 1.7];
+      S.starts = GOOD ? [-3.4, 0.0, 3.4] : [-1.7, 0.1, 1.7];
       S.centers = GOOD ? [0, 0, 0] : [-1.5, 0.0, 1.5];
       for (var i = 0; i < NCH; i++) { S.eta[i] = FV.randn(S.rng); S.cur[i] = S.starts[i]; }
     }
