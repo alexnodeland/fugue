@@ -11,6 +11,9 @@
 // Model: y ~ Normal(a*x + b, 0.8), priors a,b ~ Normal(0, 2.5). σ_obs fixed 0.8.
 // Diagnostics (acceptance / split-R̂ / ESS) ported from src/inference/{diagnostics,
 // mcmc_utils}.rs. Self-contained IIFE; assumes fugue-viz.js has loaded first.
+// Math core: when fugue-wasm-loader.js resolves FV.wasmReady to the real crate,
+// sampling/diagnostics/heatmap run fugue's actual MH kernel via WASM; otherwise
+// the mirrored JS math below runs unchanged (root gets data-fugue-backend=wasm|js).
 (function () {
   "use strict";
   if (typeof window === "undefined" || !window.FugueViz) return;
@@ -19,6 +22,10 @@
   // ---- The model. logp(a,b) is THE log posterior over (slope, intercept). ----
   var SIGMA_OBS = 0.8;   // fixed observation noise (stated on the page)
   var PRIOR_SD = 2.5;    // Normal(0, 2.5) prior on both params
+
+  // The SAME model in the fugue DSL, compiled by the real crate when the wasm
+  // pkg is available. Priors N(0, 2.5), sigma_obs 0.8 — matches logp() below.
+  var SRC = 'let a <- sample(addr!("a"), Normal(0.0, 2.5));\nlet b <- sample(addr!("b"), Normal(0.0, 2.5));\nfor i in 0..x.len() {\n    observe(addr!("y", i), Normal(a * x[i] + b, 0.8), y[i]);\n}\npure(a)';
 
   // Fixed plot domains (kept stable so dragging never makes the axes jump).
   // Windows shared verbatim with viz/hmc.js — the two pages present the SAME
@@ -125,7 +132,15 @@
     return [86, 211, 100];
   }
 
+  // Init defers on FV.wasmReady (fugue-wasm-loader.js): resolves to the
+  // wasm-bindgen module namespace, or null when the pkg is absent — in which
+  // case realInit runs with W=null and behaves exactly as before.
   FV.register("metropolis", function (root, FV) {
+    var p = FV.wasmReady || Promise.resolve(null);
+    p.then(function (W) { realInit(root, FV, W); });
+  });
+
+  function realInit(root, FV, W) {
     // ------------------------------------------------------------------ state
     var seed0 = parseInt(root.getAttribute("data-seed") || "11", 10);
     var params = { sigma: 0.35, nChains: 3, speed: 8, seed: seed0 };
@@ -147,6 +162,160 @@
       return lp;
     }
 
+    // ================================================================= core
+    // ONE math-core interface, two implementations, chosen once at init:
+    // W truthy -> wasmCore (the real fugue crate); W null -> jsCore (the
+    // mirrored JS math above, untouched). A wasm construction error demotes
+    // this widget instance to jsCore permanently. The renderer only ever
+    // consumes chains[].{a,b,lp,trail,as,bs,flash} + spaghetti[] — both
+    // cores feed exactly that state.
+    var mh = null;    // WasmMh instance (wasm core only)
+    var core;         // -> wasmCore or jsCore, selected below
+
+    function dataJson() {
+      return JSON.stringify({
+        x: pts.map(function (p) { return p.x; }),
+        y: pts.map(function (p) { return p.y; })
+      });
+    }
+
+    var warnedFallback = false;
+    function fallbackToJs(err) {
+      if (!warnedFallback) {
+        warnedFallback = true;
+        try { console.warn("[fugue-viz] metropolis: wasm core failed — falling back to JS math", err); } catch (e) { /* readout only */ }
+      }
+      mh = null;
+      core = jsCore;
+      root.setAttribute("data-fugue-backend", "js");
+    }
+
+    var jsCore = {
+      // Dispersed starts + fresh RNG — byte-identical to the pre-wasm widget.
+      reset: function () {
+        rand = FV.rng(params.seed >>> 0);
+        chains = [];
+        for (var i = 0; i < params.nChains; i++) {
+          var a = STARTA[i % 4], b = STARTB[i % 4];
+          chains.push({ a: a, b: b, lp: logp(a, b), as: [a], bs: [b], trail: [[a, b]], flash: null });
+        }
+      },
+      setSigma: function (sigma) { /* doStep reads params.sigma directly */ },
+      step: function () { doStep(); },
+      onDataChanged: function () { reweightChains(); },
+      rhat: function (win) {
+        var as = [], bs = [], i;
+        for (i = 0; i < chains.length; i++) { as.push(chains[i].as); bs.push(chains[i].bs); }
+        var ra = splitRhat(as), rb = splitRhat(bs);
+        var r = Math.max(isFinite(ra) ? ra : -Infinity, isFinite(rb) ? rb : -Infinity);
+        return isFinite(r) ? r : NaN;
+      },
+      ess: function () {
+        var as = [], bs = [], i;
+        for (i = 0; i < chains.length; i++) { as.push(chains[i].as); bs.push(chains[i].bs); }
+        return Math.min(essFromChains(as), essFromChains(bs)); // worst coordinate
+      },
+      acceptRate: function (win) { return accProp ? accAcc / accProp : 0; },
+      heatGrid: function (aVals, bVals) {
+        var na = aVals.length, nb = bVals.length;
+        var out = new Array(na * nb);
+        for (var j = 0; j < nb; j++) {
+          for (var i = 0; i < na; i++) out[j * na + i] = logp(aVals[i], bVals[j]);
+        }
+        return out;
+      }
+    };
+
+    var wasmCore = {
+      reset: function () {
+        try {
+          // u64 args cross wasm-bindgen as BigInt.
+          mh = new W.WasmMh(SRC, dataJson(), params.nChains, BigInt(params.seed));
+          mh.set_fixed_scale(params.sigma);
+        } catch (e) {
+          fallbackToJs(e);
+          core.reset();           // core is jsCore now
+          return;
+        }
+        // Chains start from the crate's own prior draws — real fugue
+        // initialization, intentionally NOT the JS dispersed starts.
+        chains = [];
+        var av = mh.current_values("a"), bv = mh.current_values("b"), lw = mh.log_weights();
+        for (var i = 0; i < params.nChains; i++) {
+          chains.push({ a: av[i], b: bv[i], lp: lw[i], as: [av[i]], bs: [bv[i]], trail: [[av[i], bv[i]]], flash: null });
+        }
+      },
+      setSigma: function (sigma) { if (mh) mh.set_fixed_scale(sigma); },
+      step: function () {
+        // fugue's kernel is single-site adaptive MH: one coordinate per
+        // transition, so 2 transitions ≈ one joint JS move — the walk speed
+        // feels the same at any SPEED setting.
+        mh.step(2);
+        var av = mh.current_values("a"), bv = mh.current_values("b"), lw = mh.log_weights();
+        for (var i = 0; i < chains.length; i++) {
+          var ch = chains[i];
+          var pa = av[i], pb = bv[i];
+          // "accepted" = the chain moved. Rejections have no proposal coords
+          // on this side of the boundary, so their flash sits at the state.
+          var accepted = pa !== ch.a || pb !== ch.b;
+          accProp++;
+          ch.flash = { oa: ch.a, ob: ch.b, pa: pa, pb: pb, accepted: accepted, life: 1 };
+          if (accepted) {
+            accAcc++;
+            spaghetti.push([pa, pb]);
+            if (spaghetti.length > SPAGHETTI) spaghetti.shift();
+          }
+          ch.a = pa; ch.b = pb; ch.lp = lw[i];
+          ch.as.push(ch.a); ch.bs.push(ch.b);
+          if (ch.as.length > MAXSAMP) { ch.as.shift(); ch.bs.shift(); }
+          ch.trail.push([ch.a, ch.b]);
+          if (ch.trail.length > MAXTRAIL) ch.trail.shift();
+        }
+      },
+      onDataChanged: function () {
+        // Posterior moved: rebuild the sampler on the new data but keep every
+        // chain exactly where it stood (set_value re-scores at the position).
+        var saved = [], i;
+        for (i = 0; i < chains.length; i++) saved.push([chains[i].a, chains[i].b]);
+        try {
+          mh = new W.WasmMh(SRC, dataJson(), params.nChains, BigInt(params.seed));
+          mh.set_fixed_scale(params.sigma);
+          for (i = 0; i < saved.length; i++) {
+            mh.set_value(i, "a", saved[i][0]);
+            mh.set_value(i, "b", saved[i][1]);
+          }
+        } catch (e) {
+          fallbackToJs(e);
+          core.onDataChanged();   // jsCore reweights + marks heat dirty
+          return;
+        }
+        var lw = mh.log_weights();
+        for (i = 0; i < chains.length; i++) chains[i].lp = lw[i];
+        heatDirty = true;
+      },
+      rhat: function (win) {
+        // Same readout semantics as jsCore: worst coordinate, split-R̂.
+        var ra = mh.r_hat("a", win || 0), rb = mh.r_hat("b", win || 0);
+        var r = Math.max(isFinite(ra) ? ra : -Infinity, isFinite(rb) ? rb : -Infinity);
+        return isFinite(r) ? r : NaN;
+      },
+      ess: function () { return Math.min(mh.ess("a"), mh.ess("b")); }, // worst coordinate
+      acceptRate: function (win) { return mh.recent_acceptance(win || 0); },
+      heatGrid: function (aVals, bVals) {
+        try {
+          return W.log_joint_grid(SRC, dataJson(), "a", "b",
+            new Float64Array(aVals), new Float64Array(bVals), BigInt(params.seed));
+        } catch (e) {
+          fallbackToJs(e);
+          return core.heatGrid(aVals, bVals);
+        }
+      }
+    };
+
+    core = W ? wasmCore : jsCore;
+    root.setAttribute("data-fugue-backend", W ? "wasm" : "js");
+    // ================================================================ /core
+
     // Seeded default dataset, identical to viz/hmc.js makeSeedData(11):
     // true line y = 0.8·x − 0.4 + Normal(0, 0.8), 12 points evenly on [-3, 3].
     function makeData() {
@@ -163,16 +332,11 @@
     }
 
     function newChains() {
-      rand = FV.rng(params.seed >>> 0);
-      chains = [];
       spaghetti = [];
-      for (var i = 0; i < params.nChains; i++) {
-        var a = STARTA[i % 4], b = STARTB[i % 4];
-        chains.push({ a: a, b: b, lp: logp(a, b), as: [a], bs: [b], trail: [[a, b]], flash: null });
-      }
       accProp = 0; accAcc = 0; acc = 0;
       diag = { rhat: NaN, ess: 0, acc: 0 };
       lastDiag = 0;
+      core.reset();   // rebuilds chains[] (JS: dispersed starts; wasm: prior draws)
     }
 
     // Data changed (drag / reseed): posterior moved, so every chain's cached
@@ -182,6 +346,7 @@
       heatDirty = true;
     }
 
+    // jsCore step: one symmetric joint (a,b) MH proposal per chain.
     function doStep() {
       var s = params.sigma;
       for (var i = 0; i < chains.length; i++) {
@@ -208,13 +373,10 @@
     function refreshDiag(now) {
       if (now - lastDiag < 250) return;
       lastDiag = now;
-      var as = [], bs = [], i;
-      for (i = 0; i < chains.length; i++) { as.push(chains[i].as); bs.push(chains[i].bs); }
-      var ra = splitRhat(as), rb = splitRhat(bs);
-      var rhat = Math.max(isFinite(ra) ? ra : -Infinity, isFinite(rb) ? rb : -Infinity);
-      if (!isFinite(rhat)) rhat = NaN;
-      var ess = Math.min(essFromChains(as), essFromChains(bs)); // worst coordinate
-      diag = { rhat: rhat, ess: ess, acc: accProp ? accAcc / accProp : 0 };
+      // Worst-coordinate split-R̂ over the retained window (JS history is
+      // capped at MAXSAMP, so the wasm core mirrors that), worst-coordinate
+      // ESS, acceptance over everything since the last reset (window 0).
+      diag = { rhat: core.rhat(MAXSAMP), ess: core.ess(), acc: core.acceptRate(0) };
       renderReadouts();
     }
 
@@ -229,7 +391,7 @@
     FV.slider(controls, {
       label: "PROPOSAL σ", min: 0, max: 1, step: 0.001, value: (Math.log(params.sigma) - LOGLO) / (LOGHI - LOGLO),
       fmt: function (t) { return sigmaOf(t).toFixed(2); },
-      onInput: function (t) { params.sigma = sigmaOf(t); requestDraw(); }
+      onInput: function (t) { params.sigma = sigmaOf(t); core.setSigma(params.sigma); requestDraw(); }
     });
 
     FV.slider(controls, {
@@ -299,16 +461,16 @@
       // resolution (4px) once the point is released (onEnd forces heatDirty).
       var step = dragIdx >= 0 ? 8 : 4;
       var cols = Math.ceil(iw / step), rows = Math.ceil(ih / step);
-      var vals = new Array(cols * rows), maxv = -Infinity, ix, iy;
-      for (iy = 0; iy < rows; iy++) {
-        var b = PB[1] - ((iy * step + step / 2) / ih) * (PB[1] - PB[0]);
-        for (ix = 0; ix < cols; ix++) {
-          var a = PA[0] + ((ix * step + step / 2) / iw) * (PA[1] - PA[0]);
-          var v = logp(a, b);
-          if (!isFinite(v)) v = -Infinity;
-          vals[iy * cols + ix] = v;
-          if (v > maxv) maxv = v;
-        }
+      var aVals = new Float64Array(cols), bVals = new Float64Array(rows), ix, iy;
+      for (ix = 0; ix < cols; ix++) aVals[ix] = PA[0] + ((ix * step + step / 2) / iw) * (PA[1] - PA[0]);
+      for (iy = 0; iy < rows; iy++) bVals[iy] = PB[1] - ((iy * step + step / 2) / ih) * (PB[1] - PB[0]);
+      // Row-major log-density grid vals[iy*cols+ix] from the active core —
+      // only the log-density SOURCE differs; normalization/coloring is shared.
+      var vals = core.heatGrid(aVals, bVals);
+      var maxv = -Infinity, k;
+      for (k = 0; k < cols * rows; k++) {
+        var v = vals[k];
+        if (isFinite(v) && v > maxv) maxv = v;
       }
       var rgb = toRgb(col);
       heatCtx.clearRect(0, 0, iw, ih);
@@ -316,7 +478,7 @@
         for (iy = 0; iy < rows; iy++) {
           for (ix = 0; ix < cols; ix++) {
             var lv = vals[iy * cols + ix];
-            var al = lv === -Infinity ? 0 : Math.exp(lv - maxv);
+            var al = isFinite(lv) ? Math.exp(lv - maxv) : 0;
             if (al <= 0.004) continue;
             if (al > 1) al = 1;
             heatCtx.fillStyle = "rgba(" + rgb[0] + "," + rgb[1] + "," + rgb[2] + "," + al + ")";
@@ -412,6 +574,14 @@
       ctx.drawImage(heatCanvas, pp.ix, pp.iy, pp.iw, pp.ih);
       FV.axes(ctx, { x: pp.ix, y: pp.iy, w: pp.iw, h: pp.ih, xscale: pp.sx, yscale: pp.sy, xlabel: "slope a", ylabel: "intercept b", theme: th });
 
+      // Everything walk-related clips to the panel: wasm chains start from
+      // real prior draws, which can lie outside the fixed (a, b) window, and
+      // an unclipped trail would draw over the frame on its way in.
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(pp.ix, pp.iy, pp.iw, pp.ih);
+      ctx.clip();
+
       // param trails (the "recording" so far) — ink, faded
       ctx.save();
       ctx.globalAlpha = 0.45;
@@ -443,6 +613,8 @@
         ctx.beginPath(); ctx.arc(cx, cy, 4.5, 0, 2 * Math.PI); ctx.stroke();
         ctx.restore();
       }
+
+      ctx.restore(); // end param-panel clip
 
       // ---- DATA panel: spaghetti + points ----
       FV.axes(ctx, { x: dp.ix, y: dp.iy, w: dp.iw, h: dp.ih, xscale: dp.sx, yscale: dp.sy, xlabel: "x", ylabel: "y", theme: th });
@@ -518,7 +690,8 @@
         if (nx < DX[0]) nx = DX[0]; if (nx > DX[1]) nx = DX[1];
         if (ny < DY[0]) ny = DY[0]; if (ny > DY[1]) ny = DY[1];
         pts[i].x = nx; pts[i].y = ny;
-        reweightChains();     // posterior moved -> heatDirty + stale lp fixed
+        core.onDataChanged(); // posterior moved -> heatDirty + stale lp fixed
+                              // (wasm: rebuild on new data, chains keep position)
         requestDraw();        // heatmap rebuilds at HALF res while dragging
       },
       onEnd: function () { dragIdx = -1; heatDirty = true; requestDraw(); }
@@ -539,11 +712,11 @@
     // static frame below).
     var FLASH_DUR = 0.35;   // proposal-flash lifetime in seconds (time-based, §A.7)
     var loopApi = FV.loop(root, function (dt) {
-      if (dt === 0) { doStep(); }        // Step button (or reduced-motion)
+      if (dt === 0) { core.step(); }     // Step button (or reduced-motion)
       else {
         acc += dt * params.speed;
         var n = Math.floor(acc);
-        if (n > 0) { acc -= n; if (n > 60) n = 60; for (var i = 0; i < n; i++) doStep(); }
+        if (n > 0) { acc -= n; if (n > 60) n = 60; for (var i = 0; i < n; i++) core.step(); }
         // Decay proposal flashes by wall-clock time, not frame count, so they
         // last the same ~0.35s whether rAF runs at 60fps or drops to 30.
         var dl = dt / FLASH_DUR;
@@ -574,12 +747,12 @@
     // never animates, still shows a rich converged frame — never an empty axis).
     makeData();
     newChains();
-    for (var pw = 0; pw < 40; pw++) doStep();
+    for (var pw = 0; pw < 40; pw++) core.step();
     refreshDiag(nowMs());
     renderReadouts();
     draw();
     // The loop autoplays itself (see FV.loop {autoplay:true}); reflect that on the
     // button. play() already ran and is a no-op under reduced motion.
     if (loopApi.playing) btns.fvButtons["Play"].textContent = "Pause";
-  });
+  }
 })();

@@ -48,3 +48,10 @@ Once you know it, every canvas and every equation on this site reads at a glance
 Read them in order for a course, or jump to what you came for — each page stands alone and
 links onward. When a page convinces you, the matching tutorial turns the intuition into
 working Rust; the code on every explorable compiles against `fugue-ppl 0.2.0` as written.
+
+One more honesty note, and a point of pride: the samplers behind the MH, HMC, and SMC
+machines are not JavaScript imitations — they are the **fugue crate itself, compiled to
+WebAssembly**, driven one transition per animation frame. Same kernels, same diagnostics,
+same seeded reproducibility as production; only the drawing is JavaScript. (Browsers
+without the WASM package fall back to a faithful JS mirror.) When you want to type your
+own model at these kernels, the **[Playground](../playground.md)** is exactly that.

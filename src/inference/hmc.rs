@@ -328,11 +328,27 @@ fn grad_log_joint<A>(
     (g, ok)
 }
 
+/// One recorded point of a leapfrog trajectory: the position `q` over the
+/// continuous sites (ordered as [`HmcSession::sites`]) and the Hamiltonian
+/// `H = -log π(q) + ½ pᵀM⁻¹p` at that point. Produced by
+/// [`HmcSession::step_recorded`]; a rising `h` along a trajectory signals
+/// integration error, and a divergence truncates the recording at the point
+/// the support was left.
+#[derive(Clone, Debug)]
+pub struct LeapfrogPoint {
+    /// Position over the continuous sites.
+    pub q: Vec<f64>,
+    /// Hamiltonian (potential + kinetic energy) at this point.
+    pub h: f64,
+}
+
 /// Leapfrog (velocity-Verlet) integration of the Hamiltonian dynamics for `l`
 /// steps at step size `eps`. The force is reused between the trailing half-kick
 /// of one step and the leading half-kick of the next, so the whole trajectory
 /// costs `L + 1` gradient evaluations. Returns the endpoint `(q, p)` and a
 /// `divergent` flag set when a force evaluation is non-finite (support left).
+/// With `record` attached, each integration point (including the start) is
+/// pushed with its Hamiltonian — one extra model execution per point.
 #[allow(clippy::too_many_arguments)]
 fn leapfrog<A>(
     model_fn: &impl Fn() -> Model<A>,
@@ -344,10 +360,25 @@ fn leapfrog<A>(
     l: usize,
     h: f64,
     m_inv: &[f64],
+    mut record: Option<&mut Vec<LeapfrogPoint>>,
 ) -> (Vec<f64>, Vec<f64>, bool) {
     let d = q0.len();
     let mut q = q0.to_vec();
     let mut p = p0.to_vec();
+
+    // Hamiltonian at the current (q, p); one extra model execution, so only
+    // evaluated when a recorder is attached.
+    let record_point = |q: &[f64], p: &[f64], out: &mut Vec<LeapfrogPoint>| {
+        let k = 0.5 * (0..d).map(|i| p[i] * p[i] * m_inv[i]).sum::<f64>();
+        let lj = log_joint_at(model_fn, base, sites, q);
+        out.push(LeapfrogPoint {
+            q: q.to_vec(),
+            h: -lj + k,
+        });
+    };
+    if let Some(out) = record.as_deref_mut() {
+        record_point(&q, &p, out);
+    }
 
     let (mut grad, ok) = grad_log_joint(model_fn, base, sites, &q, h);
     if !ok {
@@ -368,16 +399,21 @@ fn leapfrog<A>(
         for i in 0..d {
             p[i] += 0.5 * eps * grad[i];
         }
+        if let Some(out) = record.as_deref_mut() {
+            record_point(&q, &p, out);
+        }
     }
     (q, p, false)
 }
 
 /// One HMC transition. Returns
-/// `(accepted, q_next, endpoint_if_accepted, acceptance_probability)`.
+/// `(accepted, q_next, endpoint_if_accepted, acceptance_probability, divergent)`.
 ///
 /// `endpoint_if_accepted` carries the model result, freshly-scored trace, and
-/// log-joint of the accepted state.
-type TransitionOut<A> = (bool, Vec<f64>, Option<(A, Trace, f64)>, f64);
+/// log-joint of the accepted state. `divergent` is set when the trajectory
+/// left the support (non-finite force) or landed on a non-finite log-joint;
+/// a divergent proposal is always rejected with acceptance probability 0.
+type TransitionOut<A> = (bool, Vec<f64>, Option<(A, Trace, f64)>, f64, bool);
 
 #[allow(clippy::too_many_arguments)]
 fn hmc_transition<A: Clone, R: Rng>(
@@ -392,6 +428,7 @@ fn hmc_transition<A: Clone, R: Rng>(
     h: f64,
     m_inv: &[f64],
     mass_sqrt: &[f64],
+    record: Option<&mut Vec<LeapfrogPoint>>,
 ) -> TransitionOut<A> {
     let d = q_cur.len();
 
@@ -405,14 +442,15 @@ fn hmc_transition<A: Clone, R: Rng>(
     let k0 = 0.5 * (0..d).map(|i| p0[i] * p0[i] * m_inv[i]).sum::<f64>();
     let h0 = -lj_cur + k0;
 
-    let (q_new, p_new, divergent) = leapfrog(model_fn, base, sites, q_cur, &p0, eps, l, h, m_inv);
+    let (q_new, p_new, divergent) =
+        leapfrog(model_fn, base, sites, q_cur, &p0, eps, l, h, m_inv, record);
     if divergent {
-        return (false, q_cur.to_vec(), None, 0.0);
+        return (false, q_cur.to_vec(), None, 0.0, true);
     }
 
     let (a_new, t_new, lj_new) = score_full(model_fn, base, sites, &q_new);
     if !lj_new.is_finite() {
-        return (false, q_cur.to_vec(), None, 0.0);
+        return (false, q_cur.to_vec(), None, 0.0, true);
     }
 
     let k_new = 0.5 * (0..d).map(|i| p_new[i] * p_new[i] * m_inv[i]).sum::<f64>();
@@ -422,9 +460,15 @@ fn hmc_transition<A: Clone, R: Rng>(
     let accept_prob = (h0 - h_new).exp().min(1.0);
     let accept = rng.gen::<f64>() < accept_prob;
     if accept {
-        (true, q_new, Some((a_new, t_new, lj_new)), accept_prob)
+        (
+            true,
+            q_new,
+            Some((a_new, t_new, lj_new)),
+            accept_prob,
+            false,
+        )
     } else {
-        (false, q_cur.to_vec(), None, accept_prob)
+        (false, q_cur.to_vec(), None, accept_prob, false)
     }
 }
 
@@ -454,7 +498,7 @@ fn find_reasonable_epsilon<A, R: Rng>(
     let h0 = -lj_q + k0;
 
     let log_ratio_at = |eps: f64| -> f64 {
-        let (q1, p1, divergent) = leapfrog(model_fn, base, sites, q, &p0, eps, 1, h, m_inv);
+        let (q1, p1, divergent) = leapfrog(model_fn, base, sites, q, &p0, eps, 1, h, m_inv, None);
         if divergent {
             return f64::NEG_INFINITY;
         }
@@ -526,21 +570,260 @@ pub fn hmc_chain<A: Clone, R: Rng>(
     n_warmup: usize,
     config: HMCConfig,
 ) -> Vec<(A, Trace)> {
-    // Initialize from a prior draw (correct, fresh accumulators).
-    let (mut cur_a, mut cur_trace) = run(
-        PriorHandler {
-            rng,
-            trace: Trace::default(),
-        },
-        model_fn(),
-    );
-    let (sites, mut q) = positions_from_trace(&cur_trace);
-    let d = sites.len();
+    let mut session = HmcSession::new(rng, &model_fn, n_warmup, config);
+    for _ in 0..n_warmup {
+        session.step(rng, &model_fn);
+    }
+    let mut out = Vec::with_capacity(n_samples);
+    for _ in 0..n_samples {
+        session.step(rng, &model_fn);
+        out.push((session.result().clone(), session.trace().clone()));
+    }
+    out
+}
 
-    // No continuous sites: HMC has nothing to do — return independent prior draws.
-    if d == 0 {
-        let mut out = Vec::with_capacity(n_samples);
-        for _ in 0..n_samples {
+/// Metadata for one [`HmcSession`] transition.
+#[derive(Clone, Debug)]
+pub struct HmcStepInfo {
+    /// Whether the proposal was accepted (the session state advanced).
+    pub accepted: bool,
+    /// Whether the trajectory diverged (non-finite force or log-joint; the
+    /// proposal is always rejected).
+    pub divergent: bool,
+    /// The Metropolis acceptance probability of the proposal (0.0 on
+    /// divergence).
+    pub accept_prob: f64,
+    /// The step size used for this transition.
+    pub step_size: f64,
+    /// The leapfrog trajectory (start point included), recorded only by
+    /// [`HmcSession::step_recorded`]; empty for [`HmcSession::step`]. On a
+    /// divergence the recording stops at the last finite point.
+    pub trajectory: Vec<LeapfrogPoint>,
+}
+
+/// An incremental HMC chain: [`hmc_chain`] exposed one transition at a time.
+///
+/// Holds everything [`hmc_chain`] tracks between transitions — current
+/// position/trace, dual-averaging step-size state, and the (optionally
+/// adapted) diagonal mass matrix — so a caller can advance the chain at its
+/// own pace (an animation frame, a streaming API, an interleaved multi-chain
+/// driver) instead of running to completion. `hmc_chain` itself is a thin
+/// wrapper around this type, so a session stepped `n_warmup + n_samples`
+/// times visits exactly the states the batch chain returns (given the same
+/// RNG stream).
+///
+/// The model is passed to every call (models are single-use; drivers hold a
+/// `Fn() -> Model<A>`), and **must build the same program each time** — same
+/// addresses, same structure — as with every other inference driver in this
+/// crate.
+///
+/// Warmup is handled internally: the first `n_warmup` calls adapt the step
+/// size (and optionally mass) exactly as [`hmc_chain`] does, then the kernel
+/// freezes. [`HmcSession::is_warming_up`] reports which phase the next step
+/// runs in.
+///
+/// # Example
+///
+/// ```rust
+/// use fugue::*;
+/// use fugue::inference::hmc::{HmcSession, HMCConfig};
+/// use rand::rngs::StdRng;
+/// use rand::SeedableRng;
+///
+/// let model_fn = || sample(addr!("x"), Normal::new(0.0, 1.0).unwrap());
+/// let mut rng = StdRng::seed_from_u64(0);
+/// let mut session = HmcSession::new(&mut rng, &model_fn, 50, HMCConfig::default());
+/// for _ in 0..60 {
+///     session.step(&mut rng, &model_fn);
+/// }
+/// let info = session.step_recorded(&mut rng, &model_fn);
+/// assert!(!info.trajectory.is_empty()); // leapfrog path with Hamiltonians
+/// assert!(session.trace().get_f64(&addr!("x")).is_some());
+/// ```
+pub struct HmcSession<A> {
+    sites: Vec<Address>,
+    q: Vec<f64>,
+    cur_a: A,
+    cur_trace: Trace,
+    lj_cur: f64,
+    eps: f64,
+    frozen_eps: Option<f64>,
+    da: DualAveraging,
+    m_inv: Vec<f64>,
+    mass_sqrt: Vec<f64>,
+    welford: Welford,
+    mass_adapt_at: Option<usize>,
+    n_warmup: usize,
+    iter: usize,
+    l: usize,
+    h: f64,
+    target_accept: f64,
+}
+
+impl<A: Clone> HmcSession<A> {
+    /// Initialize a chain from a prior draw, finding a reasonable initial step
+    /// size unless [`HMCConfig::init_step_size`] pins one — identical setup to
+    /// [`hmc_chain`].
+    pub fn new<R: Rng>(
+        rng: &mut R,
+        model_fn: &impl Fn() -> Model<A>,
+        n_warmup: usize,
+        config: HMCConfig,
+    ) -> Self {
+        let (cur_a, cur_trace) = run(
+            PriorHandler {
+                rng,
+                trace: Trace::default(),
+            },
+            model_fn(),
+        );
+        let (sites, q) = positions_from_trace(&cur_trace);
+        let d = sites.len();
+
+        let h = config.finite_diff_eps;
+        let l = config.n_leapfrog.max(1);
+        let m_inv = vec![1.0; d];
+        let mass_sqrt = vec![1.0; d];
+        let lj_cur = cur_trace.total_log_weight();
+
+        // With no continuous sites every step degenerates to a fresh prior
+        // draw; skip the epsilon search (it would divide by d = 0 nowhere,
+        // but there is nothing to tune).
+        let eps0 = if d == 0 {
+            1.0
+        } else {
+            match config.init_step_size {
+                Some(e) => e,
+                None => find_reasonable_epsilon(
+                    rng, model_fn, &cur_trace, &sites, &q, lj_cur, h, &m_inv, &mass_sqrt,
+                ),
+            }
+        };
+        let da = DualAveraging::new(eps0, config.target_accept);
+        let welford = Welford::new(d);
+        let mass_adapt_at = if config.adapt_mass && n_warmup >= 4 {
+            Some(n_warmup / 2)
+        } else {
+            None
+        };
+
+        HmcSession {
+            sites,
+            q,
+            cur_a,
+            cur_trace,
+            lj_cur,
+            eps: eps0,
+            frozen_eps: None,
+            da,
+            m_inv,
+            mass_sqrt,
+            welford,
+            mass_adapt_at,
+            n_warmup,
+            iter: 0,
+            l,
+            h,
+            target_accept: config.target_accept,
+        }
+    }
+
+    /// The ordered continuous site addresses the chain moves (the coordinate
+    /// order of [`HmcSession::position`] and [`LeapfrogPoint::q`]).
+    pub fn sites(&self) -> &[Address] {
+        &self.sites
+    }
+
+    /// Pin the step size for all subsequent transitions, overriding both
+    /// warmup adaptation and the frozen dual-averaging value. Meant for
+    /// interactive use (a step-size slider); the kernel stays exact for any
+    /// positive `eps`.
+    pub fn set_step_size(&mut self, eps: f64) {
+        let eps = eps.max(1e-12);
+        self.eps = eps;
+        self.frozen_eps = Some(eps);
+        // Leave warmup: a manually pinned step size must not be re-adapted.
+        self.n_warmup = self.n_warmup.min(self.iter);
+    }
+
+    /// Change the number of leapfrog steps per proposal for subsequent
+    /// transitions.
+    pub fn set_n_leapfrog(&mut self, l: usize) {
+        self.l = l.max(1);
+    }
+
+    /// The current position over the continuous sites.
+    pub fn position(&self) -> &[f64] {
+        &self.q
+    }
+
+    /// The model result at the current state.
+    pub fn result(&self) -> &A {
+        &self.cur_a
+    }
+
+    /// The current state's trace (freshly scored; `total_log_weight` is valid).
+    pub fn trace(&self) -> &Trace {
+        &self.cur_trace
+    }
+
+    /// The step size the next transition will use.
+    pub fn step_size(&self) -> f64 {
+        if self.iter < self.n_warmup {
+            self.eps
+        } else {
+            self.frozen_or_current()
+        }
+    }
+
+    /// Whether the next [`step`](HmcSession::step) still adapts (warmup phase).
+    pub fn is_warming_up(&self) -> bool {
+        self.iter < self.n_warmup
+    }
+
+    /// Number of transitions taken so far (warmup included).
+    pub fn iterations(&self) -> usize {
+        self.iter
+    }
+
+    fn frozen_or_current(&self) -> f64 {
+        match self.frozen_eps {
+            Some(e) => e,
+            // Freeze lazily on first read past warmup: the dual-averaging
+            // running mean, or the raw eps when there was no warmup —
+            // matching hmc_chain's `final_eps`.
+            None if self.n_warmup > 0 => self.da.frozen_step(),
+            None => self.eps,
+        }
+    }
+
+    /// Advance the chain by one transition. Equivalent to
+    /// [`step_recorded`](HmcSession::step_recorded) without paying for
+    /// trajectory recording.
+    pub fn step<R: Rng>(&mut self, rng: &mut R, model_fn: &impl Fn() -> Model<A>) -> HmcStepInfo {
+        self.advance(rng, model_fn, false)
+    }
+
+    /// Advance the chain by one transition, recording the leapfrog trajectory
+    /// and the Hamiltonian at each integration point (one extra model
+    /// execution per point — meant for visualization and diagnostics, not
+    /// hot loops).
+    pub fn step_recorded<R: Rng>(
+        &mut self,
+        rng: &mut R,
+        model_fn: &impl Fn() -> Model<A>,
+    ) -> HmcStepInfo {
+        self.advance(rng, model_fn, true)
+    }
+
+    fn advance<R: Rng>(
+        &mut self,
+        rng: &mut R,
+        model_fn: &impl Fn() -> Model<A>,
+        record: bool,
+    ) -> HmcStepInfo {
+        // No continuous sites: independent prior draws, as in hmc_chain.
+        if self.sites.is_empty() {
             let (a, t) = run(
                 PriorHandler {
                     rng,
@@ -548,90 +831,92 @@ pub fn hmc_chain<A: Clone, R: Rng>(
                 },
                 model_fn(),
             );
-            out.push((a, t));
+            self.cur_a = a;
+            self.lj_cur = t.total_log_weight();
+            self.cur_trace = t;
+            self.iter += 1;
+            return HmcStepInfo {
+                accepted: true,
+                divergent: false,
+                accept_prob: 1.0,
+                step_size: self.eps,
+                trajectory: Vec::new(),
+            };
         }
-        return out;
-    }
 
-    let h = config.finite_diff_eps;
-    let l = config.n_leapfrog.max(1);
+        let warming = self.iter < self.n_warmup;
+        let eps = if warming {
+            self.eps
+        } else {
+            let e = self.frozen_or_current();
+            self.frozen_eps = Some(e);
+            e
+        };
 
-    // Mass matrix: identity by default. m_inv = M^{-1} diagonal; mass_sqrt = √M.
-    let mut m_inv = vec![1.0; d];
-    let mut mass_sqrt = vec![1.0; d];
-
-    let mut lj_cur = cur_trace.total_log_weight();
-
-    let eps0 = match config.init_step_size {
-        Some(e) => e,
-        None => find_reasonable_epsilon(
-            rng, &model_fn, &cur_trace, &sites, &q, lj_cur, h, &m_inv, &mass_sqrt,
-        ),
-    };
-    let mut da = DualAveraging::new(eps0, config.target_accept);
-    let mut eps = eps0;
-
-    let mut welford = Welford::new(d);
-    // Adapt the mass matrix once, at the warmup midpoint, when requested.
-    let mass_adapt_at = if config.adapt_mass && n_warmup >= 4 {
-        Some(n_warmup / 2)
-    } else {
-        None
-    };
-
-    // -- Warmup: adapt step size (and optionally mass). --
-    for iter in 0..n_warmup {
-        let (accepted, q_new, endpoint, alpha) = hmc_transition(
-            rng, &model_fn, &cur_trace, &sites, &q, lj_cur, eps, l, h, &m_inv, &mass_sqrt,
+        let mut trajectory = Vec::new();
+        let recorder = if record { Some(&mut trajectory) } else { None };
+        let (accepted, q_new, endpoint, alpha, divergent) = hmc_transition(
+            rng,
+            model_fn,
+            &self.cur_trace,
+            &self.sites,
+            &self.q,
+            self.lj_cur,
+            eps,
+            self.l,
+            self.h,
+            &self.m_inv,
+            &self.mass_sqrt,
+            recorder,
         );
         if accepted {
             let (a, t, lj) = endpoint.unwrap();
-            cur_a = a;
-            cur_trace = t;
-            q = q_new;
-            lj_cur = lj;
+            self.cur_a = a;
+            self.cur_trace = t;
+            self.q = q_new;
+            self.lj_cur = lj;
         }
-        eps = da.update(alpha);
 
-        if mass_adapt_at.is_some() {
-            welford.push(&q);
-        }
-        if Some(iter + 1) == mass_adapt_at {
-            // Set M^{-1} to the estimated marginal variances and re-tune eps for
-            // the remaining warmup. Any positive diagonal mass keeps the kernel
-            // exact (module docs), so this only affects efficiency.
-            let vars = welford.variances();
-            for i in 0..d {
-                m_inv[i] = vars[i];
-                mass_sqrt[i] = (1.0 / vars[i]).sqrt();
+        if warming {
+            self.eps = self.da.update(alpha);
+            if self.mass_adapt_at.is_some() {
+                self.welford.push(&self.q);
             }
-            let eps_reset = find_reasonable_epsilon(
-                rng, &model_fn, &cur_trace, &sites, &q, lj_cur, h, &m_inv, &mass_sqrt,
-            );
-            da = DualAveraging::new(eps_reset, config.target_accept);
-            eps = eps_reset;
+            if Some(self.iter + 1) == self.mass_adapt_at {
+                // Set M^{-1} to the estimated marginal variances and re-tune
+                // eps for the remaining warmup. Any positive diagonal mass
+                // keeps the kernel exact (module docs), so this only affects
+                // efficiency.
+                let vars = self.welford.variances();
+                for (i, &v) in vars.iter().enumerate() {
+                    self.m_inv[i] = v;
+                    self.mass_sqrt[i] = (1.0 / v).sqrt();
+                }
+                let eps_reset = find_reasonable_epsilon(
+                    rng,
+                    model_fn,
+                    &self.cur_trace,
+                    &self.sites,
+                    &self.q,
+                    self.lj_cur,
+                    self.h,
+                    &self.m_inv,
+                    &self.mass_sqrt,
+                );
+                self.da = DualAveraging::new(eps_reset, self.target_accept);
+                self.eps = eps_reset;
+            }
+        }
+        self.iter += 1;
+
+        HmcStepInfo {
+            accepted,
+            divergent,
+            accept_prob: alpha,
+            step_size: eps,
+            trajectory,
         }
     }
-
-    // Freeze the step size (dual-averaging running mean) after warmup.
-    let final_eps = if n_warmup > 0 { da.frozen_step() } else { eps };
-
-    // -- Sampling: fixed kernel. --
-    let mut out = Vec::with_capacity(n_samples);
-    for _ in 0..n_samples {
-        let (accepted, q_new, endpoint, _alpha) = hmc_transition(
-            rng, &model_fn, &cur_trace, &sites, &q, lj_cur, final_eps, l, h, &m_inv, &mass_sqrt,
-        );
-        if accepted {
-            let (a, t, lj) = endpoint.unwrap();
-            cur_a = a;
-            cur_trace = t;
-            q = q_new;
-            lj_cur = lj;
-        }
-        out.push((cur_a.clone(), cur_trace.clone()));
-    }
-    out
 }
 
 #[cfg(test)]
@@ -732,5 +1017,72 @@ mod tests {
         assert!(my.abs() < 2.0, "y mean {my}");
         assert!((vx - 1.0).abs() < 0.25, "var(x) {vx}");
         assert!((vy - 100.0).abs() < 25.0, "var(y) {vy}");
+    }
+
+    // The incremental session must visit exactly the states the batch chain
+    // returns: same seed, same model, same config => identical draws. This
+    // pins hmc_chain as a true thin wrapper over HmcSession.
+    #[test]
+    fn session_matches_batch_chain_exactly() {
+        let model_fn = || {
+            sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
+                .bind(|mu| observe(addr!("y"), Normal::new(mu, 1.0).unwrap(), 2.0).map(move |_| mu))
+        };
+        let cfg = HMCConfig::default();
+        let (n_warmup, n_samples) = (50, 40);
+
+        let mut rng1 = StdRng::seed_from_u64(7);
+        let batch = hmc_chain(&mut rng1, model_fn, n_samples, n_warmup, cfg);
+
+        let mut rng2 = StdRng::seed_from_u64(7);
+        let mut session = HmcSession::new(&mut rng2, &model_fn, n_warmup, cfg);
+        for _ in 0..n_warmup {
+            assert!(session.is_warming_up());
+            session.step(&mut rng2, &model_fn);
+        }
+        for (batch_mu, batch_trace) in &batch {
+            assert!(!session.is_warming_up());
+            session.step(&mut rng2, &model_fn);
+            assert_eq!(*session.result(), *batch_mu);
+            assert_eq!(
+                session.trace().total_log_weight(),
+                batch_trace.total_log_weight()
+            );
+        }
+    }
+
+    // step_recorded returns the full leapfrog path (L+1 points, start
+    // included) with finite Hamiltonians, and recording must not perturb the
+    // chain: the extra Hamiltonian evaluations are deterministic re-scores
+    // that consume no randomness.
+    #[test]
+    fn recorded_trajectory_shape_and_rng_neutrality() {
+        let model_fn = || {
+            sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
+                .bind(|mu| observe(addr!("y"), Normal::new(mu, 1.0).unwrap(), 0.5).map(move |_| mu))
+        };
+        let cfg = HMCConfig {
+            n_leapfrog: 12,
+            init_step_size: Some(0.2),
+            ..HMCConfig::default()
+        };
+
+        let mut rng1 = StdRng::seed_from_u64(3);
+        let mut recorded = HmcSession::new(&mut rng1, &model_fn, 0, cfg);
+        let mut rng2 = StdRng::seed_from_u64(3);
+        let mut plain = HmcSession::new(&mut rng2, &model_fn, 0, cfg);
+
+        for _ in 0..10 {
+            let info = recorded.step_recorded(&mut rng1, &model_fn);
+            plain.step(&mut rng2, &model_fn);
+            if !info.divergent {
+                assert_eq!(info.trajectory.len(), cfg.n_leapfrog + 1);
+            }
+            for pt in &info.trajectory {
+                assert_eq!(pt.q.len(), 1);
+                assert!(pt.h.is_finite());
+            }
+            assert_eq!(recorded.position(), plain.position());
+        }
     }
 }

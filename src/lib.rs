@@ -41,7 +41,7 @@ pub use inference::diagnostics::{
     extract_u64_values, extract_usize_values, print_diagnostics, r_hat_f64,
     summarize_f64_parameter, Diagnostics, ParameterSummary,
 };
-pub use inference::hmc::{hmc_chain, HMCConfig};
+pub use inference::hmc::{hmc_chain, HMCConfig, HmcSession, HmcStepInfo, LeapfrogPoint};
 pub use inference::mcmc_utils::{
     effective_sample_size_mcmc, effective_sample_size_multichain, geweke_diagnostic,
     DiminishingAdaptation,

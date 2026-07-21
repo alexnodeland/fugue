@@ -401,3 +401,56 @@ html.rust .fv-btn.fv-primary {
     min-width: 0;
   }
 }
+
+/* ==========================================================================
+   Playground (viz/playground.js) — editor, feedback, notice
+   ========================================================================== */
+.fv-pg-editors {
+  margin-bottom: 8px;
+}
+.fv-pg-editor {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 8px;
+  padding: 10px 12px;
+  font-family: var(--mono-font, monospace);
+  font-size: 0.82em;
+  line-height: 1.5;
+  color: var(--fg);
+  background: var(--quote-bg, rgba(128, 128, 128, 0.08));
+  border: 1px solid var(--fv-grid, rgba(128, 128, 128, 0.35));
+  border-radius: 6px;
+  resize: vertical;
+}
+.fv-pg-editor:focus-visible {
+  outline: 2px solid var(--fv-flow, #b18bf5);
+  outline-offset: 1px;
+}
+.fv-pg-feedback {
+  margin-top: 6px;
+  font-family: var(--mono-font, monospace);
+  font-size: 0.75em;
+  min-height: 1.2em;
+}
+.fv-pg-feedback.fv-pg-ok { color: var(--fv-post, #56d364); opacity: 0.8; }
+.fv-pg-feedback.fv-pg-err { color: var(--fv-hot, #ff7b72); }
+.fv-pg-notice {
+  padding: 14px 16px;
+  border: 1px dashed var(--fv-grid, rgba(128, 128, 128, 0.4));
+  border-radius: 8px;
+  font-size: 0.9em;
+  opacity: 0.85;
+}
+.fv-select {
+  font: inherit;
+  font-size: 0.85em;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--fv-grid, rgba(128, 128, 128, 0.35));
+  border-radius: 5px;
+  padding: 3px 6px;
+}
+.fv-pg-badge {
+  margin-top: 6px;
+}

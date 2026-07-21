@@ -1,0 +1,46 @@
+[package]
+name = "fugue-wasm"
+version = "0.1.0"
+edition = "2021"
+authors = ["Alex Nodeland"]
+description = "WebAssembly bindings for fugue: run real fugue models and inference in the browser"
+license = "MIT"
+repository = "https://github.com/alexnodeland/fugue"
+# Distributed via `wasm-pack build` output (npm-shaped pkg/), not crates.io;
+# same arrangement as fugue-evo's crates/fugue-evo-wasm.
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+fugue = { package = "fugue-ppl", path = "../.." }
+
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+
+# Better panic diagnostics at the JS boundary (logs Rust file/line to the
+# console instead of an opaque `unreachable` trap).
+console_error_panic_hook = "0.1"
+
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# fugue pulls in rand 0.8 -> getrandom 0.2, which needs the "js" feature to
+# compile for wasm32-unknown-unknown (browser entropy via crypto.getRandomValues).
+# All samplers here are explicitly seeded; this only satisfies the linker.
+getrandom = { version = "0.2", features = ["js"] }
+rand = "0.8"
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[package.metadata.wasm-pack.profile.release]
+# wasm-opt -Os keeps the shipped binary small without touching the root
+# crate's cargo release profile (which benches rely on).
+wasm-opt = ["-Os"]
+
+[package.metadata.wasm-pack.profile.release.wasm-bindgen]
+debug-js-glue = false
+demangle-name-section = true
+dwarf-debug-info = false

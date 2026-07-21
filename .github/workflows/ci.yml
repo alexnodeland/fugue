@@ -42,6 +42,40 @@ jobs:
       #   if: hashFiles('docs/**/*.md') != ''
       #   run: mdbook test docs
 
+  wasm:
+    name: WASM (fugue-wasm)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust (wasm32 target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+          key: wasm
+
+      - name: Check WASM crate compiles for wasm32
+        run: cargo check -p fugue-wasm --target wasm32-unknown-unknown
+
+      - name: Native tests (DSL + interpreter)
+        run: cargo test -p fugue-wasm
+
+      - name: WASM boundary tests (Node)
+        run: wasm-pack test --node crates/fugue-wasm
+
+      - name: Build WASM package
+        run: wasm-pack build crates/fugue-wasm --target web --release
+
   msrv:
     name: MSRV (1.87.0)
     runs-on: ubuntu-latest
@@ -72,6 +106,11 @@ jobs:
           # truncating the manifest at `[dev-dependencies]` here commits
           # nothing back and only scopes *this* check to what actually ships.
           sed -i '/^\[dev-dependencies\]/,$d' Cargo.toml
+          # Same reasoning for crates/fugue-wasm: it is an unpublished
+          # bindings crate (wasm-bindgen tooling has its own MSRV floor) and
+          # is never part of a downstream `cargo add fugue-ppl`. Drop it from
+          # the workspace so its dependency graph doesn't enter resolution.
+          sed -i 's#, "crates/fugue-wasm"##' Cargo.toml
           # The committed Cargo.lock may be a newer lock-file format than an
           # older cargo/rustc pair can parse; regenerating against the
           # trimmed manifest above is required (and sufficient -- verified
