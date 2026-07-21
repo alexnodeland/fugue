@@ -574,6 +574,14 @@
       ctx.drawImage(heatCanvas, pp.ix, pp.iy, pp.iw, pp.ih);
       FV.axes(ctx, { x: pp.ix, y: pp.iy, w: pp.iw, h: pp.ih, xscale: pp.sx, yscale: pp.sy, xlabel: "slope a", ylabel: "intercept b", theme: th });
 
+      // Everything walk-related clips to the panel: wasm chains start from
+      // real prior draws, which can lie outside the fixed (a, b) window, and
+      // an unclipped trail would draw over the frame on its way in.
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(pp.ix, pp.iy, pp.iw, pp.ih);
+      ctx.clip();
+
       // param trails (the "recording" so far) — ink, faded
       ctx.save();
       ctx.globalAlpha = 0.45;
@@ -605,6 +613,8 @@
         ctx.beginPath(); ctx.arc(cx, cy, 4.5, 0, 2 * Math.PI); ctx.stroke();
         ctx.restore();
       }
+
+      ctx.restore(); // end param-panel clip
 
       // ---- DATA panel: spaghetti + points ----
       FV.axes(ctx, { x: dp.ix, y: dp.iy, w: dp.iw, h: dp.ih, xscale: dp.sx, yscale: dp.sy, xlabel: "x", ylabel: "y", theme: th });
