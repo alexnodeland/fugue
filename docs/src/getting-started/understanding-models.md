@@ -18,6 +18,10 @@ In 8 minutes, you'll understand:
 **Time**: ~8 minutes
 ```
 
+```admonish tip title="Try it live"
+**[The Model Is a Score](../explorables/monad.md)** is a step-debugger for the Model monad: step through the real `SampleF64`/`ObserveF64`/`Pure` chain and swap handlers (PriorHandler vs. ReplayHandler) to see execution and specification separate before your eyes.
+```
+
 ## The Big Picture: Models vs Execution
 
 One of Fugue's key insights is **separating model specification from execution**:
@@ -43,6 +47,8 @@ graph LR
 - **Conditioning** (inference given observations)
 - **Replay** (MCMC proposals)
 - **Scoring** (compute probabilities)
+
+<div class="fugue-explorable fv-inline" data-viz="trace-ticker" data-caption="The Trace box above, alive: addr · value · log-weight rows fill in as a real 3-site model runs."></div>
 
 ## Addresses: The Key to Advanced Inference
 

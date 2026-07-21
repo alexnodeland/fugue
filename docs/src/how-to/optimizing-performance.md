@@ -73,6 +73,8 @@ $$S_{\text{max}} = \frac{1}{f_{\text{seq}} + \frac{1-f_{\text{seq}}}{p}}$$
 where $f_{\text{seq}}$ is the fraction of sequential computation and $p$ is the number of processors.
 ```
 
+<div class="fugue-explorable fv-inline" data-viz="rhat-spark" data-mode="good" data-caption="Well-tuned chains converge fast — R̂ falls toward 1.00 instead of burning your parallel budget on wasted exploration."></div>
+
 ```rust,ignore
 {{#include ../../../examples/optimizing_performance.rs:performance_monitoring}}
 ```

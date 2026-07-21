@@ -15,6 +15,10 @@ Fugue models form a **monad** $\mathcal{M}$ with:
 This categorical structure ensures that model composition is **mathematically sound** and **computationally tractable**.
 ```
 
+```admonish tip title="Try it live"
+The regression and hierarchical models built below are exactly what [Random Walks in Posterior Space](../explorables/metropolis.md) samples from — watch a chain explore a posterior like the ones you're about to compose.
+```
+
 ## Do-Notation with `prob!`
 
 The `prob!` macro implements **monadic do-notation** for probabilistic computations, providing a natural syntax for sequential dependence. Formally, it translates:
@@ -132,7 +136,7 @@ The computational challenge lies in maintaining **state consistency** while enab
 - Mixed probabilistic and deterministic updates
 
 ```admonish warning
-Sequential models can create large traces. Consider using memory-efficient handlers for long sequences.
+Sequential models can create large traces — every site's `Choice` lives in the returned `Trace`'s `BTreeMap` for the life of the run. For very long sequences, consider a custom `Handler` that summarizes or streams state instead of retaining every choice (see [Custom Handlers](./custom-handlers.md)).
 ```
 
 ## Composable Model Functions
@@ -206,6 +210,8 @@ $$\begin{align}
 \mu_j \mid \mu_{\text{pop}}, \sigma_{\text{group}} &\sim \mathcal{N}(\mu_{\text{pop}}, \sigma_{\text{group}}^2) \\
 y_{ij} \mid \mu_j, \sigma_j &\sim \mathcal{N}(\mu_j, \sigma_j^2)
 \end{align}$$
+
+<div class="fugue-explorable fv-inline" data-viz="shrinkage" data-caption="Partial pooling is this exact shrinkage: group means pulled toward the population mean as τ moves between no-pooling and complete-pooling."></div>
 
 ```rust,ignore
 {{#include ../../../examples/building_complex_models.rs:multilevel_hierarchy}}

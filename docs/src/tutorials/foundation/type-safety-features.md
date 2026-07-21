@@ -6,6 +6,12 @@
 
 A comprehensive exploration of Fugue's revolutionary type-safe distribution system and its practical implications for probabilistic programming. This tutorial demonstrates how dependent type theory principles eliminate runtime errors while preserving full statistical expressiveness, making probabilistic programs both safer and more performant.
 
+```admonish tip title="Try it live"
+[**A Field Guide to Distributions**](../../explorables/distributions.md) lets
+you page through every distribution Fugue ships and see each one's natural
+return type (`bool`, `u64`, `usize`, `f64`) next to its live pdf/pmf.
+```
+
 ```admonish info title="Learning Objectives"
 By the end of this tutorial, you will understand:
 - **Natural Return Types**: How distributions return mathematically appropriate types
@@ -71,9 +77,17 @@ This ensures that sampling operations return values in their natural mathematica
 | Mathematical Object | Support $\mathcal{S}$ | Fugue Type | Example |
 |-------------------|---------------------|------------|---------|
 | Bernoulli($p$) | $\{0, 1\}$ | `bool` | `true`/`false` |
-| Poisson($\lambda$) | $\mathbb{N}_0$ | `u64` | `0, 1, 2, ...` |
+| Poisson($\lambda$), Binomial($n,p$) | $\mathbb{N}_0$ | `u64` | `0, 1, 2, ...` |
 | Categorical($\mathbf{p}$) | $\{0, 1, ..., k-1\}$ | `usize` | Array indices |
-| Normal($\mu, \sigma^2$) | $\mathbb{R}$ | `f64` | Continuous values |
+| DiscreteUniform($a,b$) | $\{a, a{+}1, ..., b\} \subset \mathbb{Z}$ | `i64` | Signed integers |
+| Normal($\mu, \sigma^2$), Beta, Gamma, ... | $\mathbb{R}$ (or a subset) | `f64` | Continuous values |
+
+```admonish note title="17 distributions, 5 natural return types"
+Fugue ships 17 distributions total, every one returning its mathematically
+natural type — `bool`, `u64`, `usize`, `i64`, or `f64`. `DiscreteUniform` is
+the one distribution in the crate with `i64` support, since it's the only
+distribution whose domain can go negative.
+```
 
 ### Type-Theoretic Properties
 
@@ -109,11 +123,20 @@ Fugue eliminates the `f64`-everything problem by returning mathematically approp
 - **Benefit**: Direct arithmetic without casting or precision loss
 - **Performance**: Integer operations are faster than float conversions
 
+<div class="fugue-explorable fv-inline" data-viz="dist-strip" data-dist="poisson" data-params="4" data-caption="Poisson draws land as u64 counts — no cast, no round, no precision loss."></div>
+
 ### Categorical Distributions
 
 - **Returns**: `usize` - natural array indices  
 - **Benefit**: Guaranteed bounds safety for array indexing
 - **Performance**: No runtime bounds checking required
+
+### Signed Discrete Distributions (DiscreteUniform)
+
+- **Returns**: `i64` - natural signed integers
+- **Benefit**: Represents ranges that cross zero (e.g. `[-5, 5]`) without an
+  unsigned workaround
+- **Performance**: Direct integer arithmetic, same as the `u64` path
 
 ### Continuous Distributions
 

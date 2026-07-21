@@ -6,6 +6,12 @@
 
 A comprehensive guide to Bayesian mixture modeling using Fugue. This tutorial demonstrates how to build, analyze, and extend mixture models for complex data structures, showcasing advanced probabilistic programming techniques for unsupervised learning and heterogeneous populations.
 
+```admonish tip title="Try it live"
+[**Particles That Tell Stories**](../../explorables/smc.md) plays out the same latent-variable
+idea this page uses for cluster assignments — a population of weighted particles standing in
+for a distribution — with resampling and degeneracy made visible.
+```
+
 ```admonish info title="Learning Objectives"
 By the end of this tutorial, you will understand:
 - **Gaussian Mixture Models**: Foundation of mixture modeling for continuous data
@@ -78,6 +84,8 @@ This **data augmentation** approach enables efficient MCMC inference.
 ## Gaussian Mixture Models
 
 The most common mixture model uses Gaussian components, ideal for continuous data clustering.
+
+<div class="fugue-explorable fv-inline" data-viz="mixture-resp" data-caption="Points colored by real EM responsibility as two Gaussian components compete for the data."></div>
 
 ### Mathematical Model
 
@@ -262,8 +270,40 @@ $$\text{WAIC} = -2(\text{lppd} - p_{\text{WAIC}})$$
 
 Components with different regression relationships:
 
+```admonish note title="No Dirichlet distribution"
+Fugue's 17 distributions (`src/core/distribution/`) do not include `Dirichlet`. For symmetric
+mixing weights over more than two components, sample a **stick-breaking** decomposition
+instead: `n_components - 1` independent `Beta(1, α)` draws, each carving its share off what's
+left of the stick. This is the same construction the Dirichlet Process section below uses for
+infinitely many components, truncated to a fixed `n_components`.
+```
+
 ```rust,ignore
 # use fugue::*;
+
+// Stick-breaking weights from `n_components - 1` Beta(1, alpha) draws. Each
+// `v_k` claims a `v_k` fraction of whatever stick remains; the last component
+// gets what's left. This is a recursive `.bind()` chain, not a `for` loop,
+// because each draw depends on the previous step's *sampled* remaining length
+// — `prob!`'s `<-` and `plate!` only sequence independent per-index draws.
+fn stick_breaking_weights(
+    k: usize,
+    n_components: usize,
+    alpha: f64,
+    remaining: f64,
+    mut weights: Vec<f64>,
+) -> Model<Vec<f64>> {
+    if k == n_components - 1 {
+        weights.push(remaining); // last share: whatever is left of the stick
+        pure(weights)
+    } else {
+        sample(addr!("v", k), Beta::new(1.0, alpha).unwrap()).bind(move |v| {
+            let w_k = v * remaining;
+            weights.push(w_k);
+            stick_breaking_weights(k + 1, n_components, alpha, remaining - w_k, weights)
+        })
+    }
+}
 
 fn mixture_regression_model(
     x_data: Vec<f64>,
@@ -271,29 +311,33 @@ fn mixture_regression_model(
     n_components: usize
 ) -> Model<(Vec<f64>, Vec<(f64, f64)>, Vec<f64>)> {
     prob! {
-        // Mixing weights
-        let alpha_prior = vec![1.0; n_components];
-        let mixing_weights <- sample(addr!("pi"), Dirichlet::new(alpha_prior).unwrap());
+        // Mixing weights via stick-breaking (alpha = 1.0: uniform over the simplex)
+        let mixing_weights <- stick_breaking_weights(0, n_components, 1.0, 1.0, Vec::new());
 
-        // Component-specific regression parameters
-        let mut component_params = Vec::new();
-        for k in 0..n_components {
-            let intercept <- sample(addr!("intercept", k), fugue::Normal::new(0.0, 5.0).unwrap());
-            let slope <- sample(addr!("slope", k), fugue::Normal::new(0.0, 5.0).unwrap());
-            let sigma <- sample(addr!("sigma", k), Gamma::new(1.0, 1.0).unwrap());
-            component_params.push((intercept, slope, sigma));
-        }
+        // Component-specific regression parameters — independent per component,
+        // so a `plate!` (not a dependent recursion) is enough here.
+        let component_params <- plate!(k in 0..n_components => {
+            sample(addr!("intercept", k), fugue::Normal::new(0.0, 5.0).unwrap()).bind(move |intercept| {
+                sample(addr!("slope", k), fugue::Normal::new(0.0, 5.0).unwrap()).bind(move |slope| {
+                    sample(addr!("sigma", k), Gamma::new(1.0, 1.0).unwrap())
+                        .map(move |sigma| (intercept, slope, sigma))
+                })
+            })
+        });
 
         // Latent cluster assignments and observations
-        let mut cluster_assignments = Vec::new();
-        for i in 0..x_data.len() {
-            let z_i <- sample(addr!("z", i), Categorical::new(mixing_weights.clone()).unwrap());
-            cluster_assignments.push(z_i);
-
-            let (intercept, slope, sigma) = component_params[z_i];
-            let mean_y = intercept + slope * x_data[i];
-            let _obs <- observe(addr!("y", i), fugue::Normal::new(mean_y, sigma).unwrap(), y_data[i]);
-        }
+        let weights_for_obs = mixing_weights.clone();
+        let params_for_obs = component_params.clone();
+        let _observations <- plate!(i in 0..x_data.len() => {
+            let weights = weights_for_obs.clone();
+            let params = params_for_obs.clone();
+            let (x_i, y_i) = (x_data[i], y_data[i]);
+            sample(addr!("z", i), Categorical::new(weights).unwrap()).bind(move |z_i| {
+                let (intercept, slope, sigma) = params[z_i];
+                let mean_y = intercept + slope * x_i;
+                observe(addr!("y", i), fugue::Normal::new(mean_y, sigma).unwrap(), y_i)
+            })
+        });
 
         let regression_params: Vec<(f64, f64)> = component_params.iter()
             .map(|(int, slope, _)| (*int, *slope)).collect();
@@ -312,33 +356,41 @@ Use heavy-tailed distributions for outlier resistance:
 ```rust,ignore
 # use fugue::*;
 
+// Fugue provides `StudentT` directly — no Normal
+// approximation needed. `StudentT::new(df, loc, scale)`, see
+// `src/core/distribution.rs`.
 fn robust_mixture_model(
     data: Vec<f64>,
     n_components: usize
 ) -> Model<(Vec<f64>, Vec<(f64, f64, f64)>)> {
     prob! {
-        // Mixing weights
-        let alpha_prior = vec![1.0; n_components];
-        let mixing_weights <- sample(addr!("pi"), Dirichlet::new(alpha_prior).unwrap());
+        // Mixing weights via stick-breaking (see `stick_breaking_weights` above;
+        // Fugue has no `Dirichlet`)
+        let mixing_weights <- stick_breaking_weights(0, n_components, 1.0, 1.0, Vec::new());
 
-        // t-distribution components for robustness
-        let mut component_params = Vec::new();
-        for k in 0..n_components {
-            let mu <- sample(addr!("mu", k), fugue::Normal::new(0.0, 10.0).unwrap());
-            let sigma <- sample(addr!("sigma", k), Gamma::new(1.0, 1.0).unwrap());
-            let nu <- sample(addr!("nu", k), Gamma::new(2.0, 0.1).unwrap()); // Degrees of freedom
-            component_params.push((mu, sigma, nu));
-        }
+        // t-distribution components for robustness — independent per component
+        let component_params <- plate!(k in 0..n_components => {
+            sample(addr!("mu", k), fugue::Normal::new(0.0, 10.0).unwrap()).bind(move |mu| {
+                sample(addr!("sigma", k), Gamma::new(1.0, 1.0).unwrap()).bind(move |sigma| {
+                    // Degrees of freedom: lower = heavier tails, more outlier-resistant
+                    sample(addr!("nu", k), Gamma::new(2.0, 0.1).unwrap())
+                        .map(move |nu| (mu, sigma, nu))
+                })
+            })
+        });
 
-        // Observations with t-distribution likelihood
-        for i in 0..data.len() {
-            let z_i <- sample(addr!("z", i), Categorical::new(mixing_weights.clone()).unwrap());
-            let (mu, sigma, nu) = component_params[z_i];
-
-            // Use Normal approximation for t-distribution (simplified)
-            let effective_sigma = sigma * (nu / (nu - 2.0)).sqrt(); // t-distribution variance adjustment
-            let _obs <- observe(addr!("x", i), fugue::Normal::new(mu, effective_sigma).unwrap(), data[i]);
-        }
+        // Observations with a genuine t-distribution likelihood
+        let weights_for_obs = mixing_weights.clone();
+        let params_for_obs = component_params.clone();
+        let _observations <- plate!(i in 0..data.len() => {
+            let weights = weights_for_obs.clone();
+            let params = params_for_obs.clone();
+            let x_i = data[i];
+            sample(addr!("z", i), Categorical::new(weights).unwrap()).bind(move |z_i| {
+                let (mu, sigma, nu) = params[z_i];
+                observe(addr!("x", i), StudentT::new(nu, mu, sigma).unwrap(), x_i)
+            })
+        });
 
         pure((mixing_weights, component_params))
     }

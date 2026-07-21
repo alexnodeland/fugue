@@ -6,6 +6,12 @@
 
 A comprehensive guide to Bayesian linear regression using Fugue. This tutorial demonstrates how to build, analyze, and extend linear models for real-world data analysis, showcasing the power of probabilistic programming for uncertainty quantification and model comparison.
 
+```admonish tip title="Try it live"
+[**Random Walks in Posterior Space**](../../explorables/metropolis.md) lets you drive the
+Metropolis-Hastings sampler these regressions run on by hand — tune the proposal step size and
+watch split-R̂ and ESS respond before you read the numbers below.
+```
+
 ```admonish info title="Learning Objectives"
 By the end of this tutorial, you will understand:
 - **Bayesian Linear Regression**: Prior specification and posterior inference for regression parameters
@@ -20,6 +26,8 @@ By the end of this tutorial, you will understand:
 ## The Linear Regression Framework
 
 Linear regression is the cornerstone of statistical modeling. In the Bayesian framework, we treat regression parameters as random variables with prior distributions, allowing us to quantify uncertainty in our estimates and make probabilistic predictions.
+
+<div class="fugue-explorable fv-inline" data-viz="regression-mini" data-caption="Ambient posterior spaghetti under a slow MH chain — drag a point and the fits migrate."></div>
 
 ```mermaid
 graph TB
@@ -301,25 +309,22 @@ fn hierarchical_regression_model(
         let sigma_y <- sample(addr!("sigma_y"), Gamma::new(2.0, 0.5).unwrap());
         let sigma_group <- sample(addr!("sigma_group"), Gamma::new(2.0, 1.0).unwrap());
 
-        // Group-specific intercepts
-        let mut group_intercepts = Vec::new();
-        for g in 0..n_groups {
-            let intercept_g <- sample(
-                addr!("intercept", g),
-                Normal::new(0.0, sigma_group).unwrap()
-            );
-            group_intercepts.push(intercept_g);
-        }
+        // Group-specific intercepts. `prob!`'s `<-` bind only munches
+        // top-level `let` statements, so a per-group loop goes through
+        // `plate!` (one `sample` per address, sequenced via `traverse_vec`)
+        // rather than a raw `for`.
+        let group_intercepts <- plate!(g in 0..n_groups => {
+            sample(addr!("intercept", g), Normal::new(0.0, sigma_group).unwrap())
+        });
 
-        // Likelihood
-        for (i, ((x_i, y_i), group_i)) in x_data.iter()
-            .zip(y_data.iter())
-            .zip(group_ids.iter())
-            .enumerate()
-        {
-            let mean_i = group_intercepts[*group_i] + global_slope * x_i;
-            let _obs <- observe(addr!("y", i), Normal::new(mean_i, sigma_y).unwrap(), *y_i);
-        }
+        // Likelihood — same reasoning: one `observe` per row via `plate!`.
+        // Clone before the closure: `plate!`'s closure is `move`, and
+        // `group_intercepts` is still needed below in `pure(...)`.
+        let intercepts_for_obs = group_intercepts.clone();
+        let _observations <- plate!(i in 0..x_data.len() => {
+            let mean_i = intercepts_for_obs[group_ids[i]] + global_slope * x_data[i];
+            observe(addr!("y", i), Normal::new(mean_i, sigma_y).unwrap(), y_data[i])
+        });
 
         pure((global_slope, sigma_y, group_intercepts))
     )
@@ -343,33 +348,34 @@ fn spline_regression_model(
         // Smoothness prior
         let precision <- sample(addr!("precision"), Gamma::new(1.0, 0.1).unwrap());
 
-        // Spline coefficients with smoothness penalty
-        let mut coefficients = Vec::new();
-        for j in 0..n_basis {
-            let coef_j <- sample(
-                addr!("coef", j),
-                Normal::new(0.0, 1.0 / precision.sqrt()).unwrap()
-            );
-            coefficients.push(coef_j);
-        }
+        // Spline coefficients with smoothness penalty — one `sample` per
+        // basis function via `plate!` (a raw `for` can't wrap a `<-` bind).
+        let coefficients <- plate!(j in 0..n_basis => {
+            sample(addr!("coef", j), Normal::new(0.0, 1.0 / precision.sqrt()).unwrap())
+        });
 
         let sigma <- sample(addr!("sigma"), Gamma::new(2.0, 0.5).unwrap());
 
-        // Likelihood (basis functions would be computed here)
-        for (i, (x_i, y_i)) in x_data.iter().zip(y_data.iter()).enumerate() {
-            // Compute basis function values at x_i
+        // Likelihood (basis functions would be computed here); one `observe`
+        // per row via `plate!`. The inner loop over basis functions is plain
+        // Rust arithmetic, not a model bind, so it's fine inside the closure.
+        // Clone first: `plate!`'s closure is `move`, and `coefficients` is
+        // still needed below in `pure(coefficients)`.
+        let coefficients_for_obs = coefficients.clone();
+        let _observations <- plate!(i in 0..x_data.len() => {
+            let x_i = x_data[i];
             let mut mean_i = 0.0;
-            for (j, coef_j) in coefficients.iter().enumerate() {
+            for (j, coef_j) in coefficients_for_obs.iter().enumerate() {
                 // basis_function(x_i, j, knots) would compute B-spline basis
                 let basis_val = if j < knots.len() {
                     (x_i - knots[j]).max(0.0).powi(3)
                 } else {
-                    x_i.powi(j - knots.len())
+                    x_i.powi((j - knots.len()) as i32)
                 };
                 mean_i += coef_j * basis_val;
             }
-            let _obs <- observe(addr!("y", i), Normal::new(mean_i, sigma).unwrap(), *y_i);
-        }
+            observe(addr!("y", i), Normal::new(mean_i, sigma).unwrap(), y_data[i])
+        });
 
         pure(coefficients)
     )
@@ -389,11 +395,10 @@ For large datasets:
 
 ### Model Diagnostics
 
-Essential checks for regression models:
+Essential checks for regression models: residual analysis, and — since MCMC samples are
+correlated draws, not i.i.d. ones — convergence diagnostics on the chain itself.
 
 ```rust,ignore
-# use fugue::inference::diagnostics::*;
-
 fn regression_diagnostics(samples: &[(f64, f64, f64)], x_data: &[f64], y_data: &[f64]) {
     // Residual analysis
     let predictions: Vec<f64> = samples.iter().map(|(intercept, slope, _)| {
@@ -413,6 +418,33 @@ fn regression_diagnostics(samples: &[(f64, f64, f64)], x_data: &[f64], y_data: &
     });
 }
 ```
+
+````admonish note title="Convergence diagnostics"
+Residuals check the *model*; `fugue::inference::diagnostics` checks the *sampler*. Run at
+least two chains and pass their traces to [`r_hat_f64`](https://docs.rs/fugue-ppl/latest/fugue/inference/diagnostics/fn.r_hat_f64.html)
+(split-R̂, Vehtari et al. 2021 — splits each chain in half so it also catches within-chain
+drift that the classic 1992 statistic misses) and
+[`summarize_f64_parameter`](https://docs.rs/fugue-ppl/latest/fugue/inference/diagnostics/fn.summarize_f64_parameter.html)
+(mean, std, quantiles, split-R̂, and multi-chain effective sample size together):
+
+```rust,ignore
+# use fugue::*; // r_hat_f64 and summarize_f64_parameter are re-exported at the crate root
+# use rand::{SeedableRng, rngs::StdRng};
+let chains: Vec<Vec<Trace>> = (0..4).map(|seed| {
+    let mut rng = StdRng::seed_from_u64(seed);
+    let model_fn = move || basic_linear_regression_model(x_data.clone(), y_data.clone());
+    adaptive_mcmc_chain(&mut rng, model_fn, 1000, 200)
+        .into_iter()
+        .map(|(_, trace)| trace)
+        .collect()
+}).collect();
+
+let r_hat = r_hat_f64(&chains, &addr!("slope"));
+let summary = summarize_f64_parameter(&chains, &addr!("slope"));
+assert!(r_hat < 1.1, "chains haven't mixed: split-R̂ = {r_hat:.3}");
+println!("slope: {:.3} ± {:.3}, ESS = {:.0}", summary.mean, summary.std, summary.ess);
+```
+````
 
 ### Cross-Validation
 
@@ -490,15 +522,16 @@ let gdp_model = prob!(
 
     let sigma <- sample(addr!("sigma"), Gamma::new(2.0, 0.5).unwrap());
 
-    // Quarterly GDP growth predictions
-    for (i, (inflation, unemployment, interest_rate, gdp_growth)) in economic_data.iter().enumerate() {
+    // Quarterly GDP growth predictions — one `observe` per quarter via `plate!`
+    let _observations <- plate!(i in 0..economic_data.len() => {
+        let (inflation, unemployment, interest_rate, gdp_growth) = economic_data[i];
         let expected_growth = intercept +
                             beta_inflation * inflation +
                             beta_unemployment * unemployment +
                             beta_interest_rate * interest_rate;
 
-        let _obs <- observe(addr!("gdp", i), Normal::new(expected_growth, sigma).unwrap(), *gdp_growth);
-    }
+        observe(addr!("gdp", i), Normal::new(expected_growth, sigma).unwrap(), gdp_growth)
+    });
 
     pure((intercept, beta_inflation, beta_unemployment, beta_interest_rate))
 );
@@ -517,13 +550,15 @@ let dose_response_model = prob!(
 
     let sigma <- sample(addr!("sigma"), Gamma::new(2.0, 0.5).unwrap());
 
-    for (i, (log_dose, response)) in dose_response_data.iter().enumerate() {
+    // One `observe` per dose via `plate!`
+    let _observations <- plate!(i in 0..dose_response_data.len() => {
+        let (log_dose, response) = dose_response_data[i];
         // Hill equation: E = baseline + (max_effect - baseline) / (1 + 10^(hill_slope * (log_ic50 - log_dose)))
         let hill_term = hill_slope * (log_ic50 - log_dose);
         let expected_response = baseline + (max_effect - baseline) / (1.0 + (10.0_f64).powf(hill_term));
 
-        let _obs <- observe(addr!("response", i), Normal::new(expected_response, sigma).unwrap(), *response);
-    }
+        observe(addr!("response", i), Normal::new(expected_response, sigma).unwrap(), response)
+    });
 
     pure((log_ic50, hill_slope, baseline, max_effect))
 );

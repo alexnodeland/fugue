@@ -10,11 +10,15 @@ text-direction = "ltr"
 create-missing = true
 
 [output.html]
-default-theme = "dark"
+# "navy" is mdbook's dark theme; the previous value "dark" is not a real
+# mdbook theme name, so light-OS visitors silently got the light CSS fallback
+# while the html class still claimed dark.
+default-theme = "navy"
+preferred-dark-theme = "navy"
 git-repository-url = "https://github.com/alexnodeland/fugue"
 site-url = "/fugue/"
-additional-css = ["./mdbook-admonish.css"]
-additional-js = ["mermaid.min.js", "mermaid-init.js"]
+additional-css = ["./mdbook-admonish.css", "fugue-viz.css"]
+additional-js = ["mermaid.min.js", "mermaid-init.js", "fugue-viz.js", "viz/anatomy.js", "viz/monad.js", "viz/metropolis.js", "viz/hmc.js", "viz/smc.js", "viz/distributions.js", "viz/inline.js", "viz/minis.js"]
 
 [output.html.fold]
 enable = true

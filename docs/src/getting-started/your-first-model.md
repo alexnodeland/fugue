@@ -18,6 +18,10 @@ In 5 minutes, you'll understand:
 **Time**: ~5 minutes
 ```
 
+```admonish tip title="Try it live"
+Before diving into code, play with **[Anatomy of a Probabilistic Program](../explorables/anatomy.md)** — a touchable coin-flip Bayes loop that shows prior, data, and posterior updating in real time.
+```
+
 ## Step 1: The Simplest Model
 
 Let's start with the simplest possible model - one that always returns the same value:
@@ -98,6 +102,8 @@ Understanding the Output
 - **`trace`** - Records what happened during execution (choices made, probabilities)
 - **`log_probability`** - How likely this particular execution was
 ```
+
+<div class="fugue-explorable fv-inline" data-viz="trace-ticker" data-caption="A trace is a recording: every address, value, and log-weight, typed in as the model runs."></div>
 
 ## Step 4: Type Safety in Action
 

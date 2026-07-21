@@ -6,6 +6,12 @@
 
 A deep exploration of Fugue's runtime system and trace manipulation capabilities. This tutorial demonstrates how traces enable sophisticated probabilistic programming techniques including replay, scoring, custom inference, and debugging. Learn how Fugue's execution history recording makes advanced inference algorithms possible while maintaining full type safety.
 
+```admonish tip title="Try it live"
+[**The Model Is a Score**](../../explorables/monad.md) is a step-debugger for
+the exact CPS chain / handler / trace loop this tutorial describes — step
+through a real model node by node and watch the trace fill in.
+```
+
 ```admonish info title="Learning Objectives"
 By the end of this tutorial, you will understand:
 - **Trace System Architecture**: How execution history is recorded and structured  
@@ -19,6 +25,8 @@ By the end of this tutorial, you will understand:
 ## The Execution History Problem
 
 Traditional programming languages execute once and discard their execution history. In probabilistic programming, we need to **record, manipulate, and reason about random choices** to enable sophisticated inference algorithms. Fugue's trace system solves this fundamental challenge.
+
+<div class="fugue-explorable fv-inline" data-viz="trace-ticker" data-caption="A trace is a recording — addr · value · log w typing themselves in, live."></div>
 
 ```mermaid
 graph TD
@@ -165,6 +173,7 @@ graph TD
     B --> D["on_sample_bool()"] 
     B --> E["on_sample_u64()"]
     B --> F["on_sample_usize()"]
+    B --> M["on_sample_i64()"]
     B --> G["on_observe_*()"]
     B --> H["on_factor()"]
     
@@ -172,6 +181,7 @@ graph TD
     D --> I
     E --> I
     F --> I
+    M --> I
     G --> I
     H --> I
     
@@ -191,6 +201,15 @@ graph TD
 | `ScoreGivenTrace` | Compute log-probability | Importance sampling |
 | `SafeReplayHandler` | Error-resilient replay | Production MCMC |
 | `SafeScoreGivenTrace` | Safe scoring | Robust inference |
+
+```admonish tip title="Handler trait: on_sample_i64 / on_observe_i64"
+`Handler` has default implementations for `on_sample_i64` and `on_observe_i64`
+(the signed-discrete path used by distributions like `DiscreteUniform`) that
+**panic** unless overridden — this keeps handlers written before the i64 path
+existed compiling unchanged. Every built-in handler above overrides both; a
+custom handler (like `DebugHandler` below) only needs to as well if its model
+samples or observes an i64-typed site.
+```
 
 ## Trace Scoring
 
@@ -267,6 +286,19 @@ Where:
 - $\hat{V}$: Estimated marginal posterior variance
 - $W$: Within-chain variance
 
+```admonish note title="Split-R-hat (Vehtari et al. 2021)"
+`r_hat_f64` (and the `r_hat` field on `ParameterSummary`) now compute
+**split**-R-hat: each chain is first split in half and the halves are treated
+as separate chains before the formula above is applied. Splitting catches
+within-chain non-stationarity (e.g. a slow drift) that the classic 1992
+statistic misses when every chain drifts the same way — that classic
+statistic is still available as `classic_r_hat_f64` if you specifically want
+it. `effective_sample_size` and the `ess` field are likewise routed through a
+single, dimensionless (variance-normalized) autocorrelation estimator; the
+`ess` reported by `summarize_f64_parameter` pools all chains together
+(Vehtari et al.'s multi-chain ESS), not just the first one.
+```
+
 **Interpretation**:
 
 - $\hat{R} \approx 1.0$: Good convergence
@@ -278,8 +310,8 @@ Where:
 For each parameter, compute:
 
 - **Mean and Standard Deviation**: Central tendency and spread
-- **Quantiles**: 5%, 25%, 50%, 75%, 95% for uncertainty intervals
-- **Effective Sample Size**: Accounting for autocorrelation
+- **Quantiles**: 2.5%, 25%, 50%, 75%, 97.5% for uncertainty intervals
+- **Effective Sample Size**: The multi-chain, autocorrelation-adjusted estimate described above
 
 ## Advanced Debugging
 
@@ -368,7 +400,7 @@ impl<R: rand::Rng> CustomMCMC<R> {
         
         // Score proposal
         let (_, scored_trace) = runtime::handler::run(
-            ScoreGivenTrace::new(proposal_trace),
+            ScoreGivenTrace { base: proposal_trace, trace: Trace::default() },
             model_fn()
         );
         

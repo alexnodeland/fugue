@@ -10,6 +10,8 @@ $$\text{ELBO}(\phi) = \mathbb{E}_{z \sim q_\phi}\left[\log p(x, z) - \log q_\phi
 
 This trades exactness for speed: a converged VI fit is one optimization run, not thousands of MCMC iterations — at the cost of being only as good as the chosen family $q_\phi$ lets it be.
 
+<div class="fugue-explorable fv-inline" data-viz="elbo-climb" data-caption="The green guide climbs the ELBO toward the target density below — this is optimization, not sampling."></div>
+
 ## The model
 
 ```rust,ignore

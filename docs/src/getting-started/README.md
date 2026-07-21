@@ -78,7 +78,7 @@ Separate model specification from execution strategy through handlers.
 
 ### 📊 **Diagnostics Built In**
 
-R-hat, effective sample size, memory-optimized traces, and a structured error taxonomy.
+Split-R̂, autocorrelation-based and multi-chain effective sample size, and a structured error taxonomy.
 
 ## Architecture Overview
 
@@ -94,11 +94,12 @@ graph TB
     subgraph "Core System"
         C[Distributions & Types]
         H[Handlers & Interpreters]
-        T[Traces & Memory]
+        T[Traces]
     end
 
     subgraph "Inference Engines"
         MCMC[MCMC Sampling]
+        HMC[Hamiltonian Monte Carlo]
         SMC[Particle Filtering]
         VI[Variational Inference]
         ABC[ABC Methods]
@@ -109,6 +110,7 @@ graph TB
     C --> H
     H --> T
     T --> MCMC
+    T --> HMC
     T --> SMC
     T --> VI
     T --> ABC
@@ -124,6 +126,8 @@ graph TB
 4. **Quantify** uncertainty in your conclusions
 
 **Fugue** makes this safe, fast, and composable in Rust.
+
+<div class="fugue-explorable fv-inline" data-viz="posterior-morph" data-kind="beta" data-caption="Step 3, Infer, in miniature: each yellow observation sharpens the green posterior around the blue prior."></div>
 
 ## Next Steps
 

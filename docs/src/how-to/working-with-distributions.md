@@ -10,6 +10,12 @@ Fugue's type-safe distribution system represents a principled approach to probab
 Fugue's distribution system is grounded in **dependent type theory**, where each distribution $D$ is parameterized not just by its parameters $\theta$, but by its **support type** $\mathcal{S}$. This ensures that $\text{sample}(D_\theta) : \mathcal{S}$ and eliminates the need for runtime type checking or unsafe casting operations.
 ```
 
+Fugue ships **17 distributions** in `fugue::core::distribution`: 12 continuous (`Normal`, `Uniform`, `LogNormal`, `Exponential`, `Beta`, `Gamma`, `StudentT`, `Cauchy`, `Laplace`, `Weibull`, `ChiSquared`, `InverseGamma`) and 5 discrete/other (`Bernoulli`, `Categorical`, `Binomial`, `Poisson`, `DiscreteUniform`).
+
+```admonish tip title="Try it live"
+Play with every one of these — parameter sliders, a live sampling histogram racing the true curve — in the [Field Guide to Distributions](../explorables/distributions.md) explorable.
+```
+
 ## Type Safety in Practice
 
 Traditional probabilistic programming libraries return `f64` for everything, leading to casting overhead and runtime errors. Fugue distributions return their natural types:
@@ -25,6 +31,8 @@ No casting, no comparisons with floating-point values—just natural boolean log
 Continuous distributions in Fugue model phenomena over uncountable domains $\mathcal{S} \subseteq \mathbb{R}^n$. The probability density function $f_X(x)$ satisfies the normalization condition:
 
 $$\int_{\mathcal{S}} f_X(x) \, dx = 1$$
+
+<div class="fugue-explorable fv-inline" data-viz="dist-strip" data-dist="normal" data-params="0,1" data-caption="A continuous density integrating to 1, live: samples rain into a histogram racing the blue curve."></div>
 
 For computational stability, Fugue operates in **log-space** by default, computing $\log f_X(x)$ to avoid numerical underflow:
 
@@ -51,6 +59,8 @@ Always work with log-probabilities for numerical stability. Only convert to regu
 Discrete distributions operate over countable support sets $\mathcal{S} \subseteq \mathbb{Z}^n$ or finite sets. The probability mass function satisfies:
 
 $$\sum_{x \in \mathcal{S}} P(X = x) = 1$$
+
+<div class="fugue-explorable fv-inline" data-viz="dist-strip" data-dist="poisson" data-params="4" data-caption="Poisson's pmf sums to 1 over the non-negative integers, exactly as the equation above requires."></div>
 
 Fugue enforces this constraint at construction time and leverages natural integer types to eliminate precision loss from floating-point representation:
 
@@ -98,6 +108,8 @@ graph TD
 - **Normal Distribution**: $\mathcal{N}(\mu, \sigma^2)$ requires $\sigma > 0$
 - **Beta Distribution**: $\text{Beta}(\alpha, \beta)$ requires $\alpha, \beta > 0$
 - **Categorical Distribution**: $\sum_i p_i = 1$ and $p_i \geq 0 \, \forall i$
+
+<div class="fugue-explorable fv-inline" data-viz="dist-strip" data-dist="beta" data-params="2,5" data-caption="Beta(2, 5) — the α, β > 0 constraint above is exactly what keeps this curve a valid density."></div>
 
 ```rust,ignore
 {{#include ../../../examples/working_with_distributions.rs:parameter_validation}}

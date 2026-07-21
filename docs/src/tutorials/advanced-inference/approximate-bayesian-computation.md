@@ -6,6 +6,8 @@
 
 Approximate Bayesian Computation (ABC) is what you reach for when the likelihood $p(y \mid \theta)$ is intractable (or you simply don't want to write it down), but you *can* simulate synthetic data from the model. ABC replaces likelihood evaluation with simulate-and-compare: draw $\theta$ from the prior, simulate $y_{\text{sim}}$, and accept $\theta$ if $y_{\text{sim}}$ is close enough to the real observation $y_{\text{obs}}$.
 
+<div class="fugue-explorable fv-inline" data-viz="abc-eps" data-caption="Accepted draws (green) fall inside the shrinking ε band; rejects (coral) fall outside — the accepted cloud is the posterior."></div>
+
 ```admonish warning title="This example's likelihood isn't actually intractable"
 To keep this tutorial directly comparable to the [SMC](./sequential-monte-carlo.md) and [VI](./variational-inference.md) pages, it reuses the conjugate Normal-Normal model — whose likelihood is very much tractable. ABC's real value is for simulators where no such closed form (or even numerical likelihood) exists at all; using a tractable model here is purely so we have a known target to check the approximation against.
 ```

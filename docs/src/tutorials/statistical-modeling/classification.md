@@ -51,6 +51,8 @@ Traditional machine learning gives you point predictions. Bayesian classificatio
 
 The foundation of Bayesian classification is **logistic regression**, which models the probability of binary outcomes.
 
+<div class="fugue-explorable fv-inline" data-viz="logistic-boundary" data-caption="Posterior draws of the decision boundary wobble as the sampler explores — that spread is your uncertainty."></div>
+
 ### Mathematical Model
 
 For binary classification, we model:
@@ -219,6 +221,23 @@ For ordered categorical outcomes (e.g., ratings, severity levels):
 ```rust,ignore
 # use fugue::*;
 
+// Ordered cutpoints via a monotone stick of `Gamma`-distributed increments.
+// This is a recursive `.bind()` chain rather than a `for` loop: each cutpoint
+// depends on the previous one's *sampled value*, and `prob!`'s `<-` syntax
+// (like `plate!`) only sequences INDEPENDENT per-index draws — it can't
+// thread a running value through a loop body.
+fn sample_cutpoints(k: usize, n_categories: usize, cutpoints: Vec<f64>) -> Model<Vec<f64>> {
+    if k >= n_categories - 1 {
+        pure(cutpoints)
+    } else {
+        sample(addr!("delta", k), Gamma::new(1.0, 1.0).unwrap()).bind(move |delta| {
+            let mut next = cutpoints.clone();
+            next.push(cutpoints[k - 1] + delta);
+            sample_cutpoints(k + 1, n_categories, next)
+        })
+    }
+}
+
 // Ordinal logistic regression with proportional odds
 fn ordinal_classification_model(
     features: Vec<Vec<f64>>,
@@ -230,22 +249,21 @@ fn ordinal_classification_model(
         let coefficients <- plate!(i in 0..features[0].len() => {
             sample(addr!("beta", i), fugue::Normal::new(0.0, 2.0).unwrap())
         });
-        
-        // Cutpoints (must be ordered)
-        let mut cutpoints = Vec::new();
+
+        // Cutpoints (must be ordered): first cutpoint free, the rest built by
+        // adding positive increments so they stay strictly increasing.
         let first_cut <- sample(addr!("cutpoint", 0), fugue::Normal::new(0.0, 5.0).unwrap());
-        cutpoints.push(first_cut);
-        
-        for k in 1..(n_categories-1) {
-            let delta <- sample(addr!("delta", k), Gamma::new(1.0, 1.0).unwrap());
-            cutpoints.push(cutpoints[k-1] + delta);
-        }
-        
-        // Likelihood using cumulative logits
+        let cutpoints <- sample_cutpoints(1, n_categories, vec![first_cut]);
+
+        // Likelihood using cumulative logits. Clone first: `plate!`'s closure
+        // is `move`, and both `coefficients` and `cutpoints` are still needed
+        // below in `pure((coefficients, cutpoints))`.
+        let coefficients_for_obs = coefficients.clone();
+        let cutpoints_for_obs = cutpoints.clone();
         let _observations <- plate!(obs_idx in features.iter().zip(outcomes.iter()).enumerate() => {
             let (idx, (x_vec, &y)) = obs_idx;
             let mut linear_pred = 0.0;
-            for (coef, &x_val) in coefficients.iter().zip(x_vec.iter()) {
+            for (coef, &x_val) in coefficients_for_obs.iter().zip(x_vec.iter()) {
                 linear_pred += coef * x_val;
             }
             
@@ -253,12 +271,12 @@ fn ordinal_classification_model(
             let mut probs = Vec::new();
             for k in 0..n_categories {
                 let prob = if k == 0 {
-                    1.0 / (1.0 + (-(cutpoints[0] - linear_pred)).exp())
+                    1.0 / (1.0 + (-(cutpoints_for_obs[0] - linear_pred)).exp())
                 } else if k == n_categories - 1 {
-                    1.0 - (1.0 / (1.0 + (-(cutpoints[k-1] - linear_pred)).exp()))
+                    1.0 - (1.0 / (1.0 + (-(cutpoints_for_obs[k-1] - linear_pred)).exp()))
                 } else {
-                    let p_le_k = 1.0 / (1.0 + (-(cutpoints[k] - linear_pred)).exp());
-                    let p_le_k_minus_1 = 1.0 / (1.0 + (-(cutpoints[k-1] - linear_pred)).exp());
+                    let p_le_k = 1.0 / (1.0 + (-(cutpoints_for_obs[k] - linear_pred)).exp());
+                    let p_le_k_minus_1 = 1.0 / (1.0 + (-(cutpoints_for_obs[k-1] - linear_pred)).exp());
                     p_le_k - p_le_k_minus_1
                 };
                 probs.push(prob.max(1e-10).min(1.0 - 1e-10));
@@ -293,24 +311,32 @@ fn robust_classification_model(
         // Degrees of freedom for robustness
         let nu <- sample(addr!("nu"), Gamma::new(2.0, 0.1).unwrap());
         
-        // Robust likelihood using latent variables
+        // Robust likelihood using latent variables. The closure body below is
+        // NOT itself expanded by `prob!`, so its own `sample`/`observe` bind
+        // (`z`, then the observation) must be chained explicitly through
+        // another `prob! { ... }` (or `.bind()`) rather than a second `<-`.
+        // Clone first: `plate!`'s closure is `move`, and `coefficients` is
+        // still needed below in `pure((coefficients, nu))`.
+        let coefficients_for_obs = coefficients.clone();
         let _observations <- plate!(obs_idx in features.iter().zip(labels.iter()).enumerate() => {
             let (idx, (x_vec, &y)) = obs_idx;
-            
+
             // Linear predictor
             let mut eta = 0.0;
-            for (coef, &x_val) in coefficients.iter().zip(x_vec.iter()) {
+            for (coef, &x_val) in coefficients_for_obs.iter().zip(x_vec.iter()) {
                 eta += coef * x_val;
             }
-            
-            // Latent variable for robustness
-            let z <- sample(addr!("z", idx), fugue::Normal::new(eta, 1.0).unwrap());
-            
-            // Robust transformation
-            let p = 1.0 / (1.0 + (-z).exp());
-            let bounded_p = p.max(1e-10).min(1.0 - 1e-10);
-            
-            observe(addr!("y", idx), Bernoulli::new(bounded_p).unwrap(), y)
+
+            prob! {
+                // Latent variable for robustness
+                let z <- sample(addr!("z", idx), fugue::Normal::new(eta, 1.0).unwrap());
+
+                // Robust transformation
+                let p = 1.0 / (1.0 + (-z).exp());
+                let bounded_p = p.max(1e-10).min(1.0 - 1e-10);
+
+                observe(addr!("y", idx), Bernoulli::new(bounded_p).unwrap(), y)
+            }
         });
         
         pure((coefficients, nu))
