@@ -36,7 +36,10 @@ fn mh_recovers_conjugate_posterior_in_wasm() {
     // Determinism: same seed, same draws.
     let mut mh2 = WasmMh::new(COIN, COIN_DATA, 3, 11).unwrap();
     mh2.step(100);
-    assert_eq!(mh.values_since("p", 0, 0)[..100], mh2.values_since("p", 0, 0)[..]);
+    assert_eq!(
+        mh.values_since("p", 0, 0)[..100],
+        mh2.values_since("p", 0, 0)[..]
+    );
 }
 
 #[wasm_bindgen_test]
@@ -76,7 +79,10 @@ fn particle_filter_tracks_and_reports() {
     }
     assert_eq!(pf.t(), 10);
     assert!(pf.log_evidence().is_finite());
-    assert!(resampled_any, "expected at least one resampling in 10 steps");
+    assert!(
+        resampled_any,
+        "expected at least one resampling in 10 steps"
+    );
 }
 
 #[wasm_bindgen_test]

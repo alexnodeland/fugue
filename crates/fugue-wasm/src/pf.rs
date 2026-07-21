@@ -81,8 +81,8 @@ impl WasmParticleFilter {
     ) -> Result<WasmParticleFilter, JsValue> {
         let n = n.clamp(2, 5000);
         let mut rng = StdRng::seed_from_u64(seed);
-        let prior = Normal::new(0.0, prior_sig.max(1e-6))
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let prior =
+            Normal::new(0.0, prior_sig.max(1e-6)).map_err(|e| JsValue::from_str(&e.to_string()))?;
         let particles = (0..n)
             .map(|_| make_particle(prior.sample(&mut rng), 0.0))
             .collect();

@@ -74,11 +74,7 @@ impl WasmHmc {
     /// The continuous site addresses the chain moves (coordinate order of
     /// every position/trajectory array).
     pub fn site_names(&self) -> Vec<String> {
-        self.session
-            .sites()
-            .iter()
-            .map(|a| a.to_string())
-            .collect()
+        self.session.sites().iter().map(|a| a.to_string()).collect()
     }
 
     /// One transition WITH trajectory recording; returns a JSON string of

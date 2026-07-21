@@ -842,14 +842,18 @@ fn build_dist(spec: &DistSpec, env: &Env) -> Result<BuiltDist, String> {
         "Bernoulli" => d(Bernoulli::new(a[0]).map(|x| BuiltDist::Bool(Box::new(x)))),
         "Binomial" => {
             if a[0] < 0.0 || a[0].fract() != 0.0 {
-                return Err(format!("Binomial n must be a non-negative integer, got {}", a[0]));
+                return Err(format!(
+                    "Binomial n must be a non-negative integer, got {}",
+                    a[0]
+                ));
             }
             d(Binomial::new(a[0] as u64, a[1]).map(|x| BuiltDist::U64(Box::new(x))))
         }
         "Poisson" => d(Poisson::new(a[0]).map(|x| BuiltDist::U64(Box::new(x)))),
         "Categorical" => d(Categorical::new(a.clone()).map(|x| BuiltDist::Usize(Box::new(x)))),
-        "DiscreteUniform" => d(DiscreteUniform::new(a[0] as i64, a[1] as i64)
-            .map(|x| BuiltDist::I64(Box::new(x)))),
+        "DiscreteUniform" => {
+            d(DiscreteUniform::new(a[0] as i64, a[1] as i64).map(|x| BuiltDist::I64(Box::new(x))))
+        }
         other => Err(format!("unknown distribution `{other}`")),
     }
 }
@@ -962,14 +966,13 @@ fn interp(env: Env, cont: Cont) -> Model<f64> {
                             env.warn(format!("sample `{name}`: {msg}"));
                             let k = next(after);
                             let a2 = a.clone();
-                            sample(a2, Normal::new(0.0, 1.0).unwrap())
-                                .bind(move |v| {
-                                    factor(f64::NEG_INFINITY).bind(move |_| {
-                                        let mut env2 = env;
-                                        env2.vars.insert(name, Value::F64(v));
-                                        interp(env2, k)
-                                    })
+                            sample(a2, Normal::new(0.0, 1.0).unwrap()).bind(move |v| {
+                                factor(f64::NEG_INFINITY).bind(move |_| {
+                                    let mut env2 = env;
+                                    env2.vars.insert(name, Value::F64(v));
+                                    interp(env2, k)
                                 })
+                            })
                         }
                     }
                 }
@@ -990,7 +993,9 @@ fn interp(env: Env, cont: Cont) -> Model<f64> {
                                     DynDist(d),
                                     v.as_index().unwrap_or(0).max(0) as usize,
                                 ),
-                                BuiltDist::I64(d) => observe(a, DynDist(d), v.as_index().unwrap_or(0)),
+                                BuiltDist::I64(d) => {
+                                    observe(a, DynDist(d), v.as_index().unwrap_or(0))
+                                }
                             };
                             m.bind(move |_| interp(env, k))
                         }
@@ -1063,8 +1068,8 @@ impl CompiledModel {
         let mut vars = HashMap::new();
         let trimmed = data_json.trim();
         if !trimmed.is_empty() && trimmed != "null" {
-            let parsed: serde_json::Value =
-                serde_json::from_str(trimmed).map_err(|e| format!("data is not valid JSON: {e}"))?;
+            let parsed: serde_json::Value = serde_json::from_str(trimmed)
+                .map_err(|e| format!("data is not valid JSON: {e}"))?;
             let to_arr = |v: &serde_json::Value| -> Result<Vec<f64>, String> {
                 v.as_array()
                     .ok_or_else(|| "data arrays must be JSON arrays".to_string())?
@@ -1238,13 +1243,14 @@ mod tests {
     #[test]
     fn static_errors_are_caught() {
         assert!(CompiledModel::compile("pure(nope)", "").is_err());
-        assert!(CompiledModel::compile("let x <- sample(addr!(\"x\"), Nope(1.0)); pure(x)", "")
-            .is_err());
-        assert!(CompiledModel::compile(
-            "let x <- sample(addr!(\"x\"), Normal(1.0)); pure(x)",
-            ""
-        )
-        .is_err());
+        assert!(
+            CompiledModel::compile("let x <- sample(addr!(\"x\"), Nope(1.0)); pure(x)", "")
+                .is_err()
+        );
+        assert!(
+            CompiledModel::compile("let x <- sample(addr!(\"x\"), Normal(1.0)); pure(x)", "")
+                .is_err()
+        );
         assert!(CompiledModel::compile("let x = 1.0;", "").is_err()); // no pure
         let err = match CompiledModel::compile(
             "let x <- sample(addr!(\"x\") Normal(0,1)); pure(x)",
