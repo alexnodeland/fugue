@@ -119,10 +119,58 @@ html.dark {
   opacity: 0.9;
 }
 
+/* Custom slider: hairline track, solid accent thumb with a hover halo.
+   (Firefox additionally fills the elapsed side via ::-moz-range-progress.) */
 .fv-range {
+  -webkit-appearance: none;
+  appearance: none;
   width: 140px;
-  accent-color: var(--fv-prior);
+  height: 26px;
+  background: transparent;
   cursor: pointer;
+}
+
+.fv-range::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fv-ink) 18%, transparent);
+}
+.fv-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5.5px;
+  border: none;
+  border-radius: 50%;
+  background: var(--fv-prior);
+  transition: box-shadow 120ms ease;
+}
+.fv-range:hover::-webkit-slider-thumb,
+.fv-range:active::-webkit-slider-thumb {
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--fv-prior) 22%, transparent);
+}
+
+.fv-range::-moz-range-track {
+  height: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fv-ink) 18%, transparent);
+}
+.fv-range::-moz-range-progress {
+  height: 3px;
+  border-radius: 999px;
+  background: var(--fv-prior);
+}
+.fv-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 50%;
+  background: var(--fv-prior);
+  transition: box-shadow 120ms ease;
+}
+.fv-range:hover::-moz-range-thumb,
+.fv-range:active::-moz-range-thumb {
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--fv-prior) 22%, transparent);
 }
 
 .fv-range:focus-visible {
@@ -138,9 +186,35 @@ html.dark {
   cursor: pointer;
 }
 
+/* Custom checkbox: hairline rounded square, filled posterior-green when
+   checked (ink check on the light green of dark themes, white check on the
+   dark green of light themes). */
 .fv-checkbox {
-  accent-color: var(--fv-post);
+  -webkit-appearance: none;
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  border: 1px solid color-mix(in srgb, var(--fv-ink) 35%, transparent);
+  border-radius: 4px;
+  background: transparent;
   cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.fv-checkbox:hover {
+  border-color: var(--fv-post);
+}
+.fv-checkbox:checked {
+  background: var(--fv-post) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 8'%3E%3Cpath d='M1 4l2.8 2.8L9 1.4' fill='none' stroke='%23081018' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 9px no-repeat;
+  border-color: var(--fv-post);
+}
+html.light .fv-checkbox:checked,
+html.rust .fv-checkbox:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 8'%3E%3Cpath d='M1 4l2.8 2.8L9 1.4' fill='none' stroke='%23ffffff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+.fv-checkbox:focus-visible {
+  outline: 2px solid var(--fv-post);
+  outline-offset: 2px;
 }
 
 /* Buttons */
@@ -160,10 +234,12 @@ html.dark {
   cursor: pointer;
   font-family: inherit;
   line-height: 1.4;
+  transition: border-color 120ms ease, background-color 120ms ease;
 }
 
 .fv-btn:hover {
   border-color: var(--fv-prior);
+  background-color: color-mix(in srgb, var(--fv-prior) 10%, transparent);
 }
 
 .fv-btn:focus-visible {
@@ -348,6 +424,18 @@ html.rust .fv-btn.fv-primary {
     height: 30px;
     width: 160px;
   }
+  .fv-range::-webkit-slider-thumb {
+    width: 18px;
+    height: 18px;
+    margin-top: -7.5px;
+  }
+  .fv-range::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+  }
+  .fv-select {
+    padding: 7px 30px 7px 12px;
+  }
   .fv-btn {
     padding: 8px 14px;
     font-size: 0.8rem;
@@ -442,14 +530,30 @@ html.rust .fv-btn.fv-primary {
   font-size: 0.9em;
   opacity: 0.85;
 }
+/* Custom select: no native chrome, mid-gray chevron (legible both themes). */
 .fv-select {
+  -webkit-appearance: none;
+  appearance: none;
   font: inherit;
   font-size: 0.85em;
   color: var(--fg);
-  background: var(--bg);
-  border: 1px solid var(--fv-grid, rgba(128, 128, 128, 0.35));
-  border-radius: 5px;
-  padding: 3px 6px;
+  background-color: var(--bg);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238b96ad' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  background-size: 10px 6px;
+  border: 1px solid color-mix(in srgb, var(--fv-ink) 25%, transparent);
+  border-radius: 7px;
+  padding: 4px 28px 4px 10px;
+  cursor: pointer;
+  transition: border-color 120ms ease;
+}
+.fv-select:hover {
+  border-color: var(--fv-prior);
+}
+.fv-select:focus-visible {
+  outline: 2px solid var(--fv-prior);
+  outline-offset: 2px;
 }
 .fv-pg-badge {
   margin-top: 6px;

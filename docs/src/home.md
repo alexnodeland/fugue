@@ -1,53 +1,34 @@
-<div align="center">
+<div class="fugue-hero">
 
-# 🎼 Fugue User Guide
+<div class="fugue-mark"><span>ƒ</span></div>
 
-<img src="fugue-logo.svg" alt="Fugue Logo" width="200" height="200">
+# Fugue
 
-**A type-safe, monadic probabilistic programming library for Rust — pre-1.0 and actively developed**
+<p class="fugue-hero-tag">A type-safe, monadic probabilistic programming library for Rust — compose models in direct style, listen backwards with state-of-the-art inference.</p>
 
-*Write elegant probabilistic programs by composing `Model` values in direct style; execute them with pluggable interpreters and state-of-the-art inference algorithms.*
-
-[![Rust](https://img.shields.io/badge/rust-1.87%2B-blue.svg)](https://www.rust-lang.org)
-[![Crates.io](https://img.shields.io/crates/v/fugue-ppl.svg)](https://crates.io/crates/fugue-ppl)
-[![Dev Docs](https://docs.rs/fugue-ppl/badge.svg)](https://docs.rs/fugue-ppl)
-[![User Docs](https://img.shields.io/badge/guides-fugue.run-blue)](https://fugue.run)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![CI](https://github.com/alexnodeland/fugue/actions/workflows/ci.yml/badge.svg)](https://github.com/alexnodeland/fugue/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/alexnodeland/fugue/branch/main/graph/badge.svg?token=BDJ5OB6GOB)](https://codecov.io/gh/alexnodeland/fugue)
-[![Downloads](https://img.shields.io/crates/d/fugue-ppl?logo=rust)](https://crates.io/crates/fugue-ppl)
-[![Zotero](https://img.shields.io/badge/Zotero-Fugue-red?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org/groups/6138134/fugue/library)
-[![Discord](https://img.shields.io/discord/1412802057437712426?logo=discord&label=discord)](https://discord.gg/QAcF7Nwr)
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/alexnodeland/fugue)
-
-**Supported Rust:** 1.87+ • **Platforms:** Linux / macOS / Windows • **Crate:** [`fugue-ppl` on crates.io](https://crates.io/crates/fugue-ppl)
+<div class="fugue-badge-row">
+<a href="https://crates.io/crates/fugue-ppl"><img src="https://img.shields.io/crates/v/fugue-ppl.svg" alt="Crates.io"></a>
+<a href="https://docs.rs/fugue-ppl"><img src="https://docs.rs/fugue-ppl/badge.svg" alt="Dev Docs"></a>
+<a href="https://github.com/alexnodeland/fugue/actions/workflows/ci.yml"><img src="https://github.com/alexnodeland/fugue/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+<a href="https://codecov.io/gh/alexnodeland/fugue"><img src="https://codecov.io/gh/alexnodeland/fugue/branch/main/graph/badge.svg?token=BDJ5OB6GOB" alt="codecov"></a>
+<a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+<a href="https://discord.gg/QAcF7Nwr"><img src="https://img.shields.io/discord/1412802057437712426?logo=discord&label=discord" alt="Discord"></a>
+</div>
 
 </div>
 
----
-
 <div class="fugue-explorable fv-inline" data-viz="dist-strip" data-dist="normal" data-params="0,1" data-caption="This page is alive — most figures in these docs run live. Touch them."></div>
 
-```admonish tip title="🎮 New: Fugue Explorables"
-Learn Fugue by **playing**, not just reading. The [Explorables](./explorables/README.md) are interactive, touchable diagrams — drag a slider and watch a posterior re-form, step an interpreter one effect at a time, roll a Hamiltonian trajectory across a density. In the tradition of Bret Victor's explorable explanations and 3Blue1Brown.
+<div class="fugue-cards">
+<a class="fugue-card" href="./getting-started/index.html"><span class="fugue-card-title">Getting Started</span><span class="fugue-card-desc">Install Fugue and run your first probabilistic model in minutes.</span></a>
+<a class="fugue-card" href="./explorables/index.html"><span class="fugue-card-title">Explorables</span><span class="fugue-card-desc">Interactive essays — drag a prior and watch the posterior re-form, roll HMC across a landscape.</span></a>
+<a class="fugue-card" href="./playground.html"><span class="fugue-card-title">Playground</span><span class="fugue-card-desc">Write <code>prob!</code> models in the browser and run real inference, compiled to WASM.</span></a>
+<a class="fugue-card" href="./how-to/index.html"><span class="fugue-card-title">How-To Guides</span><span class="fugue-card-desc">Task-focused recipes: custom distributions, diagnostics, working with traces.</span></a>
+<a class="fugue-card" href="./tutorials/index.html"><span class="fugue-card-title">Tutorials</span><span class="fugue-card-desc">From the coin-flip Bayes loop to advanced inference, in depth.</span></a>
+<a class="fugue-card" href="./api-reference.html"><span class="fugue-card-title">API Reference</span><span class="fugue-card-desc">The complete <code>fugue-ppl</code> API, documented on docs.rs.</span></a>
+</div>
 
-- [**Anatomy of a Probabilistic Program**](./explorables/anatomy.md) — the coin-flip Bayes loop, fully touchable
-- [**The Model Is a Score**](./explorables/monad.md) — a step-debugger for the `Model` monad
-- [**Random Walks in Posterior Space**](./explorables/metropolis.md) — Metropolis–Hastings by hand
-- [**Rolling, Not Guessing: HMC**](./explorables/hmc.md) — Hamiltonian Monte Carlo, rolling a ball across the posterior landscape
-- [**Particles That Tell Stories**](./explorables/smc.md) — sequential Monte Carlo, resampling made visible
-- [**A Field Guide to Distributions**](./explorables/distributions.md) — all 17 distributions, sampled live
-```
-
-```admonish info title="👋 Welcome"
-
-Check out these resources to get started:
-
-- [Getting Started](./getting-started/README.md) - Installation and first steps
-- [How-To Guides](./how-to/README.md) - Practical guides for common tasks
-- [Tutorials](./tutorials/README.md) - In-depth learning materials
-- [API Reference](./api-reference.md) - Complete API documentation
-```
+<a class="fugue-eco" href="https://evo.fugue.run"><span class="fugue-card-title">Fugue Evo <span class="fugue-brand-arrow">↗</span></span><span class="fugue-card-desc">Evolution as Bayesian inference — CMA-ES, NSGA-II, island models, and estimation-of-distribution algorithms on the same foundations, with its own live playground.</span></a>
 
 ## About Fugue
 
@@ -70,11 +51,9 @@ Fugue is 0.2.x: pre-1.0, actively developed, with no SemVer stability guarantee 
 fugue-ppl = "0.2.0"
 ```
 
----
-
-```admonish note title="🔍 More Resources"
+## More Resources
 
 - [GitHub Repository](https://github.com/alexnodeland/fugue)
-- [API Reference](https://docs.rs/fugue-ppl)
-- [Zotero](https://www.zotero.org/groups/6138134/fugue/library)
-```
+- [API Reference on docs.rs](https://docs.rs/fugue-ppl)
+- [Zotero Library](https://www.zotero.org/groups/6138134/fugue/library)
+- [Ask DeepWiki](https://deepwiki.com/alexnodeland/fugue)

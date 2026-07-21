@@ -328,8 +328,7 @@
     selWrap.appendChild(selLab);
     var sel = document.createElement("select");
     sel.className = "fv-select";
-    sel.style.cssText = "font-size:0.8rem;color:var(--fv-ink,inherit);background:var(--fv-panel,transparent);" +
-      "border:1px solid var(--fv-grid,#8884);border-radius:6px;padding:4px 6px;margin-top:4px;";
+    sel.style.marginTop = "4px";
     for (var gi = 0; gi < GROUPS.length; gi++) {
       var og = document.createElement("optgroup");
       og.label = GROUPS[gi].label;
