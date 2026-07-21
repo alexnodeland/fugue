@@ -1,3 +1,9 @@
+[workspace]
+members = [".", "crates/fugue-wasm"]
+# docs/ holds a standalone helper package (fugue-docs-tests) with its own
+# manifest; keep it out of the workspace so its resolution stays independent.
+exclude = ["docs"]
+
 [package]
 name = "fugue-ppl"
 version = "0.2.0"
