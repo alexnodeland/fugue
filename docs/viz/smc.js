@@ -7,6 +7,14 @@
   if (!window.FugueViz) return;
 
   window.FugueViz.register("smc", function (root, FV) {
+    // Wait for the wasm loader's verdict (module namespace or null), then
+    // init once. When the loader is absent we behave exactly as before.
+    (FV.wasmReady || Promise.resolve(null)).then(function (W) {
+      realInit(root, FV, W);
+    });
+  });
+
+  function realInit(root, FV, W) {
     // ---- fixed model constants --------------------------------------------
     var T = 22; // number of time steps (observations)
     var SIG_STEP = 0.7; // latent random-walk step std (x_t | x_{t-1})
@@ -22,6 +30,49 @@
     };
 
     var colors = FV.theme().colors;
+
+    // ---- wasm backend (real fugue crate) -----------------------------------
+    // When W is non-null the particle-filter math runs in the real crate via
+    // WasmParticleFilter; the JS below stays as the mirrored fallback. The
+    // wasm filter draws its own RNG stream, so a given seed yields a
+    // different — but equally reproducible — particle history than JS mode.
+    var pf = null; // live WasmParticleFilter, or null (JS math)
+    var wasmFailed = false; // construction/step threw once -> permanent JS fallback
+    root.setAttribute("data-fugue-backend", W ? "wasm" : "js");
+
+    function wasmBail(e) {
+      if (!wasmFailed) {
+        try {
+          console.warn(
+            "[fugue-viz] smc: wasm particle filter failed (" +
+              (e && e.message ? e.message : e) +
+              ") — using mirrored JS math"
+          );
+        } catch (e2) { /* readout only */ }
+      }
+      wasmFailed = true;
+      pf = null;
+      root.setAttribute("data-fugue-backend", "js");
+    }
+
+    function buildFilter() {
+      pf = null;
+      if (!W || wasmFailed) return;
+      try {
+        // essThreshold 0 disables resampling (ESS/N is never < 0), which
+        // mirrors the JS path's "adaptive off = never resample" toggle.
+        pf = new W.WasmParticleFilter(
+          st.N,
+          PRIOR_SIG,
+          SIG_STEP,
+          st.sigObs,
+          st.adaptive ? 0.5 : 0,
+          BigInt(st.seed)
+        );
+      } catch (e) {
+        wasmBail(e);
+      }
+    }
 
     // ---- DOM shell ---------------------------------------------------------
     var controls = document.createElement("div");
@@ -105,6 +156,10 @@
         s.push(FV.randn(rand) * PRIOR_SIG); // x_0 prior cloud
         w.push(uni);
       }
+      // wasm mode: fresh filter from the same seed (loop restarts replay).
+      // The JS prior cloud above still paints the at-rest frame; the first
+      // wasm step supplies its own prior via r.prev.
+      buildFilter();
       curT = -1;
       est = [];
       sd = [];
@@ -148,8 +203,101 @@
     }
 
     // -----------------------------------------------------------------------
+    // One time-step through the REAL fugue crate (WasmParticleFilter.step).
+    // Maps the returned JSON onto the exact anim.stp shape the JS path
+    // builds; render-only extras (chosen, jitter) are recomputed here just
+    // as the JS path does.
+    function beginStepWasm() {
+      var toT = curT + 1;
+      if (toT >= T) return false;
+      var n = st.N,
+        i;
+      var hasProp = curT >= 0;
+
+      var r = JSON.parse(pf.step(ys[toT]));
+      var newS = r.propagated;
+      var newW = r.weights; // already normalized
+
+      // posterior mean / weighted variance — same estimator as the JS path
+      var mean = 0;
+      for (i = 0; i < n; i++) mean += newW[i] * newS[i];
+      var vari = 0;
+      for (i = 0; i < n; i++) {
+        var dm = newS[i] - mean;
+        vari += newW[i] * dm * dm;
+      }
+
+      var doResample = !!r.resampled;
+      var parents = doResample ? r.parents : null,
+        postS = doResample ? r.posterior : newS,
+        postW = newW,
+        jitter = null,
+        chosen = null;
+      if (doResample) {
+        chosen = {};
+        for (i = 0; i < n; i++) chosen[parents[i]] = (chosen[parents[i]] || 0) + 1;
+        // deterministic small vertical fan so duplicated children separate
+        jitter = new Array(n);
+        var seen = {};
+        var span = 0.28 * (yDomain[1] - yDomain[0]) * 0.06;
+        for (i = 0; i < n; i++) {
+          var p = parents[i];
+          var k = seen[p] || 0;
+          var cnt = chosen[p];
+          jitter[i] = cnt > 1 ? (k - (cnt - 1) / 2) * span : 0;
+          seen[p] = k + 1;
+        }
+        postW = new Array(n);
+        for (i = 0; i < n; i++) postW[i] = 1 / n;
+      }
+
+      anim.stp = {
+        fromT: curT,
+        toT: toT,
+        hasProp: hasProp,
+        prevS: r.prev,
+        newS: newS,
+        newW: newW,
+        doResample: doResample,
+        parents: parents,
+        chosen: chosen,
+        jitter: jitter,
+        postS: postS,
+        postW: postW,
+        essN: r.ess_frac, // already ESS/N, matching the JS field's units
+        logZ: r.log_z_inc, // incremental log-evidence; finalize accumulates
+        estMean: mean,
+        estVar: vari,
+      };
+      anim.phases = [];
+      anim.durs = [];
+      if (hasProp) {
+        anim.phases.push("propagate");
+        anim.durs.push(DUR.propagate);
+      }
+      anim.phases.push("weight");
+      anim.durs.push(DUR.weight);
+      if (doResample) {
+        anim.phases.push("resample");
+        anim.durs.push(DUR.resample);
+      }
+      anim.time = 0;
+      anim.active = true;
+      return true;
+    }
+
+    // -----------------------------------------------------------------------
     // Compute one full time-step of the filter (pure-ish; commits on finalize).
     function beginStep() {
+      if (pf) {
+        try {
+          return beginStepWasm();
+        } catch (e) {
+          // fall back permanently; s/w are maintained identically in both
+          // modes, so the mirrored JS math continues from the same state.
+          wasmBail(e);
+        }
+      }
       var toT = curT + 1;
       if (toT >= T) return false;
       var n = st.N,
@@ -627,7 +775,18 @@
       },
       onInput: function (v) {
         st.sigObs = v;
-        reset();
+        if (pf) {
+          // wasm mode: retune the live filter mid-run (no reset needed);
+          // any rebuild via reset() picks up st.sigObs anyway.
+          try {
+            pf.set_sig_obs(v);
+          } catch (e) {
+            wasmBail(e);
+            reset();
+          }
+        } else {
+          reset();
+        }
       },
     });
 
@@ -730,5 +889,5 @@
     // autoplay the filter (onPlay is a no-op under reduced motion, which keeps the
     // pre-warmed frame and leaves stepping to the Step button).
     onPlay();
-  });
+  }
 })();

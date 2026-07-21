@@ -10,6 +10,24 @@ For the initial 0.1.0 release notes, see `.github/CHANGELOG.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **Incremental HMC session API**: `HmcSession` exposes the HMC kernel one
+  transition at a time (`step`, `step_recorded` with full leapfrog
+  trajectories and per-point Hamiltonians, `set_step_size`/`set_n_leapfrog`
+  live retuning). `hmc_chain` is now a thin wrapper over it; same-seed
+  equivalence is pinned by test. New public types: `HmcSession`,
+  `HmcStepInfo`, `LeapfrogPoint`.
+- **`crates/fugue-wasm`** (unpublished workspace member): wasm-bindgen
+  bindings that run the real crate in the browser — a `prob!`-subset DSL
+  interpreted into actual `Model` combinators, incremental multi-chain MH
+  (`WasmMh`), incremental HMC (`WasmHmc`), a bootstrap particle filter over
+  fugue's SMC primitives (`WasmParticleFilter`), one-shot adaptive tempered
+  SMC with log-evidence (`wasm_smc_run`), and log-joint grid evaluation for
+  posterior heatmaps (`log_joint_grid`). Powers the docs' Playground page
+  and the WASM-backed explorable widgets (mirrored-JS math remains only as
+  a fallback).
+
 ## [0.2.0] - 2026-07-13
 
 The entries below summarize a full-crate audit remediation (170 findings,

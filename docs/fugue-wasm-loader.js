@@ -35,7 +35,7 @@
   FV.wasm = null;
   FV.wasmReady = dynImport(root + 'pkg/fugue_wasm.js')
     .then(function (mod) {
-      return mod.default(root + 'pkg/fugue_wasm_bg.wasm').then(function () {
+      return mod.default({ module_or_path: root + 'pkg/fugue_wasm_bg.wasm' }).then(function () {
         FV.wasm = mod;
         try {
           console.log(

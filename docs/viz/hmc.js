@@ -43,6 +43,13 @@
   var DIV_THRESHOLD = 1000;    // |dH| beyond this => divergent (Stan's default)
   var SPAG_CAP = 60;           // spaghetti lines retained per sampler
 
+  // The SAME regression, written in fugue's model DSL. When the wasm package
+  // is present (FV.wasmReady resolves to the module), the REAL crate compiles
+  // this source and runs the HMC transitions, the MH ghost, the ESS readout
+  // and the heatmap grid. The JS math below stays as the mirrored fallback
+  // core (and as the node-gate export surface).
+  var SRC = 'let a <- sample(addr!("a"), Normal(0.0, 2.5));\nlet b <- sample(addr!("b"), Normal(0.0, 2.5));\nfor i in 0..x.len() {\n    observe(addr!("y", i), Normal(a * x[i] + b, 0.8), y[i]);\n}\npure(a)';
+
   function makeSeedData(seed) {
     var rng = FugueViz.rng(seed >>> 0);
     var xs = new Array(N), ys = new Array(N);
@@ -141,7 +148,15 @@
   // ------------------------------------------------------------------
   if (typeof FugueViz === "undefined" || !FugueViz.register) return;
 
+  // Register a thin async shell: wait for the wasm loader's verdict (module
+  // namespace or null), then init once with the backend fixed for the session.
   FugueViz.register("hmc", function (root, FV) {
+    (FV.wasmReady || Promise.resolve(null)).then(function (W) {
+      realInit(root, FV, W);
+    });
+  });
+
+  function realInit(root, FV, W) {
     var seed0 = parseInt(root.getAttribute("data-seed"), 10);
     if (!isFinite(seed0)) seed0 = DATA_SEED;
 
@@ -161,18 +176,66 @@
 
     function pushCapped(arr, v, cap) { arr.push(v); if (arr.length > cap) arr.shift(); }
 
+    // ---- wasm backend (the real fugue crate) ----
+    // Chosen ONCE at init: W non-null => trajectories, the MH ghost, ESS and
+    // the heatmap grid all come from the crate. Any construction or stepping
+    // failure flips the whole widget back to the mirrored JS core.
+    var useWasm = !!W;
+    var wasmHmc = null, wasmMh = null, warnedFallback = false;
+
+    function dataJson() { return JSON.stringify({ x: data.xs, y: data.ys }); }
+
+    function fallbackToJs(err) {
+      useWasm = false;
+      wasmHmc = null; wasmMh = null;
+      if (!warnedFallback) {
+        warnedFallback = true;
+        try {
+          console.warn("[fugue-viz] hmc: wasm core unavailable, using the mirrored JS math", err);
+        } catch (e2) { /* readout only */ }
+      }
+      root.setAttribute("data-fugue-backend", "js");
+    }
+
+    // (Re)build the wasm chain + MH ghost. Called at init, on reseed, and when
+    // a data point is dragged (the dataset is baked into the wasm objects at
+    // construction). nWarmup = 0: the sliders own the kernel tuning; the chain
+    // starts at a prior draw for the given seed.
+    function rebuildWasm() {
+      if (!useWasm) return;
+      try {
+        if (wasmHmc && wasmHmc.free) wasmHmc.free();
+        if (wasmMh && wasmMh.free) wasmMh.free();
+      } catch (eFree) { /* best-effort release */ }
+      wasmHmc = null; wasmMh = null;
+      try {
+        var dj = dataJson();
+        wasmHmc = new W.WasmHmc(SRC, dj, BigInt(curSeed), 0, L | 0, eps);
+        wasmMh = new W.WasmMh(SRC, dj, 1, BigInt(curSeed));
+        wasmMh.set_fixed_scale(MH_SIGMA);
+        var cva = wasmMh.current_values("a"), cvb = wasmMh.current_values("b");
+        if (cva.length && cvb.length) mhQ = [cva[0], cvb[0]];
+      } catch (e) {
+        fallbackToJs(e);
+      }
+    }
+
+    root.setAttribute("data-fugue-backend", useWasm ? "wasm" : "js");
+
     function resetChain() {
       rng = FV.rng(curSeed);
       q = [0.0, 0.0];
+      mhQ = [0.0, 0.0];
+      if (useWasm) rebuildWasm();   // fresh seed + data; sets mhQ from the ghost
       logpCur = logpost(q[0], q[1], data);
-      trail = [[q[0], q[1]]];
-      samplesA = [q[0]];
       spag = [];
       accepts = 0; total = 0; divergences = 0; lastDH = 0;
-      mhQ = [0.0, 0.0]; mhLogp = logpost(mhQ[0], mhQ[1], data);
+      mhLogp = logpost(mhQ[0], mhQ[1], data);
       mhTrail = [[mhQ[0], mhQ[1]]]; mhSpag = []; mhAccepts = 0; mhTotal = 0;
       active = null; reveal = 0; applied = false; flash = null; rejLine = null;
-      nextTransition();
+      nextTransition();             // wasm: also syncs q to the trajectory start
+      trail = [[q[0], q[1]]];
+      samplesA = [q[0]];
     }
 
     // The data changed (a point was dragged): recompute densities but keep the
@@ -180,12 +243,58 @@
     function onDataChanged() {
       logpCur = logpost(q[0], q[1], data);
       mhLogp = logpost(mhQ[0], mhQ[1], data);
+      // The dataset is baked into the wasm objects at construction, so a drag
+      // must rebuild them (the wasm chain restarts at its seeded prior draw).
+      if (useWasm) rebuildWasm();
       nextTransition();
       bgDirty = true;
     }
 
-    // Simulate a full leapfrog trajectory from the current q using the analytic force.
+    // One HMC transition. wasm mode: the REAL crate runs it (step_recorded)
+    // and we adapt its JSON into the same `active` object the renderer
+    // animates. JS mode: simulate the leapfrog here with the analytic force.
     function nextTransition() {
+      if (useWasm) {
+        try { wasmNextTransition(); return; } catch (e) { fallbackToJs(e); }
+      }
+      jsNextTransition();
+    }
+
+    function wasmNextTransition() {
+      var rec = JSON.parse(wasmHmc.step_recorded());
+      var qs = rec.trajectory_q, Hs = rec.trajectory_h;
+      if (!qs || !qs.length || !Hs || !Hs.length) throw new Error("empty wasm trajectory");
+      // The wasm chain is the source of truth: its trajectory starts at ITS
+      // current position (a retune may have discarded an in-flight transition
+      // that still advanced it), so re-sync q to the recorded start point.
+      q = [qs[0][0], qs[0][1]];
+      var H0 = Hs[0];
+      var last = Hs.length - 1;
+      var dH = Hs[last] - H0;
+      // Apply the widget's own divergence flag (|dH| > DIV_THRESHOLD) on top
+      // of the crate's, so the visual language matches the JS core exactly.
+      var divergent = !!rec.divergent;
+      for (var i = 0; i <= last && !divergent; i++) {
+        if (!isFinite(Hs[i]) || Math.abs(Hs[i] - H0) > DIV_THRESHOLD) divergent = true;
+      }
+      var accept = !!rec.accepted && !divergent;
+      var e0 = rec.step_size > 0 ? rec.step_size : eps;
+      // step_recorded does not return the momentum draw; recover the arrow's
+      // direction from the first leapfrog displacement (q1 - q0 ≈ eps * p0).
+      var p0 = qs.length > 1
+        ? [(qs[1][0] - qs[0][0]) / e0, (qs[1][1] - qs[0][1]) / e0]
+        : [0, 0];
+      var qEnd = qs[qs.length - 1];
+      active = {
+        qs: qs, Hs: Hs, H0: H0, p0: p0, start: [qs[0][0], qs[0][1]],
+        divergent: divergent, dH: dH, accept: accept,
+        qEnd: [qEnd[0], qEnd[1]], logpEnd: logpost(qEnd[0], qEnd[1], data)
+      };
+      reveal = 0; applied = false;
+    }
+
+    // Simulate a full leapfrog trajectory from the current q using the analytic force.
+    function jsNextTransition() {
       var p = [nrm(), nrm()]; // identity mass => N(0,1) momentum
       var U0 = -logpost(q[0], q[1], data);
       var H0 = U0 + 0.5 * (p[0] * p[0] + p[1] * p[1]);
@@ -238,7 +347,24 @@
     }
 
     // Random-walk Metropolis: one proposal per leapfrog step => matched budget.
+    // wasm mode drives the crate's real MH kernel (1 chain, fixed scale); its
+    // single-site kernel needs 2 transitions to approximate 1 joint (a,b) move.
     function mhAdvance(steps) {
+      if (useWasm && wasmMh) {
+        try {
+          for (var j = 0; j < steps; j++) {
+            mhAccepts += wasmMh.step(2);
+            mhTotal += 2;
+            var ga = wasmMh.current_values("a")[0];
+            var gb = wasmMh.current_values("b")[0];
+            mhQ = [ga, gb];
+            pushCapped(mhTrail, [ga, gb], 1200);
+          }
+          mhLogp = logpost(mhQ[0], mhQ[1], data);
+          pushCapped(mhSpag, [mhQ[0], mhQ[1]], SPAG_CAP);
+          return;
+        } catch (e) { fallbackToJs(e); }
+      }
       for (var i = 0; i < steps; i++) {
         var na = mhQ[0] + nrm() * MH_SIGMA;
         var nb = mhQ[1] + nrm() * MH_SIGMA;
@@ -312,7 +438,30 @@
       octx.setTransform(dpr, 0, 0, dpr, 0, 0);
       var xsL = FV.scale(DOM_A, [0, view.w]);
       var ysL = FV.scale(DOM_B, [view.h, 0]);
-      FV.heatmap(octx, function (a, b) { return Math.exp(logpost(a, b, data)); },
+      var field = null;
+      if (useWasm) {
+        // Sample the REAL log-joint on exactly the grid FV.heatmap will ask
+        // for (pixel blocks of `step`, sampled at block centers) and serve
+        // lookups from it — same resolution, and heatmap's max-normalization
+        // keeps the coloring identical to the JS path.
+        try {
+          var step = 4;
+          var cols = Math.ceil(view.w / step), rows = Math.ceil(view.h / step);
+          var aV = new Float64Array(cols), bV = new Float64Array(rows), gi;
+          for (gi = 0; gi < cols; gi++) aV[gi] = xsL.invert(gi * step + step / 2);
+          for (gi = 0; gi < rows; gi++) bV[gi] = ysL.invert(gi * step + step / 2);
+          var grid = W.log_joint_grid(SRC, dataJson(), "a", "b", aV, bV, BigInt(curSeed));
+          field = function (a, b) {
+            var ix = Math.round((xsL(a) - step / 2) / step);
+            var iy = Math.round((ysL(b) - step / 2) / step);
+            if (ix < 0) ix = 0; else if (ix >= cols) ix = cols - 1;
+            if (iy < 0) iy = 0; else if (iy >= rows) iy = rows - 1;
+            return Math.exp(grid[iy * cols + ix]);
+          };
+        } catch (e) { fallbackToJs(e); }
+      }
+      if (!field) field = function (a, b) { return Math.exp(logpost(a, b, data)); };
+      FV.heatmap(octx, field,
         { xscale: xsL, yscale: ysL, w: view.w, h: view.h, colormap: "post", step: 4 });
       view.bg = off;
     }
@@ -571,7 +720,18 @@
       roAccept.set((ar * 100).toFixed(0) + "%", ar >= 0.6 ? "post" : "hot");
       var adH = Math.abs(lastDH);
       roDH.set((lastDH >= 0 ? "+" : "") + lastDH.toFixed(2), adH > 1 ? "hot" : "flow");
-      roEss.set(samplesA.length > 3 ? essSingle(samplesA).toFixed(1) : "—", "post");
+      var essTxt = null;
+      if (samplesA.length > 3) {
+        if (useWasm && wasmHmc) {
+          // fugue's own single-chain ESS over the slope history
+          try {
+            var ev = wasmHmc.ess("a");
+            if (isFinite(ev) && ev > 0) essTxt = ev.toFixed(1);
+          } catch (eE) { /* fall through to the JS estimator */ }
+        }
+        if (essTxt === null) essTxt = essSingle(samplesA).toFixed(1);
+      }
+      roEss.set(essTxt !== null ? essTxt : "—", "post");
       roDiv.set(String(divergences), divergences > 0 ? "hot" : null);
     }
 
@@ -581,12 +741,24 @@
     FV.slider(controls, {
       label: "STEP ε", min: 0.01, max: 0.4, step: 0.005, value: eps,
       fmt: function (v) { return v.toFixed(3); },
-      onInput: function (v) { eps = v; nextTransition(); scheduleDraw(); }
+      onInput: function (v) {
+        eps = v;
+        if (useWasm && wasmHmc) {
+          try { wasmHmc.set_step_size(eps); } catch (e) { fallbackToJs(e); }
+        }
+        nextTransition(); scheduleDraw();
+      }
     });
     FV.slider(controls, {
       label: "LEAPFROG L", min: 1, max: 50, step: 1, value: L,
       fmt: function (v) { return String(v); },
-      onInput: function (v) { L = v | 0; nextTransition(); scheduleDraw(); }
+      onInput: function (v) {
+        L = v | 0;
+        if (useWasm && wasmHmc) {
+          try { wasmHmc.set_n_leapfrog(L); } catch (e) { fallbackToJs(e); }
+        }
+        nextTransition(); scheduleDraw();
+      }
     });
     FV.slider(controls, {
       label: "SPEED", min: 2, max: 40, step: 1, value: speed,
@@ -722,5 +894,5 @@
     // The loop autoplays itself (FV.loop {autoplay:true}); reflect it on the button
     // unless reduced motion (where play() was a no-op and Play is disabled below).
     if (loopApi.playing) playBtn.textContent = "Pause";
-  });
+  }
 })();

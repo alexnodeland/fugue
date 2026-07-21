@@ -233,6 +233,27 @@ impl WasmMh {
         }
     }
 
+    /// Overwrite one chain's current value at a site and re-score the trace
+    /// (used when a widget's observed data changes under a live chain: the
+    /// chain keeps its position on the new posterior surface).
+    pub fn set_value(&mut self, chain: usize, site: &str, value: f64) {
+        let addr = Address::new(site.to_string());
+        let model = &self.model;
+        if let Some(c) = self.chains.get_mut(chain) {
+            if let Some(ch) = c.trace.choices.get_mut(&addr) {
+                ch.value = ChoiceValue::F64(value);
+            }
+            let (_, scored) = fugue::runtime::handler::run(
+                ScoreGivenTrace {
+                    base: c.trace.clone(),
+                    trace: Trace::default(),
+                },
+                model.build(),
+            );
+            c.trace = scored;
+        }
+    }
+
     /// Acceptance rate over the last `window` transitions per chain.
     pub fn recent_acceptance(&self, window: usize) -> f64 {
         let (acc, tot) = self.chains.iter().fold((0usize, 0usize), |(a, t), c| {
