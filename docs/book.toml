@@ -18,7 +18,7 @@ preferred-dark-theme = "navy"
 git-repository-url = "https://github.com/alexnodeland/fugue"
 site-url = "/fugue/"
 additional-css = ["./mdbook-admonish.css", "fugue-viz.css"]
-additional-js = ["mermaid.min.js", "mermaid-init.js", "fugue-viz.js", "viz/anatomy.js", "viz/monad.js", "viz/metropolis.js", "viz/hmc.js", "viz/smc.js", "viz/distributions.js", "viz/inline.js", "viz/minis.js"]
+additional-js = ["mermaid.min.js", "mermaid-init.js", "fugue-viz.js", "fugue-wasm-loader.js", "viz/anatomy.js", "viz/monad.js", "viz/metropolis.js", "viz/hmc.js", "viz/smc.js", "viz/distributions.js", "viz/inline.js", "viz/minis.js", "viz/playground.js"]
 
 [output.html.fold]
 enable = true

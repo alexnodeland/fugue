@@ -18,6 +18,7 @@
   - [Rolling, Not Guessing: HMC](./explorables/hmc.md)
   - [Particles That Tell Stories](./explorables/smc.md)
   - [A Field Guide to Distributions](./explorables/distributions.md)
+- [Playground](./playground.md)
 - [How-To](./how-to/README.md)
   - [Working with Distributions](./how-to/working-with-distributions.md)
   - [Building Complex Models](./how-to/building-complex-models.md)
