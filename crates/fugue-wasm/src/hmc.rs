@@ -114,6 +114,16 @@ impl WasmHmc {
         accepted
     }
 
+    /// Pin the leapfrog step size (widget slider). Disables adaptation.
+    pub fn set_step_size(&mut self, eps: f64) {
+        self.session.set_step_size(eps);
+    }
+
+    /// Change the number of leapfrog steps per proposal (widget slider).
+    pub fn set_n_leapfrog(&mut self, l: usize) {
+        self.session.set_n_leapfrog(l.clamp(1, 200));
+    }
+
     /// Whether the next step still adapts the step size.
     pub fn is_warming_up(&self) -> bool {
         self.session.is_warming_up()

@@ -734,6 +734,24 @@ impl<A: Clone> HmcSession<A> {
         &self.sites
     }
 
+    /// Pin the step size for all subsequent transitions, overriding both
+    /// warmup adaptation and the frozen dual-averaging value. Meant for
+    /// interactive use (a step-size slider); the kernel stays exact for any
+    /// positive `eps`.
+    pub fn set_step_size(&mut self, eps: f64) {
+        let eps = eps.max(1e-12);
+        self.eps = eps;
+        self.frozen_eps = Some(eps);
+        // Leave warmup: a manually pinned step size must not be re-adapted.
+        self.n_warmup = self.n_warmup.min(self.iter);
+    }
+
+    /// Change the number of leapfrog steps per proposal for subsequent
+    /// transitions.
+    pub fn set_n_leapfrog(&mut self, l: usize) {
+        self.l = l.max(1);
+    }
+
     /// The current position over the continuous sites.
     pub fn position(&self) -> &[f64] {
         &self.q

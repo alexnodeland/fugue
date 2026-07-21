@@ -19,6 +19,8 @@ struct Chain {
     adapt: DiminishingAdaptation,
     history: Vec<Trace>,
     steps: usize,
+    // Rolling accept/reject record (capped) for windowed acceptance readouts.
+    recent: Vec<bool>,
 }
 
 /// A set of independent adaptive-MH chains over one compiled model.
@@ -30,6 +32,10 @@ pub struct WasmMh {
     // grow memory without bound. Oldest halves are dropped in blocks.
     max_history: usize,
     dropped: usize,
+    // When set, every f64 site's proposal scale is pinned to this value
+    // before each transition (fixed-sigma random-walk semantics for the
+    // metropolis explorable's proposal-scale slider). None = adaptive.
+    fixed_scale: Option<f64>,
 }
 
 #[wasm_bindgen]
@@ -62,6 +68,7 @@ impl WasmMh {
                     adapt: DiminishingAdaptation::new(0.44, 0.7),
                     history: Vec::new(),
                     steps: 0,
+                    recent: Vec::new(),
                 }
             })
             .collect();
@@ -70,7 +77,16 @@ impl WasmMh {
             chains,
             max_history: 20_000,
             dropped: 0,
+            fixed_scale: None,
         })
+    }
+
+    /// Pin every site's proposal scale to `sigma` (fixed-sigma random walk;
+    /// the transition kernel is still fugue's `adaptive_single_site_mh`,
+    /// only the scale adaptation is overridden). `sigma <= 0` restores
+    /// adaptive behavior.
+    pub fn set_fixed_scale(&mut self, sigma: f64) {
+        self.fixed_scale = if sigma > 0.0 { Some(sigma) } else { None };
     }
 
     /// Advance every chain by `n` transitions. Returns the total number of
@@ -78,12 +94,24 @@ impl WasmMh {
     pub fn step(&mut self, n: usize) -> usize {
         for chain in &mut self.chains {
             for _ in 0..n {
+                if let Some(sigma) = self.fixed_scale {
+                    let addrs: Vec<Address> = chain.trace.choices.keys().cloned().collect();
+                    for a in addrs {
+                        chain.adapt.scales.insert(a, (sigma, sigma.ln()));
+                    }
+                }
+                let accepted_before: usize = chain.adapt.accept_counts.values().sum();
                 let (_, next) = adaptive_single_site_mh(
                     &mut chain.rng,
                     || self.model.build(),
                     &chain.trace,
                     &mut chain.adapt,
                 );
+                let accepted_after: usize = chain.adapt.accept_counts.values().sum();
+                if chain.recent.len() >= 512 {
+                    chain.recent.drain(0..256);
+                }
+                chain.recent.push(accepted_after > accepted_before);
                 chain.trace = next;
                 chain.steps += 1;
                 chain.history.push(chain.trace.clone());
@@ -197,6 +225,23 @@ impl WasmMh {
                 a + c.adapt.accept_counts.values().sum::<usize>(),
                 t + c.adapt.total_counts.values().sum::<usize>(),
             )
+        });
+        if tot == 0 {
+            f64::NAN
+        } else {
+            acc as f64 / tot as f64
+        }
+    }
+
+    /// Acceptance rate over the last `window` transitions per chain.
+    pub fn recent_acceptance(&self, window: usize) -> f64 {
+        let (acc, tot) = self.chains.iter().fold((0usize, 0usize), |(a, t), c| {
+            let n = c.recent.len().min(window.max(1));
+            let s = c.recent[c.recent.len() - n..]
+                .iter()
+                .filter(|&&x| x)
+                .count();
+            (a + s, t + n)
         });
         if tot == 0 {
             f64::NAN

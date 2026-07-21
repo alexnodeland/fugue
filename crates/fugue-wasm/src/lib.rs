@@ -14,12 +14,14 @@
 //! promise a fugue `Trace` makes.
 
 mod dsl;
+mod grid;
 mod hmc;
 mod mh;
 mod pf;
 mod smc;
 
 pub use dsl::CompiledModel;
+pub use grid::log_joint_grid;
 pub use hmc::WasmHmc;
 pub use mh::WasmMh;
 pub use pf::WasmParticleFilter;

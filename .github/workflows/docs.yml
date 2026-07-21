@@ -5,11 +5,21 @@ on:
     paths: 
       - 'docs/**'
       - '.github/workflows/docs.yml'
+      # The book embeds a wasm-pack build of the real crate (playground +
+      # WASM-backed widgets), so library or bindings changes must redeploy it.
+      - 'src/**'
+      - 'crates/fugue-wasm/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
   pull_request:
     branches: [ main ]
     paths:
       - 'docs/**'
       - '.github/workflows/docs.yml'
+      - 'src/**'
+      - 'crates/fugue-wasm/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
 
 jobs:
   # Job to test and validate documentation
@@ -21,6 +31,11 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
       - name: Cache Cargo registry and target
         uses: actions/cache@v4
@@ -76,12 +91,26 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-mdbook-
 
+      - name: Build WASM package (real fugue for the playground/widgets)
+        run: wasm-pack build crates/fugue-wasm --target web --release
+
       - name: Build documentation (validates structure)
         run: |
           cd docs
           # Build without linkcheck to avoid false positives with LaTeX math
           # Linkcheck has issues with math equations like \[ and \]
           mdbook build --skip-preprocessor linkcheck || mdbook build
+
+      - name: Embed WASM package next to the book
+        run: |
+          # Served at <site>/pkg/. The JS loader (docs/fugue-wasm-loader.js)
+          # dynamic-imports pkg/fugue_wasm.js and falls back to the mirrored
+          # JS math when the package is absent (e.g. local builds w/o wasm).
+          mkdir -p docs/book/pkg
+          cp crates/fugue-wasm/pkg/fugue_wasm.js \
+             crates/fugue-wasm/pkg/fugue_wasm_bg.wasm \
+             crates/fugue-wasm/pkg/package.json \
+             docs/book/pkg/
 
       - name: Validate documentation
         run: |

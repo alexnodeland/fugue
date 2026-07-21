@@ -86,6 +86,51 @@ fn particle_filter_tracks_and_reports() {
 }
 
 #[wasm_bindgen_test]
+fn fixed_scale_and_recent_acceptance() {
+    let mut mh = WasmMh::new(COIN, COIN_DATA, 2, 5).unwrap();
+    mh.set_fixed_scale(0.05); // tiny steps: acceptance should be high
+    mh.step(400);
+    let hi = mh.recent_acceptance(300);
+    let mut mh2 = WasmMh::new(COIN, COIN_DATA, 2, 5).unwrap();
+    mh2.set_fixed_scale(5.0); // huge steps: acceptance should be low
+    mh2.step(400);
+    let lo = mh2.recent_acceptance(300);
+    assert!(hi > lo, "sigma=0.05 acc {hi} should beat sigma=5 acc {lo}");
+    assert!(hi > 0.5, "tiny-step acceptance {hi}");
+}
+
+#[wasm_bindgen_test]
+fn grid_scores_peak_near_posterior_mode() {
+    // 1-D check via a 2-site model; the grid must peak near the conjugate
+    // posterior means.
+    let src = r#"
+        let a <- sample(addr!("a"), Normal(0.0, 2.0));
+        let b <- sample(addr!("b"), Normal(0.0, 2.0));
+        observe(addr!("y"), Normal(a + b, 0.5), 2.0);
+        pure(a)
+    "#;
+    let axis: Vec<f64> = (0..21).map(|i| -2.0 + 0.2 * i as f64).collect();
+    let grid = log_joint_grid(src, "", "a", "b", &axis, &axis, 1).unwrap();
+    assert_eq!(grid.len(), 21 * 21);
+    let (best, _) = grid
+        .iter()
+        .enumerate()
+        .fold((0, f64::NEG_INFINITY), |(bi, bv), (i, &v)| {
+            if v > bv {
+                (i, v)
+            } else {
+                (bi, bv)
+            }
+        });
+    let (a, b) = (axis[best % 21], axis[best / 21]);
+    // Posterior mode of (a, b) is near (0.94, 0.94) for this model.
+    assert!(
+        (a - 1.0).abs() < 0.5 && (b - 1.0).abs() < 0.5,
+        "mode ({a},{b})"
+    );
+}
+
+#[wasm_bindgen_test]
 fn smc_run_returns_evidence() {
     let json = wasm_smc_run(COIN, COIN_DATA, 300, 2, 11).unwrap();
     assert!(json.contains("\"log_evidence\""), "{json}");
