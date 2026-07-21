@@ -1,0 +1,533 @@
+/* ==========================================================================
+ * fugue-theme.css — "editorial math" chrome for the Fugue doc sites.
+ *
+ * Shared byte-for-byte between fugue and fugue-evo (same discipline as
+ * fugue-viz.css — edit both copies together). Restyles the mdBook chrome
+ * only; the explorable widgets keep their own contract in fugue-viz.css.
+ *
+ * Theme families follow the same <html>-class mapping as fugue-viz.css:
+ *   ink (dark):  .navy .coal .ayu .dark   — site default
+ *   paper (light): .light .rust
+ * Loaded after mdBook's variables.css, so equal-specificity overrides win.
+ * ========================================================================== */
+
+:root {
+    --mono-font: "JetBrains Mono", "Source Code Pro", Menlo, Consolas, monospace;
+    --content-max-width: 720px;
+    --fugue-serif: "Fraunces", Georgia, "Times New Roman", serif;
+    --fugue-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+/* ---- ink palette (dark family) ------------------------------------------ */
+
+.navy, .coal, .ayu, .dark {
+    --bg: #0c111e;
+    --fg: #c4cede;
+
+    --fugue-heading: #edf1fa;
+    --fugue-muted: #8b96ad;
+    --fugue-hairline: rgba(148, 166, 215, 0.16);
+    --fugue-panel: rgba(148, 166, 215, 0.06);
+    --fugue-panel-strong: rgba(148, 166, 215, 0.1);
+    --fugue-accent: #58a6ff;
+    --fugue-code-bg: #101828;
+
+    --sidebar-bg: #090e19;
+    --sidebar-fg: #97a2b8;
+    --sidebar-non-existant: #4a5368;
+    --sidebar-active: #58a6ff;
+    --sidebar-spacer: rgba(148, 166, 215, 0.16);
+
+    --scrollbar: rgba(148, 166, 215, 0.25);
+
+    --icons: #6b7690;
+    --icons-hover: #c4cede;
+
+    --links: #58a6ff;
+
+    --inline-code-color: #9ecbff;
+
+    --theme-popup-bg: #111827;
+    --theme-popup-border: rgba(148, 166, 215, 0.25);
+    --theme-hover: rgba(148, 166, 215, 0.12);
+
+    --quote-bg: rgba(148, 166, 215, 0.06);
+    --quote-border: rgba(148, 166, 215, 0.16);
+
+    --table-border-color: rgba(148, 166, 215, 0.16);
+    --table-header-bg: transparent;
+    --table-alternate-bg: rgba(148, 166, 215, 0.04);
+
+    --searchbar-border-color: rgba(148, 166, 215, 0.25);
+    --searchbar-bg: #101828;
+    --searchbar-fg: #c4cede;
+    --searchbar-shadow-color: transparent;
+    --searchresults-header-fg: #8b96ad;
+    --searchresults-border-color: rgba(148, 166, 215, 0.16);
+    --searchresults-li-bg: rgba(148, 166, 215, 0.06);
+    --search-mark-bg: rgba(88, 166, 255, 0.35);
+
+    --overlay-bg: rgba(5, 8, 15, 0.55);
+    --footnote-highlight: #58a6ff;
+}
+
+/* ---- paper palette (light family) ---------------------------------------- */
+
+.light, .rust {
+    --bg: #faf8f4;
+    --fg: #333a48;
+
+    --fugue-heading: #1c2230;
+    --fugue-muted: #6d7688;
+    --fugue-hairline: rgba(50, 60, 90, 0.16);
+    --fugue-panel: rgba(50, 60, 90, 0.05);
+    --fugue-panel-strong: rgba(50, 60, 90, 0.09);
+    --fugue-accent: #0969da;
+    --fugue-code-bg: #f1eee7;
+
+    --sidebar-bg: #f4f1ea;
+    --sidebar-fg: #5d6578;
+    --sidebar-non-existant: #b6bcc9;
+    --sidebar-active: #0969da;
+    --sidebar-spacer: rgba(50, 60, 90, 0.16);
+
+    --scrollbar: rgba(50, 60, 90, 0.3);
+
+    --icons: #8a92a5;
+    --icons-hover: #333a48;
+
+    --links: #0969da;
+
+    --inline-code-color: #0550ae;
+
+    --theme-popup-bg: #fffdf9;
+    --theme-popup-border: rgba(50, 60, 90, 0.22);
+    --theme-hover: rgba(50, 60, 90, 0.08);
+
+    --quote-bg: rgba(50, 60, 90, 0.05);
+    --quote-border: rgba(50, 60, 90, 0.16);
+
+    --table-border-color: rgba(50, 60, 90, 0.16);
+    --table-header-bg: transparent;
+    --table-alternate-bg: rgba(50, 60, 90, 0.03);
+
+    --searchbar-border-color: rgba(50, 60, 90, 0.25);
+    --searchbar-bg: #fffdf9;
+    --searchbar-fg: #333a48;
+    --searchbar-shadow-color: transparent;
+    --searchresults-header-fg: #6d7688;
+    --searchresults-border-color: rgba(50, 60, 90, 0.16);
+    --searchresults-li-bg: rgba(50, 60, 90, 0.05);
+    --search-mark-bg: rgba(9, 105, 218, 0.2);
+
+    --overlay-bg: rgba(120, 125, 140, 0.3);
+    --footnote-highlight: #0969da;
+}
+
+/* ---- typography ---------------------------------------------------------- */
+
+html {
+    font-family: var(--fugue-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+}
+
+body {
+    font-size: 1.7rem;
+}
+
+.content main {
+    line-height: 1.75;
+}
+
+.content h1, .content h2, .content h3 {
+    font-family: var(--fugue-serif);
+    font-weight: 600;
+    color: var(--fugue-heading);
+    letter-spacing: -0.012em;
+    line-height: 1.22;
+}
+
+.content h1 { font-size: 3.4rem; margin-block-start: 1.2em; }
+.content h2 { font-size: 2.5rem; margin-block-start: 2em; }
+.content h3 { font-size: 2rem; margin-block-start: 1.8em; }
+
+.content h4, .content h5, .content h6 {
+    font-family: var(--fugue-sans);
+    font-weight: 600;
+    color: var(--fugue-heading);
+    letter-spacing: 0.01em;
+}
+
+.content h1:first-child { margin-block-start: 0.4em; }
+
+/* heading self-links inherit the heading color, no underline */
+.content a.header:link, .content a.header:visited {
+    color: inherit;
+    text-decoration: none;
+}
+.content a.header:hover { text-decoration: none; }
+
+/* body links: quiet underline that wakes on hover */
+.content main a:not(.header):not(.fugue-card):not(.fugue-eco) {
+    color: var(--links);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--links) 35%, transparent);
+    text-underline-offset: 0.16em;
+    transition: text-decoration-color 120ms ease;
+}
+.content main a:not(.header):not(.fugue-card):not(.fugue-eco):hover {
+    text-decoration-color: var(--links);
+}
+
+.content hr {
+    border: none;
+    border-top: 1px solid var(--fugue-hairline);
+    margin: 3.2rem auto;
+}
+
+::selection {
+    background: color-mix(in srgb, var(--fugue-accent) 30%, transparent);
+}
+
+/* ---- menu bar ------------------------------------------------------------ */
+
+#menu-bar {
+    background: color-mix(in srgb, var(--bg) 82%, transparent);
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+    border-block-end: 1px solid var(--fugue-hairline);
+}
+
+#menu-bar .menu-title {
+    font-family: var(--fugue-serif);
+    font-weight: 600;
+    font-size: 1.9rem;
+    letter-spacing: -0.01em;
+    color: var(--fugue-heading);
+}
+
+#menu-bar .icon-button, #menu-bar a { transition: color 120ms ease; }
+
+/* sibling-site link injected by fugue-brand.js */
+.fugue-brand-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5em;
+    margin: 0 6px;
+    padding: 3px 12px;
+    align-self: center;
+    font-family: var(--fugue-sans);
+    font-size: 1.3rem;
+    font-weight: 500;
+    line-height: 1.6;
+    color: var(--fg) !important;
+    text-decoration: none !important;
+    border: 1px solid var(--fugue-hairline);
+    border-radius: 999px;
+    transition: border-color 120ms ease, color 120ms ease;
+}
+.fugue-brand-link:hover {
+    border-color: var(--fugue-accent);
+    color: var(--fugue-accent) !important;
+}
+.fugue-brand-link .fugue-brand-arrow { font-size: 0.85em; opacity: 0.7; }
+
+/* ---- sidebar ------------------------------------------------------------- */
+
+.sidebar {
+    font-family: var(--fugue-sans);
+    font-size: 1.35rem;
+    border-inline-end: 1px solid var(--fugue-hairline);
+}
+
+.sidebar .part-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--fugue-muted);
+    margin-block-start: 1.6em;
+}
+
+.chapter li.chapter-item {
+    line-height: 1.6;
+    margin-block-start: 0.5em;
+}
+
+.chapter li a {
+    transition: color 100ms ease;
+}
+
+.chapter li a.active {
+    color: var(--sidebar-active);
+    font-weight: 600;
+}
+
+.sidebar .sidebar-scrollbox {
+    scrollbar-width: thin;
+}
+
+/* ---- code ---------------------------------------------------------------- */
+
+:not(pre) > code {
+    font-family: var(--mono-font);
+    font-size: 0.82em;
+    padding: 0.15em 0.45em;
+    border-radius: 6px;
+    background: var(--fugue-panel-strong);
+}
+
+pre {
+    border-radius: 10px;
+    border: 1px solid var(--fugue-hairline);
+    line-height: 1.6;
+}
+
+pre > code {
+    border-radius: 10px;
+    padding: 1.1rem 1.4rem;
+}
+
+code.hljs, pre code {
+    background: var(--fugue-code-bg) !important;
+}
+
+/* syntax colors harmonized with the fv palette (overrides the stock
+   highlight.js stylesheets, which load before additional-css) */
+
+.navy .hljs, .coal .hljs, .ayu .hljs, .dark .hljs { color: #c4cede; }
+.navy .hljs-comment, .coal .hljs-comment, .ayu .hljs-comment, .dark .hljs-comment,
+.navy .hljs-quote, .coal .hljs-quote, .ayu .hljs-quote, .dark .hljs-quote { color: #7d8798; font-style: italic; }
+.navy .hljs-keyword, .coal .hljs-keyword, .ayu .hljs-keyword, .dark .hljs-keyword,
+.navy .hljs-meta, .coal .hljs-meta, .ayu .hljs-meta, .dark .hljs-meta { color: #ff7b72; }
+.navy .hljs-string, .coal .hljs-string, .ayu .hljs-string, .dark .hljs-string,
+.navy .hljs-regexp, .coal .hljs-regexp, .ayu .hljs-regexp, .dark .hljs-regexp { color: #a5d6ff; }
+.navy .hljs-number, .coal .hljs-number, .ayu .hljs-number, .dark .hljs-number,
+.navy .hljs-literal, .coal .hljs-literal, .ayu .hljs-literal, .dark .hljs-literal,
+.navy .hljs-symbol, .coal .hljs-symbol, .ayu .hljs-symbol, .dark .hljs-symbol { color: #79c0ff; }
+.navy .hljs-title, .coal .hljs-title, .ayu .hljs-title, .dark .hljs-title,
+.navy .hljs-function, .coal .hljs-function, .ayu .hljs-function, .dark .hljs-function { color: #d2a8ff; }
+.navy .hljs-type, .coal .hljs-type, .ayu .hljs-type, .dark .hljs-type,
+.navy .hljs-class, .coal .hljs-class, .ayu .hljs-class, .dark .hljs-class,
+.navy .hljs-built_in, .coal .hljs-built_in, .ayu .hljs-built_in, .dark .hljs-built_in { color: #ffa657; }
+.navy .hljs-attr, .coal .hljs-attr, .ayu .hljs-attr, .dark .hljs-attr,
+.navy .hljs-attribute, .coal .hljs-attribute, .ayu .hljs-attribute, .dark .hljs-attribute,
+.navy .hljs-variable, .coal .hljs-variable, .ayu .hljs-variable, .dark .hljs-variable { color: #9ecbff; }
+
+.light .hljs, .rust .hljs { color: #333a48; }
+.light .hljs-comment, .rust .hljs-comment,
+.light .hljs-quote, .rust .hljs-quote { color: #6e7781; font-style: italic; }
+.light .hljs-keyword, .rust .hljs-keyword,
+.light .hljs-meta, .rust .hljs-meta { color: #cf222e; }
+.light .hljs-string, .rust .hljs-string,
+.light .hljs-regexp, .rust .hljs-regexp { color: #0a3069; }
+.light .hljs-number, .rust .hljs-number,
+.light .hljs-literal, .rust .hljs-literal,
+.light .hljs-symbol, .rust .hljs-symbol { color: #0550ae; }
+.light .hljs-title, .rust .hljs-title,
+.light .hljs-function, .rust .hljs-function { color: #8250df; }
+.light .hljs-type, .rust .hljs-type,
+.light .hljs-class, .rust .hljs-class,
+.light .hljs-built_in, .rust .hljs-built_in { color: #953800; }
+.light .hljs-attr, .rust .hljs-attr,
+.light .hljs-attribute, .rust .hljs-attribute,
+.light .hljs-variable, .rust .hljs-variable { color: #0550ae; }
+
+/* code-block hover buttons (copy/play): quiet until hovered */
+.buttons button, pre > .buttons button {
+    border-radius: 6px;
+    border-color: var(--fugue-hairline);
+}
+
+/* ---- content furniture --------------------------------------------------- */
+
+.content blockquote {
+    border-radius: 0 8px 8px 0;
+    border-inline-start: 2px solid var(--fugue-accent);
+    background: var(--quote-bg);
+}
+
+.content table {
+    border-collapse: collapse;
+    width: 100%;
+}
+.content table td, .content table th {
+    border: none;
+    border-block-end: 1px solid var(--table-border-color);
+    padding: 0.7rem 1.1rem;
+    text-align: left;
+}
+.content table th {
+    font-weight: 600;
+    font-size: 0.88em;
+    color: var(--fugue-heading);
+    border-block-end: 2px solid var(--fugue-hairline);
+}
+.content table tbody tr:nth-child(2n) { background: var(--table-alternate-bg); }
+
+/* mdbook-admonish callouts: flat, tinted, hairline (no-op where unused) */
+.content .admonition {
+    border-radius: 10px;
+    border: 1px solid var(--fugue-hairline);
+    border-inline-start-width: 2px;
+    box-shadow: none;
+    background: var(--fugue-panel);
+}
+.content .admonition .admonition-title {
+    font-family: var(--fugue-sans);
+    font-weight: 600;
+    background: transparent;
+}
+
+/* KaTeX display math: breathing room, never overflows the page */
+.content .katex-display {
+    margin: 2rem 0;
+    padding: 0.2rem 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+/* footnote + scrollbars */
+* { scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
+
+/* ---- search -------------------------------------------------------------- */
+
+#searchbar {
+    border-radius: 10px;
+    padding: 8px 14px;
+    font-family: var(--fugue-sans);
+}
+#searchbar:focus, #searchbar.active {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--fugue-accent) 25%, transparent);
+}
+#searchresults a { border-radius: 8px; }
+
+/* ---- hero + landing components ------------------------------------------- */
+
+.fugue-hero {
+    text-align: center;
+    padding: 2.4rem 0 1rem;
+}
+
+/* the brand mark: an ink tile with the italic serif glyph, rendered live in
+   Fraunces (same file as the favicon's glyph). Tile stays ink in both themes. */
+.fugue-mark {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 10rem;
+    height: 10rem;
+    margin: 0 auto 1.4rem;
+    border-radius: 24%;
+    background: #0c111e;
+    border: 1px solid rgba(148, 166, 215, 0.28);
+}
+.fugue-mark span {
+    font-family: var(--fugue-serif);
+    font-style: italic;
+    font-weight: 600;
+    font-size: 6.4rem;
+    line-height: 1;
+    color: #58a6ff;
+    transform: translateY(-0.06em);
+}
+.fugue-mark.fugue-mark-evo span { color: #56d364; }
+
+.fugue-hero h1 {
+    font-family: var(--fugue-serif);
+    font-size: 4.4rem;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    margin: 0.2em 0 0.25em;
+}
+
+.fugue-hero .fugue-hero-tag {
+    font-family: var(--fugue-serif);
+    font-style: italic;
+    font-weight: 500;
+    font-size: 1.9rem;
+    color: var(--fugue-muted);
+    max-width: 34em;
+    margin: 0 auto 1.6rem;
+    line-height: 1.5;
+}
+
+.fugue-badge-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px;
+    margin: 1.6rem 0 0.6rem;
+}
+.fugue-badge-row img { height: 20px; border-radius: 4px; }
+
+.fugue-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
+    gap: 1.3rem;
+    margin: 2.4rem 0;
+}
+
+a.fugue-card, a.fugue-eco {
+    display: block;
+    padding: 1.6rem 1.8rem;
+    border: 1px solid var(--fugue-hairline);
+    border-radius: 12px;
+    background: var(--fugue-panel);
+    color: var(--fg);
+    text-decoration: none;
+    transition: border-color 140ms ease, transform 140ms ease, background 140ms ease;
+}
+a.fugue-card:hover, a.fugue-eco:hover {
+    border-color: color-mix(in srgb, var(--fugue-accent) 55%, transparent);
+    background: var(--fugue-panel-strong);
+    transform: translateY(-1px);
+    color: var(--fg);
+}
+
+.fugue-card .fugue-card-title, .fugue-eco .fugue-card-title {
+    display: block;
+    font-family: var(--fugue-sans);
+    font-weight: 600;
+    font-size: 1.5rem;
+    color: var(--fugue-heading);
+    margin-block-end: 0.35em;
+}
+.fugue-card .fugue-card-desc, .fugue-eco .fugue-card-desc {
+    display: block;
+    font-size: 1.35rem;
+    line-height: 1.55;
+    color: var(--fugue-muted);
+}
+
+a.fugue-eco {
+    margin: 2.4rem 0;
+    border-inline-start: 2px solid var(--fugue-accent);
+}
+.fugue-eco .fugue-card-title .fugue-brand-arrow { opacity: 0.6; font-size: 0.9em; }
+
+/* ---- small screens ------------------------------------------------------- */
+
+@media (max-width: 560px) {
+    .content h1 { font-size: 2.8rem; }
+    .content h2 { font-size: 2.2rem; }
+    .fugue-hero h1 { font-size: 3.3rem; }
+    .fugue-hero .fugue-hero-tag { font-size: 1.7rem; }
+    .fugue-cards { grid-template-columns: 1fr; }
+}
+
+/* ---- reduced motion ------------------------------------------------------ */
+
+@media (prefers-reduced-motion: reduce) {
+    a.fugue-card, a.fugue-eco, .fugue-brand-link, .chapter li a {
+        transition: none;
+    }
+    a.fugue-card:hover, a.fugue-eco:hover { transform: none; }
+}
+
+/* ---- print --------------------------------------------------------------- */
+
+@media print {
+    .fugue-brand-link { display: none; }
+}
