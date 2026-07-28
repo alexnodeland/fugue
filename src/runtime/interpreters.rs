@@ -807,6 +807,69 @@ mod tests {
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
+    /// EA-as-PPL F3 acceptance: grafting a prefix block between two executions
+    /// of the same model, then re-scoring, yields exactly the weight a
+    /// from-scratch replay of the spliced assignment would produce — the
+    /// observable contract that "surgery + re-score" is exact.
+    #[test]
+    fn test_graft_rescore_equality() {
+        let model_fn = || {
+            sample(addr!("gene", 0), Normal::new(0.0, 1.0).unwrap()).and_then(|g0| {
+                sample(addr!("gene", 1), Normal::new(0.0, 1.0).unwrap()).and_then(move |g1| {
+                    observe(addr!("y"), Normal::new(g0 + g1, 0.5).unwrap(), 1.0)
+                        .map(move |_| (g0, g1))
+                })
+            })
+        };
+        let mut rng = StdRng::seed_from_u64(21);
+        let (_, ta) = crate::runtime::handler::run(
+            PriorHandler {
+                rng: &mut rng,
+                trace: Trace::default(),
+            },
+            model_fn(),
+        );
+        let (_, tb) = crate::runtime::handler::run(
+            PriorHandler {
+                rng: &mut rng,
+                trace: Trace::default(),
+            },
+            model_fn(),
+        );
+
+        // Splice tb's "gene#0" block into ta, then re-score.
+        let mut spliced = ta.clone();
+        spliced.graft_prefix("gene\u{23}0", &tb); // "gene#0"
+        let (_, rescored) = crate::runtime::handler::run(
+            ScoreGivenTrace {
+                base: spliced,
+                trace: Trace::default(),
+            },
+            model_fn(),
+        );
+
+        // From-scratch expectation: hand-build the same assignment and score it.
+        let mut manual = Trace::default();
+        manual.insert_choice(
+            addr!("gene", 0),
+            tb.choices[&addr!("gene", 0)].value.clone(),
+            0.0,
+        );
+        manual.insert_choice(
+            addr!("gene", 1),
+            ta.choices[&addr!("gene", 1)].value.clone(),
+            0.0,
+        );
+        let (_, expected) = crate::runtime::handler::run(
+            ScoreGivenTrace {
+                base: manual,
+                trace: Trace::default(),
+            },
+            model_fn(),
+        );
+        assert!((rescored.total_log_weight() - expected.total_log_weight()).abs() < 1e-12);
+    }
+
     #[test]
     fn prior_handler_samples_and_accumulates() {
         let mut rng = StdRng::seed_from_u64(7);

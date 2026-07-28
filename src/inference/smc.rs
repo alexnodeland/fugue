@@ -56,14 +56,15 @@
 //! assert!(ess > 0.0);
 //! ```
 use crate::core::address::Address;
-use crate::core::distribution::{Distribution, Normal};
 use crate::core::model::Model;
 use crate::core::numerical::log_sum_exp;
 use crate::inference::mcmc_utils::DiminishingAdaptation;
+use crate::inference::mh::{propose_and_score, SiteProposal};
 use crate::runtime::handler::run;
 use crate::runtime::interpreters::{PriorHandler, ScoreGivenTrace};
-use crate::runtime::trace::{ChoiceValue, Trace};
+use crate::runtime::trace::Trace;
 use rand::Rng;
+use std::collections::HashMap;
 
 /// A weighted particle in the SMC population.
 ///
@@ -372,6 +373,187 @@ impl std::ops::Deref for SMCResult {
     }
 }
 
+/// A population-coupled MCMC move applied to the whole particle slice between
+/// SMC tempering steps.
+///
+/// Unlike per-particle rejuvenation ([`rejuvenate_particles`]), a population
+/// kernel may *couple* particles — e.g. a crossover move that swaps a block of
+/// choices between two parent traces. It is invoked by
+/// [`adaptive_smc_with_kernel`] immediately after resampling and per-particle
+/// rejuvenation, on a uniform-weight population that is (approximately)
+/// distributed according to the current tempered target π_β.
+///
+/// # Invariance contract (MUST hold, or SMC estimates are biased)
+///
+/// For a single model execution, `π_β(θ) ∝ p(θ) · p(y|θ)^β`. A kernel that
+/// couples the pair (i, j) MUST leave the **product target**
+/// `π_β(θ_i) · π_β(θ_j)` invariant (and analogously for any k-tuple it
+/// couples). Concretely the implementation MUST:
+///
+/// * **(W)** never write `particle.weight` or `particle.log_weight` — after
+///   resampling the weights are uniform and an invariant move keeps them
+///   uniform (findings FG-03 / FG-13). Reweighting here re-introduces the
+///   prior-squaring bias FG-03 fixed.
+/// * **(T)** mutate only `particle.trace`, and only to a value obtained by a
+///   Metropolis accept/reject whose target is the product of the coupled
+///   particles' tempered densities.
+/// * **(S)** re-score every trace it writes under `model_fn` (via
+///   [`ScoreGivenTrace`] or
+///   [`score_given_trace_reconciled`](crate::runtime::interpreters::score_given_trace_reconciled))
+///   so the three log accumulators are valid — direct choice surgery does NOT
+///   update them (see [`Trace::insert_choice`]).
+/// * **(E)** not read or mutate the SMC log-evidence accumulator (it has no
+///   access to it) — an invariant move contributes no incremental weight
+///   (FG-58).
+///
+/// # Correctness of the built-in crossover move
+///
+/// Between tempering steps the uniform-weight population is approximately
+/// i.i.d. from π_β, so a coupled pair (θ_i, θ_j) is distributed as
+/// `π_β ⊗ π_β`. [`CrossoverKernel`] draws an address mask S from a
+/// value-independent, pair-symmetric distribution and deterministically swaps
+/// the values on S. This map is an **involution** (swapping S back recovers
+/// the parents) with identical forward/reverse mask distributions, so
+/// `q(child|parent) = q(parent|child)` and the Hastings correction is 1. The
+/// Metropolis acceptance
+/// `α = min(1, [π_β(θ_i')·π_β(θ_j')] / [π_β(θ_i)·π_β(θ_j)])` is therefore a
+/// valid Metropolis move on `π_β ⊗ π_β`, hence product-invariant; applied to a
+/// π_β population it preserves each particle's marginal and keeps the uniform
+/// weights correct (W). Being invariant it injects zero incremental weight, so
+/// the log-evidence accumulator is untouched (E). The re-score (S) makes
+/// off-support swaps (`guard` / `factor(-∞)`) reject via a `-∞` density —
+/// support-respecting truncation.
+///
+/// The kernel is object-safe: `rng` is `&mut dyn RngCore` (rand's blanket
+/// `impl<R: RngCore + ?Sized> Rng for R` supplies the sampling methods), and
+/// the model constructor is passed as `&dyn Fn`.
+pub trait PopulationKernel<A> {
+    /// Apply one population sweep in place. `beta` is the current tempering
+    /// exponent; `model_fn` reconstructs the single-execution model whose
+    /// tempered density defines the (product) target.
+    fn sweep(
+        &mut self,
+        rng: &mut dyn rand::RngCore,
+        particles: &mut [Particle],
+        model_fn: &dyn Fn() -> Model<A>,
+        beta: f64,
+    );
+}
+
+/// The identity population kernel: does nothing. [`adaptive_smc`] is defined
+/// as `adaptive_smc_with_kernel(.., &mut NoKernel)`.
+pub struct NoKernel;
+
+impl<A> PopulationKernel<A> for NoKernel {
+    fn sweep(
+        &mut self,
+        _: &mut dyn rand::RngCore,
+        _: &mut [Particle],
+        _: &dyn Fn() -> Model<A>,
+        _: f64,
+    ) {
+    }
+}
+
+/// A population crossover kernel: repeatedly picks two distinct particles at
+/// random, proposes a child pair by swapping the block of choices at the
+/// addresses chosen by `mask`, and accepts the swap with the product-target
+/// Metropolis ratio (see the correctness argument on [`PopulationKernel`]).
+///
+/// # v1 scope: fixed-structure models
+///
+/// The swap is exact for models whose address set is identical across
+/// executions (bit-string / permutation / real-vector genomes and other
+/// fixed-structure models): the swap is dimension-preserving and the
+/// [`ScoreGivenTrace`] re-score is exact. For variable-dimension models a
+/// swapped block can leave a partner with an incomplete assignment; such
+/// crossovers need a custom kernel built on
+/// [`score_given_trace_reconciled`](crate::runtime::interpreters::score_given_trace_reconciled)
+/// carrying the RJMCMC dimension bookkeeping.
+pub struct CrossoverKernel {
+    /// Number of (pair, swap) proposals per sweep.
+    pub n_pairs: usize,
+    /// Chooses the address set S to swap. Given the two parent traces it
+    /// returns the addresses whose values are exchanged between the pair. MUST
+    /// be value-independent (depend only on the address structure) and
+    /// symmetric in its two trace arguments for the move to be a symmetric
+    /// involution (Hastings ratio 1).
+    #[allow(clippy::type_complexity)]
+    pub mask: Box<dyn Fn(&Trace, &Trace, &mut dyn rand::RngCore) -> Vec<Address>>,
+}
+
+/// Build two children by exchanging the choices at `swap` between `a` and `b`.
+/// Pure choice surgery: the children's accumulators are NOT valid until
+/// re-scored (contract S of [`PopulationKernel`]).
+fn swap_block(a: &Trace, b: &Trace, swap: &[Address]) -> (Trace, Trace) {
+    let mut ca = a.clone();
+    let mut cb = b.clone();
+    for addr in swap {
+        let from_a = ca.choices.remove(addr);
+        let from_b = cb.choices.remove(addr);
+        if let Some(c) = from_b {
+            ca.choices.insert(addr.clone(), c);
+        }
+        if let Some(c) = from_a {
+            cb.choices.insert(addr.clone(), c);
+        }
+    }
+    (ca, cb)
+}
+
+impl<A> PopulationKernel<A> for CrossoverKernel {
+    fn sweep(
+        &mut self,
+        rng: &mut dyn rand::RngCore,
+        particles: &mut [Particle],
+        model_fn: &dyn Fn() -> Model<A>,
+        beta: f64,
+    ) {
+        let n = particles.len();
+        if n < 2 {
+            return;
+        }
+        for _ in 0..self.n_pairs {
+            let i = rng.gen_range(0..n);
+            let mut j = rng.gen_range(0..n - 1);
+            if j >= i {
+                j += 1; // distinct partner
+            }
+            let s = (self.mask)(&particles[i].trace, &particles[j].trace, rng);
+            if s.is_empty() {
+                continue;
+            }
+
+            // Build child traces by choice surgery, then RE-SCORE (contract S).
+            let (ti, tj) = swap_block(&particles[i].trace, &particles[j].trace, &s);
+            let (_ai, ci) = run(
+                ScoreGivenTrace {
+                    base: ti,
+                    trace: Trace::default(),
+                },
+                model_fn(),
+            );
+            let (_aj, cj) = run(
+                ScoreGivenTrace {
+                    base: tj,
+                    trace: Trace::default(),
+                },
+                model_fn(),
+            );
+
+            // Tempered log-density of a single execution:
+            //   log π_β(θ) = log_prior + β·(log_likelihood + log_factors).
+            let logd = |t: &Trace| t.log_prior + beta * (t.log_likelihood + t.log_factors);
+            let log_alpha =
+                (logd(&ci) + logd(&cj)) - (logd(&particles[i].trace) + logd(&particles[j].trace));
+            if log_alpha >= 0.0 || rng.gen::<f64>() < log_alpha.exp() {
+                particles[i].trace = ci; // (T): only traces move;
+                particles[j].trace = cj; // (W): weights untouched.
+            }
+        }
+    }
+}
+
 /// The log incremental target factor of a particle: log p(y | θ) = log_likelihood + log_factors.
 ///
 /// Under likelihood tempering the sequence of targets is
@@ -458,6 +640,34 @@ pub fn adaptive_smc<A, R: Rng>(
     model_fn: impl Fn() -> Model<A>,
     config: SMCConfig,
 ) -> SMCResult {
+    adaptive_smc_with_kernel(rng, num_particles, model_fn, config, &mut NoKernel)
+}
+
+/// Likelihood-tempered SMC with a population-coupled kernel applied between
+/// tempering steps.
+///
+/// Identical to [`adaptive_smc`] except that after each intermediate step's
+/// resample + per-particle rejuvenation (and before the likelihood refresh),
+/// `kernel.sweep(..)` is invoked on the whole particle slice at the current β.
+/// This is the hook for population-coupled MCMC moves — e.g. crossover between
+/// particle pairs ([`CrossoverKernel`]) — which per-particle rejuvenation
+/// cannot express. With [`NoKernel`] this is exactly [`adaptive_smc`].
+///
+/// The kernel runs only at **intermediate** tempering steps: the terminal
+/// β = 1 step returns the weighted particles without resampling or moves
+/// (FG-43), so the kernel never touches the returned weighted population. See
+/// [`PopulationKernel`] for the invariance contract the kernel must satisfy.
+pub fn adaptive_smc_with_kernel<A, R, K>(
+    rng: &mut R,
+    num_particles: usize,
+    model_fn: impl Fn() -> Model<A>,
+    config: SMCConfig,
+    kernel: &mut K,
+) -> SMCResult
+where
+    R: Rng,
+    K: PopulationKernel<A>,
+{
     let n = num_particles;
     if n == 0 {
         return SMCResult {
@@ -552,6 +762,15 @@ pub fn adaptive_smc<A, R: Rng>(
                         );
                     }
                 }
+                // Population-coupled kernel sweep (π_β⊗…⊗π_β-invariant, weights
+                // untouched — see the PopulationKernel contract). Runs before the
+                // likelihood refresh below so moved traces are picked up.
+                kernel.sweep(
+                    rng as &mut dyn rand::RngCore,
+                    &mut particles,
+                    &model_fn,
+                    beta,
+                );
                 logliks = particles
                     .iter()
                     .map(|p| particle_log_likelihood(&p.trace))
@@ -623,11 +842,27 @@ fn next_beta(beta: f64, log_w: &[f64], logliks: &[f64], target_ess: f64) -> f64 
 
 /// A single π_β-invariant single-site Metropolis-Hastings rejuvenation move.
 ///
-/// Perturbs one randomly chosen continuous (f64) site with a symmetric Gaussian
-/// random walk and accepts against the tempered target π_β(θ) ∝ p(θ)·p(y|θ)^β.
-/// Because the proposal is symmetric there is no Hastings correction. The move is
-/// invariant for π_β, so applying it to a resampled (uniform-weight) population
-/// leaves the weights uniform.
+/// Picks the target uniformly over **all** of the trace's sites and dispatches
+/// the proposal by value type through the same typed machinery as
+/// [`adaptive_single_site_mh`](crate::inference::mh::adaptive_single_site_mh):
+/// Gaussian/log-space/reflected walks for `F64`, a deterministic flip for
+/// `Bool`, a reflected discrete walk for `U64`, prior-resample for `Usize`
+/// categoricals, and an integer walk for `I64`. (The previous implementation
+/// collected only `F64` sites, so populations of pure Bool/Usize/U64 traces —
+/// e.g. bit-string or permutation genomes — never moved during rejuvenation.)
+///
+/// Acceptance is the tempered trans-dimensional ratio
+///
+/// ```text
+/// log α = Δlog_prior + β·Δloglik + (log q_rev − log q_fwd) + dim_term
+/// ```
+///
+/// against π_β(θ) ∝ p(θ)·p(y|θ)^β. Births/deaths of prior-proposed structure
+/// carry their RJMCMC corrections in `log q_fwd`/`log q_rev` (the prior is
+/// untempered in π_β, so the usual prior-cancellation still holds), and
+/// `dim_term = ln|sites(current)| − ln|sites(proposed)|` (FG-20/FG-21; 0 for
+/// fixed-structure models). The move is invariant for π_β, so applying it to a
+/// resampled (uniform-weight) population leaves the weights uniform.
 fn tempered_single_site_mh<A, R: Rng>(
     rng: &mut R,
     model_fn: &impl Fn() -> Model<A>,
@@ -635,30 +870,29 @@ fn tempered_single_site_mh<A, R: Rng>(
     beta: f64,
     adaptation: &mut DiminishingAdaptation,
 ) -> Trace {
-    // Collect continuous sites eligible for a Gaussian random-walk perturbation.
-    let f64_sites: Vec<Address> = current
-        .choices
-        .iter()
-        .filter(|(_, c)| matches!(c.value, ChoiceValue::F64(_)))
-        .map(|(a, _)| a.clone())
-        .collect();
-    if f64_sites.is_empty() {
+    if current.choices.is_empty() {
         // Nothing to move; doing nothing is trivially π_β-invariant.
         return current.clone();
     }
 
-    let site = f64_sites[rng.gen_range(0..f64_sites.len())].clone();
-    let scale = adaptation.get_scale(&site);
-    let cur_val = current.choices[&site].value.as_f64().unwrap();
+    let sites: Vec<Address> = current.choices.keys().cloned().collect();
+    let target = sites[rng.gen_range(0..sites.len())].clone();
+    let scale = adaptation.get_scale(&target);
 
-    // Symmetric Gaussian random walk on the selected coordinate.
-    let z = Normal::new(0.0, 1.0).unwrap().sample(rng);
-    let prop_val = cur_val + scale * z;
+    let overrides: HashMap<Address, SiteProposal> = HashMap::new();
+    let mut kind_cache: HashMap<Address, SiteProposal> = HashMap::new();
+    let (_a_prop, prop_trace, _prop_lw, lqf, lqr, _structure_changed) = propose_and_score(
+        rng,
+        model_fn,
+        current,
+        &target,
+        scale,
+        &overrides,
+        &mut kind_cache,
+    );
 
-    let mut proposed = current.clone();
-    proposed.choices.get_mut(&site).unwrap().value = ChoiceValue::F64(prop_val);
-
-    // Score current and proposed traces under the model.
+    // Score the current state (also refreshes accumulators for the trace we
+    // return on rejection, FG-40).
     let (_, cur_scored) = run(
         ScoreGivenTrace {
             base: current.clone(),
@@ -666,22 +900,17 @@ fn tempered_single_site_mh<A, R: Rng>(
         },
         model_fn(),
     );
-    let (_, prop_scored) = run(
-        ScoreGivenTrace {
-            base: proposed,
-            trace: Trace::default(),
-        },
-        model_fn(),
-    );
 
-    // Tempered acceptance: Δlog_prior + β·Δloglik (symmetric proposal ⇒ no Hastings).
-    let log_alpha = (prop_scored.log_prior - cur_scored.log_prior)
-        + beta * (particle_log_likelihood(&prop_scored) - particle_log_likelihood(&cur_scored));
+    let dim_term = (sites.len() as f64).ln() - (prop_trace.choices.len() as f64).ln();
+    let log_alpha = (prop_trace.log_prior - cur_scored.log_prior)
+        + beta * (particle_log_likelihood(&prop_trace) - particle_log_likelihood(&cur_scored))
+        + (lqr - lqf)
+        + dim_term;
     let accept = log_alpha >= 0.0 || rng.gen::<f64>() < log_alpha.exp();
-    adaptation.update(&site, accept);
+    adaptation.update(&target, accept);
 
     if accept {
-        prop_scored
+        prop_trace
     } else {
         cur_scored
     }
@@ -789,6 +1018,75 @@ pub fn smc_prior_particles<A, R: Rng>(
     particles
 }
 
+/// Recover the model return value (e.g. a decoded genome) from a particle's
+/// trace by replaying the model against it.
+///
+/// Uses [`ScoreGivenTrace`], which requires the trace to be a complete
+/// assignment for `model_fn` — always true for particles produced by
+/// [`adaptive_smc`] / [`adaptive_smc_with_kernel`] with the same model. Costs
+/// one model execution. `Particle` deliberately does not cache the return
+/// value: storing it would force `A: Clone` through every resample/rejuvenation
+/// path and break the move-not-clone particle construction (FG-59); decode is
+/// deterministic given the trace, so nothing is lost.
+///
+/// For traces of uncertain provenance (where a site may be missing or
+/// type-mismatched), use [`try_decode_particle`] instead — `ScoreGivenTrace`
+/// panics on an incomplete assignment.
+pub fn decode_particle<A>(particle: &Particle, model_fn: impl Fn() -> Model<A>) -> A {
+    let (a, _) = run(
+        ScoreGivenTrace {
+            base: particle.trace.clone(),
+            trace: Trace::default(),
+        },
+        model_fn(),
+    );
+    a
+}
+
+/// Fallible sibling of [`decode_particle`] for traces of uncertain provenance,
+/// backed by [`SafeScoreGivenTrace`](crate::runtime::interpreters::SafeScoreGivenTrace):
+/// a missing or type-mismatched site returns `Err` instead of panicking.
+///
+/// The failure signal is the safe scorer's `-∞` `log_prior` sentinel: a trace
+/// that IS a complete, in-support assignment for `model_fn` always scores a
+/// finite log-prior, so a non-finite one means the trace does not decode under
+/// this model.
+pub fn try_decode_particle<A>(
+    particle: &Particle,
+    model_fn: impl Fn() -> Model<A>,
+) -> crate::error::FugueResult<A> {
+    let (a, scored) = run(
+        crate::runtime::interpreters::SafeScoreGivenTrace {
+            base: particle.trace.clone(),
+            trace: Trace::default(),
+            warn_on_error: false,
+        },
+        model_fn(),
+    );
+    if scored.log_prior.is_finite() {
+        Ok(a)
+    } else {
+        Err(crate::error::FugueError::trace_error(
+            "try_decode_particle",
+            None,
+            "particle trace is not a complete in-support assignment for this model",
+            crate::error::ErrorCode::TraceAddressNotFound,
+        ))
+    }
+}
+
+/// Decode a whole population, pairing each decoded value with its normalized
+/// weight — the shape posterior readouts (weighted mean / argmax) consume.
+pub fn decode_particles<A>(
+    particles: &[Particle],
+    model_fn: impl Fn() -> Model<A>,
+) -> Vec<(A, f64)> {
+    particles
+        .iter()
+        .map(|p| (decode_particle(p, &model_fn), p.weight))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -864,6 +1162,367 @@ mod tests {
         // Fallback to uniform
         assert!((particles[0].weight - 0.5).abs() < 1e-12);
         assert!((particles[1].weight - 0.5).abs() < 1e-12);
+    }
+
+    /// Regression (EA-as-PPL F1): rejuvenation must move non-F64 sites. The
+    /// previous kernel collected only `ChoiceValue::F64` sites and returned
+    /// `current.clone()` otherwise, so a population of pure-Bool traces (a
+    /// bit-string genome) was frozen forever.
+    #[test]
+    fn test_smc_rejuvenation_moves_bitstring() {
+        let n_bits = 4usize;
+        let model_fn = move || {
+            let bits: Vec<Model<bool>> = (0..n_bits)
+                .map(|i| sample(addr!("bit", i), Bernoulli::new(0.5).unwrap()))
+                .collect();
+            crate::core::model::sequence_vec(bits).bind(|bs| {
+                let k = bs.iter().filter(|&&b| b).count() as f64;
+                crate::core::model::factor(k).map(move |_| bs)
+            })
+        };
+
+        // Direct movement check: a population cloned from ONE prior draw must
+        // diversify under rejuvenation (before the fix: bit-identical forever).
+        let mut rng = StdRng::seed_from_u64(11);
+        let seed_particles = smc_prior_particles(&mut rng, 1, model_fn);
+        let mut particles: Vec<Particle> = (0..20).map(|_| seed_particles[0].clone()).collect();
+        rejuvenate_particles(&mut rng, &mut particles, model_fn, 1.0, 5);
+        let moved = particles.iter().any(|p| {
+            (0..n_bits).any(|i| {
+                p.trace.get_bool(&addr!("bit", i))
+                    != seed_particles[0].trace.get_bool(&addr!("bit", i))
+            })
+        });
+        assert!(
+            moved,
+            "Bool-only population did not move under rejuvenation"
+        );
+
+        // Analytic marginal check: per-bit posterior p(1) = e/(1+e) ≈ 0.7311.
+        let config = SMCConfig {
+            resampling_method: ResamplingMethod::Systematic,
+            ess_threshold: 0.5,
+            rejuvenation_steps: 2,
+        };
+        let result = adaptive_smc(&mut rng, 400, model_fn, config);
+        let p1 = std::f64::consts::E / (1.0 + std::f64::consts::E);
+        for i in 0..n_bits {
+            let mean: f64 = result
+                .iter()
+                .map(|p| {
+                    let b = p.trace.get_bool(&addr!("bit", i)).unwrap();
+                    p.weight * if b { 1.0 } else { 0.0 }
+                })
+                .sum();
+            assert!(
+                (mean - p1).abs() < 0.09,
+                "bit {} posterior mean {} vs analytic {}",
+                i,
+                mean,
+                p1
+            );
+        }
+    }
+
+    /// Helper: two independent Normal(0,1) sites each observed with sd 1.
+    /// Posterior per site: Normal(y_i/2, 1/2).
+    fn two_site_model(y0: f64, y1: f64) -> impl Fn() -> Model<(f64, f64)> + Clone {
+        move || {
+            sample(addr!("x", 0), Normal::new(0.0, 1.0).unwrap()).and_then(move |x0| {
+                sample(addr!("x", 1), Normal::new(0.0, 1.0).unwrap()).and_then(move |x1| {
+                    observe(addr!("y", 0), Normal::new(x0, 1.0).unwrap(), y0).and_then(move |_| {
+                        observe(addr!("y", 1), Normal::new(x1, 1.0).unwrap(), y1)
+                            .map(move |_| (x0, x1))
+                    })
+                })
+            })
+        }
+    }
+
+    /// A value-independent, pair-symmetric mask: each of the two sites is
+    /// included in the swap independently with probability 1/2.
+    #[allow(clippy::type_complexity)]
+    fn random_site_mask() -> Box<dyn Fn(&Trace, &Trace, &mut dyn rand::RngCore) -> Vec<Address>> {
+        Box::new(|a: &Trace, _b: &Trace, rng: &mut dyn rand::RngCore| {
+            a.choices
+                .keys()
+                .filter(|_| rng.gen::<bool>())
+                .cloned()
+                .collect()
+        })
+    }
+
+    /// EA-as-PPL F4: the crossover kernel is π⊗π-invariant — a population
+    /// initialized FROM the analytic posterior stays posterior-distributed
+    /// under repeated sweeps. (Crossover only exchanges values between
+    /// particles, so this — not prior-to-posterior transport — is the correct
+    /// invariance check.)
+    #[test]
+    fn test_crossover_product_invariance() {
+        let (y0, y1) = (1.0, -0.5);
+        let model_fn = two_site_model(y0, y1);
+        let mut rng = StdRng::seed_from_u64(77);
+
+        // Initialize each particle exactly from the product posterior.
+        let post0 = Normal::new(y0 / 2.0, (0.5f64).sqrt()).unwrap();
+        let post1 = Normal::new(y1 / 2.0, (0.5f64).sqrt()).unwrap();
+        let n = 300;
+        let mut particles: Vec<Particle> = (0..n)
+            .map(|_| {
+                let mut base = Trace::default();
+                base.insert_choice(
+                    addr!("x", 0),
+                    crate::runtime::trace::ChoiceValue::F64(post0.sample(&mut rng)),
+                    0.0,
+                );
+                base.insert_choice(
+                    addr!("x", 1),
+                    crate::runtime::trace::ChoiceValue::F64(post1.sample(&mut rng)),
+                    0.0,
+                );
+                let (_, scored) = run(
+                    ScoreGivenTrace {
+                        base,
+                        trace: Trace::default(),
+                    },
+                    model_fn(),
+                );
+                Particle {
+                    trace: scored,
+                    weight: 1.0 / n as f64,
+                    log_weight: -(n as f64).ln(),
+                }
+            })
+            .collect();
+
+        let mut kernel = CrossoverKernel {
+            n_pairs: 150,
+            mask: random_site_mask(),
+        };
+        for _ in 0..40 {
+            PopulationKernel::<(f64, f64)>::sweep(
+                &mut kernel,
+                &mut rng,
+                &mut particles,
+                &model_fn,
+                1.0,
+            );
+        }
+
+        for (i, target_mean) in [(0usize, y0 / 2.0), (1usize, y1 / 2.0)] {
+            let xs: Vec<f64> = particles
+                .iter()
+                .map(|p| p.trace.get_f64(&addr!("x", i)).unwrap())
+                .collect();
+            let mean: f64 = xs.iter().sum::<f64>() / xs.len() as f64;
+            let var: f64 = xs.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / xs.len() as f64;
+            assert!(
+                (mean - target_mean).abs() < 0.15,
+                "site {} marginal mean {} drifted from posterior {}",
+                i,
+                mean,
+                target_mean
+            );
+            assert!(
+                (var - 0.5).abs() < 0.15,
+                "site {} marginal var {} drifted from posterior 0.5",
+                i,
+                var
+            );
+        }
+    }
+
+    /// EA-as-PPL F4 contract (W): a sweep never touches particle weights.
+    #[test]
+    fn test_crossover_preserves_uniform_weights() {
+        let model_fn = two_site_model(1.0, -0.5);
+        let mut rng = StdRng::seed_from_u64(88);
+        let mut particles = smc_prior_particles(&mut rng, 30, &model_fn);
+        let before: Vec<(f64, f64)> = particles.iter().map(|p| (p.weight, p.log_weight)).collect();
+
+        let mut kernel = CrossoverKernel {
+            n_pairs: 60,
+            mask: random_site_mask(),
+        };
+        PopulationKernel::<(f64, f64)>::sweep(
+            &mut kernel,
+            &mut rng,
+            &mut particles,
+            &model_fn,
+            0.7,
+        );
+
+        let after: Vec<(f64, f64)> = particles.iter().map(|p| (p.weight, p.log_weight)).collect();
+        assert_eq!(before, after, "crossover sweep modified particle weights");
+    }
+
+    /// EA-as-PPL F4 contract (E) / FG-58: an invariant kernel must not shift
+    /// the log-evidence estimate. Both runs are compared to the analytic
+    /// marginal likelihood of the conjugate model.
+    #[test]
+    fn test_crossover_evidence_noncorruption() {
+        let (y0, y1) = (1.0, -0.5);
+        let model_fn = two_site_model(y0, y1);
+        // Analytic: y_i ~ N(0, sqrt(1² + 1²)) independently.
+        let marg = Normal::new(0.0, (2.0f64).sqrt()).unwrap();
+        let analytic = marg.log_prob(&y0) + marg.log_prob(&y1);
+
+        let config = || SMCConfig {
+            resampling_method: ResamplingMethod::Systematic,
+            ess_threshold: 0.7,
+            rejuvenation_steps: 2,
+        };
+        let mut rng = StdRng::seed_from_u64(99);
+        let plain = adaptive_smc(&mut rng, 600, &model_fn, config());
+        let mut kernel = CrossoverKernel {
+            n_pairs: 300,
+            mask: random_site_mask(),
+        };
+        let crossed = adaptive_smc_with_kernel(&mut rng, 600, &model_fn, config(), &mut kernel);
+
+        assert!(
+            (plain.log_evidence - analytic).abs() < 0.25,
+            "NoKernel evidence {} vs analytic {}",
+            plain.log_evidence,
+            analytic
+        );
+        assert!(
+            (crossed.log_evidence - analytic).abs() < 0.25,
+            "CrossoverKernel evidence {} vs analytic {}",
+            crossed.log_evidence,
+            analytic
+        );
+    }
+
+    /// EA-as-PPL F4: swaps that leave the target's support must be rejected.
+    /// The constraint couples the two sites (x0 + x1 ≤ 1), so a crossover swap
+    /// CAN violate it — the re-scored `-∞` density must reject the move.
+    #[test]
+    fn test_crossover_support_truncation() {
+        let model_fn = || {
+            sample(addr!("x", 0), Normal::new(0.0, 1.0).unwrap()).and_then(|x0| {
+                sample(addr!("x", 1), Normal::new(0.0, 1.0).unwrap()).and_then(move |x1| {
+                    crate::core::model::guard(x0 + x1 <= 1.0).map(move |_| (x0, x1))
+                })
+            })
+        };
+        let mut rng = StdRng::seed_from_u64(111);
+
+        // Build a valid population by rejection from the prior.
+        let n = 60;
+        let mut particles = Vec::with_capacity(n);
+        while particles.len() < n {
+            let (_, t) = run(
+                PriorHandler {
+                    rng: &mut rng,
+                    trace: Trace::default(),
+                },
+                model_fn(),
+            );
+            if t.total_log_weight().is_finite() {
+                particles.push(Particle {
+                    trace: t,
+                    weight: 1.0 / n as f64,
+                    log_weight: -(n as f64).ln(),
+                });
+            }
+        }
+
+        let mut kernel = CrossoverKernel {
+            n_pairs: 120,
+            // Swap only site 0 — guaranteed to threaten the joint constraint.
+            mask: Box::new(|_: &Trace, _: &Trace, _: &mut dyn rand::RngCore| vec![addr!("x", 0)]),
+        };
+        for _ in 0..30 {
+            PopulationKernel::<(f64, f64)>::sweep(
+                &mut kernel,
+                &mut rng,
+                &mut particles,
+                &model_fn,
+                1.0,
+            );
+            for p in &particles {
+                let x0 = p.trace.get_f64(&addr!("x", 0)).unwrap();
+                let x1 = p.trace.get_f64(&addr!("x", 1)).unwrap();
+                assert!(
+                    x0 + x1 <= 1.0 + 1e-12,
+                    "accepted crossover left the truncated support: {} + {} > 1",
+                    x0,
+                    x1
+                );
+            }
+        }
+    }
+
+    /// EA-as-PPL F5: decode returns exactly the value implied by the trace,
+    /// decoded weights sum to 1, and the fallible variant rejects a foreign
+    /// trace.
+    #[test]
+    fn test_decode_fidelity() {
+        let model_fn = || {
+            sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap()).and_then(|mu| {
+                observe(addr!("y"), Normal::new(mu, 1.0).unwrap(), 0.5).map(move |_| mu)
+            })
+        };
+        let mut rng = StdRng::seed_from_u64(123);
+        let particles = smc_prior_particles(&mut rng, 20, model_fn);
+        for p in &particles {
+            let decoded = decode_particle(p, model_fn);
+            assert_eq!(decoded, p.trace.get_f64(&addr!("mu")).unwrap());
+            assert_eq!(try_decode_particle(p, model_fn).unwrap(), decoded);
+        }
+        let decoded = decode_particles(&particles, model_fn);
+        let total: f64 = decoded.iter().map(|(_, w)| w).sum();
+        assert!((total - 1.0).abs() < 1e-9);
+
+        // A trace missing the model's site must fail the fallible decode.
+        let foreign = Particle {
+            trace: Trace::default(),
+            weight: 1.0,
+            log_weight: 0.0,
+        };
+        assert!(try_decode_particle(&foreign, model_fn).is_err());
+    }
+
+    /// EA-as-PPL F5 + EV-16 end-to-end: the fugue-evo conjugate "fitness as
+    /// likelihood" target — prior N(0, 2²), factor −½(x−3)² — reproduced
+    /// through `adaptive_smc_with_kernel` + `decode_particles`: posterior mean
+    /// 2.4 ± 0.15, variance 0.8 ± 0.2. This is the readout path fugue-evo's
+    /// rebuilt EvolutionarySMC uses in place of cached genome/fitness fields.
+    #[test]
+    fn test_decode_weighted_mean() {
+        let model_fn = || {
+            sample(addr!("gene", 0), Normal::new(0.0, 2.0).unwrap()).and_then(|x| {
+                crate::core::model::factor(-0.5 * (x - 3.0) * (x - 3.0)).map(move |_| x)
+            })
+        };
+        let mut rng = StdRng::seed_from_u64(2024);
+        let config = SMCConfig {
+            resampling_method: ResamplingMethod::Systematic,
+            ess_threshold: 0.7,
+            rejuvenation_steps: 3,
+        };
+        let mut kernel = CrossoverKernel {
+            n_pairs: 200,
+            mask: Box::new(|_: &Trace, _: &Trace, _: &mut dyn rand::RngCore| {
+                vec![addr!("gene", 0)]
+            }),
+        };
+        let result = adaptive_smc_with_kernel(&mut rng, 800, model_fn, config, &mut kernel);
+
+        let decoded = decode_particles(&result, model_fn);
+        let mean: f64 = decoded.iter().map(|(x, w)| x * w).sum();
+        let var: f64 = decoded.iter().map(|(x, w)| w * (x - mean).powi(2)).sum();
+        assert!(
+            (mean - 2.4).abs() < 0.15,
+            "EV-16 posterior mean {} vs analytic 2.4",
+            mean
+        );
+        assert!(
+            (var - 0.8).abs() < 0.2,
+            "EV-16 posterior variance {} vs analytic 0.8",
+            var
+        );
     }
 
     #[test]

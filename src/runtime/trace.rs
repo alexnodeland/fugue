@@ -340,6 +340,72 @@ impl Trace {
         };
         self.choices.insert(addr, choice);
     }
+
+    /// Collect the addresses under `prefix` (per [`Address::has_prefix`]).
+    ///
+    /// Addresses sharing a string prefix are lexicographically contiguous, so
+    /// this scans only that range of the `BTreeMap` — O(k + log n) where k is
+    /// the number of keys sharing the raw string prefix. (The `has_prefix`
+    /// matches themselves need not be contiguous — a key like `"a0"` can sort
+    /// between `"a#1"` and `"a::b"` — hence the extra filter.)
+    fn prefix_addresses(&self, prefix: &str) -> Vec<Address> {
+        self.choices
+            .range(Address::new(prefix.to_string())..)
+            .take_while(|(a, _)| a.as_str().starts_with(prefix))
+            .filter(|(a, _)| a.has_prefix(prefix))
+            .map(|(a, _)| a.clone())
+            .collect()
+    }
+
+    /// Return a new trace containing exactly the choices whose address is under
+    /// `prefix` (per [`Address::has_prefix`]).
+    ///
+    /// **The three log accumulators of the result are zeroed and must not be
+    /// trusted**: `log_prior`/`log_likelihood`/`log_factors` are flat sums over
+    /// the whole execution (observations and factors leave no `choices` entry at
+    /// all), so they are not decomposable by address — see [`Self::insert_choice`].
+    /// Re-score the result under the relevant model
+    /// ([`ScoreGivenTrace`](crate::runtime::interpreters::ScoreGivenTrace) /
+    /// [`score_given_trace_reconciled`](crate::runtime::interpreters::score_given_trace_reconciled))
+    /// before using its weight. O(k + log n).
+    pub fn extract_prefix(&self, prefix: &str) -> Trace {
+        let mut out = Trace::default();
+        for addr in self.prefix_addresses(prefix) {
+            out.choices
+                .insert(addr.clone(), self.choices[&addr].clone());
+        }
+        out
+    }
+
+    /// Remove every choice under `prefix` in place (per [`Address::has_prefix`]).
+    ///
+    /// The log accumulators are left **stale** — they are flat, non-decomposable
+    /// sums (see [`Self::extract_prefix`]) — and must be recomputed by
+    /// re-scoring under the model. O(k + log n).
+    pub fn truncate_prefix(&mut self, prefix: &str) {
+        for addr in self.prefix_addresses(prefix) {
+            self.choices.remove(&addr);
+        }
+    }
+
+    /// Replace the block under `prefix` with the choices of `donor` that fall
+    /// under `prefix`: removes this trace's `prefix` range, then inserts the
+    /// donor's `prefix`-range choices (values and stored `logp`).
+    ///
+    /// The log accumulators are left **invalid** — the caller MUST re-score the
+    /// result under the model before using its weight. A graft that leaves the
+    /// trace structurally inconsistent with the model (e.g. an incomplete
+    /// assignment) is not detectable here; it surfaces at re-score time, so use
+    /// the reconciling re-score
+    /// ([`score_given_trace_reconciled`](crate::runtime::interpreters::score_given_trace_reconciled))
+    /// when the graft may change model structure. O(k_old + k_donor + log n).
+    pub fn graft_prefix(&mut self, prefix: &str, donor: &Trace) {
+        self.truncate_prefix(prefix);
+        for addr in donor.prefix_addresses(prefix) {
+            self.choices
+                .insert(addr.clone(), donor.choices[&addr].clone());
+        }
+    }
 }
 
 #[cfg(test)]
@@ -390,5 +456,87 @@ mod tests {
         let t = Trace::default();
         let e = t.get_f64_result(&addr!("missing")).unwrap_err();
         assert!(matches!(e, crate::error::FugueError::TraceError { .. }));
+    }
+
+    /// Boundary regression for prefix surgery: `extract_prefix("a")` must take
+    /// the descendants of `a` under the path grammar and exclude both the
+    /// sibling `ab/0` and the non-descendant `a0` that sorts inside the raw
+    /// string-prefix range.
+    #[test]
+    fn test_extract_prefix_boundary() {
+        let mut t = Trace::default();
+        for (name, v) in [
+            ("a", 0.0),
+            ("a#1", 1.0),
+            ("a/0", 2.0),
+            ("a/1/x", 3.0),
+            ("a::s", 4.0),
+            ("a0", 5.0),
+            ("ab/0", 6.0),
+        ] {
+            t.insert_choice(Address::new(name), ChoiceValue::F64(v), -0.5);
+        }
+
+        let sub = t.extract_prefix("a");
+        let got: Vec<&str> = sub.choices.keys().map(|a| a.as_str()).collect();
+        assert_eq!(got, vec!["a", "a#1", "a/0", "a/1/x", "a::s"]);
+
+        // A prefix ending in a separator matches by plain starts_with.
+        let slash = t.extract_prefix("a/");
+        let got: Vec<&str> = slash.choices.keys().map(|a| a.as_str()).collect();
+        assert_eq!(got, vec!["a/0", "a/1/x"]);
+    }
+
+    /// `graft_prefix(P, self.extract_prefix(P))` is a no-op on `choices`, and
+    /// grafting from a donor replaces exactly the `P` block.
+    #[test]
+    fn test_graft_round_trip() {
+        let mut t = Trace::default();
+        t.insert_choice(addr!("gene", 0), ChoiceValue::F64(1.0), -0.1);
+        t.insert_choice(addr!("gene", 1), ChoiceValue::F64(2.0), -0.2);
+        t.insert_choice(addr!("other"), ChoiceValue::Bool(true), -0.3);
+
+        let before: Vec<(String, ChoiceValue)> = t
+            .choices
+            .iter()
+            .map(|(a, c)| (a.as_str().to_string(), c.value.clone()))
+            .collect();
+        let block = t.extract_prefix("gene");
+        t.graft_prefix("gene", &block);
+        let after: Vec<(String, ChoiceValue)> = t
+            .choices
+            .iter()
+            .map(|(a, c)| (a.as_str().to_string(), c.value.clone()))
+            .collect();
+        assert_eq!(before, after);
+
+        // Graft from a donor with different values on the block.
+        let mut donor = Trace::default();
+        donor.insert_choice(addr!("gene", 0), ChoiceValue::F64(9.0), -0.9);
+        donor.insert_choice(addr!("gene", 1), ChoiceValue::F64(8.0), -0.8);
+        donor.insert_choice(addr!("other"), ChoiceValue::Bool(false), -0.7);
+        t.graft_prefix("gene", &donor);
+        assert_eq!(t.get_f64(&addr!("gene", 0)), Some(9.0));
+        assert_eq!(t.get_f64(&addr!("gene", 1)), Some(8.0));
+        // Non-block addresses are untouched by the graft.
+        assert_eq!(t.get_bool(&addr!("other")), Some(true));
+    }
+
+    /// Contract guard: the extracted subtrace's accumulators are zeroed —
+    /// callers must re-score before trusting any weight.
+    #[test]
+    fn test_extract_zeroes_accumulators() {
+        let mut t = Trace {
+            log_prior: -1.0,
+            log_likelihood: -2.0,
+            log_factors: -3.0,
+            ..Default::default()
+        };
+        t.insert_choice(addr!("x", 0), ChoiceValue::F64(0.5), -0.5);
+        let sub = t.extract_prefix("x");
+        assert_eq!(sub.log_prior, 0.0);
+        assert_eq!(sub.log_likelihood, 0.0);
+        assert_eq!(sub.log_factors, 0.0);
+        assert_eq!(sub.choices.len(), 1);
     }
 }
