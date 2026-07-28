@@ -103,6 +103,40 @@ impl Address {
     pub fn as_str(&self) -> &str {
         &self.repr
     }
+
+    /// True iff this address is `prefix` itself or a descendant of it under the
+    /// address path grammar — i.e. `prefix` followed by a segment separator
+    /// (`#` from [`addr!`](crate::addr), `::` from
+    /// [`scoped_addr!`](crate::scoped_addr), or a caller-chosen `/`). Unlike a
+    /// raw [`str::starts_with`], this does **not** treat `"gene"` as a prefix of
+    /// `"generation"`.
+    ///
+    /// A `prefix` that already ends in a separator character (`#`, `/`, or `:`)
+    /// is matched by plain `starts_with`; callers using a bespoke separator
+    /// should pass the prefix *including* the trailing separator (e.g.
+    /// `"first/"`).
+    ///
+    /// ```rust
+    /// use fugue::*;
+    ///
+    /// assert!(addr!("gene", 3).has_prefix("gene"));
+    /// assert!(Address::new("node/0/1").has_prefix("node/0"));
+    /// assert!(Address::new("scope::x").has_prefix("scope"));
+    /// assert!(!Address::new("generation").has_prefix("gene"));
+    /// ```
+    pub fn has_prefix(&self, prefix: &str) -> bool {
+        let s = self.as_str();
+        let Some(rest) = s.strip_prefix(prefix) else {
+            return false;
+        };
+        if rest.is_empty() {
+            return true;
+        }
+        if matches!(prefix.chars().last(), Some('#' | '/' | ':')) {
+            return true;
+        }
+        rest.starts_with('#') || rest.starts_with('/') || rest.starts_with("::")
+    }
 }
 
 impl Display for Address {

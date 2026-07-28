@@ -114,7 +114,7 @@ use crate::core::distribution::Distribution;
 use crate::core::model::Model;
 use crate::inference::mcmc_utils::DiminishingAdaptation;
 use crate::runtime::handler::{run, Handler};
-use crate::runtime::interpreters::{PriorHandler, ScoreGivenTrace};
+use crate::runtime::interpreters::{score_given_trace_reconciled, PriorHandler, ScoreGivenTrace};
 use crate::runtime::trace::{Choice, ChoiceValue, Trace};
 use rand::{Rng, RngCore};
 use std::collections::HashMap;
@@ -634,7 +634,7 @@ impl<'a, R: RngCore> Handler for SingleSiteProposalHandler<'a, R> {
 /// cached site list even when the site count is unchanged (e.g. a branch that
 /// swaps one address for another).
 #[allow(clippy::type_complexity)]
-fn propose_and_score<A, F, R>(
+pub(crate) fn propose_and_score<A, F, R>(
     rng: &mut R,
     model_fn: &F,
     current: &Trace,
@@ -862,6 +862,105 @@ pub fn adaptive_single_site_mh<A, R: Rng>(
     }
 }
 
+/// One block-regeneration Metropolis–Hastings transition.
+///
+/// Deletes the choices at every address in `block` from `current`, replays the
+/// model to fill them (fresh draws from the prior, via
+/// [`score_given_trace_reconciled`]), and accepts or rejects with the
+/// prior-cancelling acceptance ratio below. This generalizes single-site MH
+/// from one target address to an arbitrary address set S — the "selective
+/// resampling" primitive: proposal = regenerate the sub-trace at S from the
+/// prior conditioned on the untouched coordinates.
+///
+/// `beta` tempers the likelihood (`π_β(θ) ∝ p(θ)·p(y|θ)^β`; pass `1.0` for an
+/// untempered posterior move), which makes the move directly usable as an SMC
+/// block-rejuvenation kernel. Addresses in `block` absent from `current` are
+/// ignored; present-but-mismatched-type entries are treated as fresh by the
+/// reconciler. The returned trace is freshly scored (FG-40/FG-48), so
+/// `total_log_weight()` is valid.
+///
+/// # Acceptance ratio
+///
+/// ```text
+/// log α = (log_prior′ − log_prior) + β·(loglik′ − loglik) + log q_rev − log q_fwd
+/// log q_fwd = Σ_{a ∈ fresh}                    logp′(a)     (forward births from the prior)
+/// log q_rev = Σ_{a ∈ S present in current}     logp(a)
+///           + Σ_{a ∈ vanished}                 logp(a)      (death correction, FG-20/FG-21)
+/// ```
+///
+/// For a **fixed address structure** (`fresh = S`, `vanished = ∅`) the prior
+/// and proposal terms cancel exactly and this collapses to
+/// `log α = β·(loglik′ − loglik)` — the prior-cancellation property that makes
+/// block regeneration cheap to accept/reject.
+///
+/// Unlike the single-site kernels there is **no dimension-selection term**
+/// (`ln|sites(current)| − ln|sites(proposed)|`): that term corrects for picking
+/// the target uniformly among a state-dependent site set, whereas here the
+/// block S is fixed by the caller — the forward and reverse moves regenerate
+/// deterministic address sets whose proposal densities are fully accounted by
+/// the `log q` terms above.
+///
+/// If the reconciling replay reports an address conflict (the model visits the
+/// same address twice, FG-47), the move is treated as a rejection and the
+/// (re-scored) current state is returned.
+pub fn block_regeneration_mh<A, R: Rng>(
+    rng: &mut R,
+    model_fn: impl Fn() -> Model<A>,
+    current: &Trace,
+    block: &[Address],
+    beta: f64,
+) -> (A, Trace) {
+    // Score the current state once; also the state returned on rejection (FG-40).
+    let (a_cur, cur_scored) = run(
+        ScoreGivenTrace {
+            base: current.clone(),
+            trace: Trace::default(),
+        },
+        model_fn(),
+    );
+
+    // Delete the block, then replay: removed addresses the model re-visits are
+    // drawn fresh from their prior (reported in `fresh_addresses`); addresses
+    // the model no longer visits are `vanished_addresses`.
+    let mut base = current.clone();
+    for a in block {
+        base.choices.remove(a);
+    }
+    let (a_prop, prop, report) = match score_given_trace_reconciled(base, rng, model_fn()) {
+        Ok(t) => t,
+        Err(_) => return (a_cur, cur_scored), // reject on address conflict
+    };
+
+    let log_q_fwd: f64 = report
+        .fresh_addresses
+        .iter()
+        .filter_map(|a| prop.choices.get(a).map(|c| c.logp))
+        .sum();
+    // Block ∩ vanished = ∅ (vanished is computed against the block-deleted
+    // base), so the two reverse-birth sums never double-count a site.
+    let log_q_rev: f64 = block
+        .iter()
+        .filter_map(|a| current.choices.get(a).map(|c| c.logp))
+        .sum::<f64>()
+        + report
+            .vanished_addresses
+            .iter()
+            .filter_map(|a| current.choices.get(a).map(|c| c.logp))
+            .sum::<f64>();
+
+    let loglik = |t: &Trace| t.log_likelihood + t.log_factors;
+    let log_alpha = (prop.log_prior - cur_scored.log_prior)
+        + beta * (loglik(&prop) - loglik(&cur_scored))
+        + log_q_rev
+        - log_q_fwd;
+
+    if log_alpha >= 0.0 || rng.gen::<f64>() < log_alpha.exp() {
+        (a_prop, prop)
+    } else {
+        (a_cur, cur_scored)
+    }
+}
+
 /// Run an adaptive MCMC chain with automatic proposal tuning.
 ///
 /// This is the main entry point for running Metropolis-Hastings MCMC on a
@@ -1033,6 +1132,230 @@ mod tests {
     use crate::runtime::handler::run;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
+
+    /// EA-as-PPL F2: block regeneration over the single latent site of a
+    /// Beta-Bernoulli model is an independence sampler from the prior and must
+    /// reproduce the closed-form Beta posterior.
+    #[test]
+    #[allow(clippy::needless_borrows_for_generic_args)] // &model_fn is reused across loop iterations
+    fn test_block_regen_beta_bernoulli() {
+        use crate::inference::validation::{
+            test_conjugate_beta_bernoulli_model, ConjugateBetaBernoulliConfig,
+        };
+        use crate::runtime::interpreters::PriorHandler;
+
+        let observations = vec![
+            true, true, false, true, false, true, true, false, true, true,
+        ];
+        let obs_for_model = observations.clone();
+        let model_fn = move || {
+            let obs = obs_for_model.clone();
+            sample(addr!("theta"), Beta::new(2.0, 2.0).unwrap()).and_then(move |theta| {
+                let mut m = crate::core::model::pure(());
+                for (i, &o) in obs.iter().enumerate() {
+                    m = m.and_then(move |_| {
+                        observe(
+                            addr!("obs", i),
+                            Bernoulli::new(theta.clamp(1e-9, 1.0 - 1e-9)).unwrap(),
+                            o,
+                        )
+                    });
+                }
+                m.map(move |_| theta)
+            })
+        };
+
+        let mcmc_fn = |rng: &mut StdRng, n_samples: usize, n_warmup: usize| {
+            let (_, mut current) = run(
+                PriorHandler {
+                    rng,
+                    trace: Trace::default(),
+                },
+                model_fn(),
+            );
+            let block = [addr!("theta")];
+            let mut samples = Vec::with_capacity(n_samples);
+            for it in 0..(n_samples + n_warmup) {
+                let (v, t) = block_regeneration_mh(rng, &model_fn, &current, &block, 1.0);
+                current = t;
+                if it >= n_warmup {
+                    samples.push((v, current.clone()));
+                }
+            }
+            samples
+        };
+
+        let mut rng = StdRng::seed_from_u64(34);
+        let result = test_conjugate_beta_bernoulli_model(
+            &mut rng,
+            mcmc_fn,
+            ConjugateBetaBernoulliConfig {
+                prior_alpha: 2.0,
+                prior_beta: 2.0,
+                observations,
+                n_samples: 8000,
+                n_warmup: 500,
+            },
+        );
+        assert!(
+            result.is_valid(),
+            "block-regeneration chain failed conjugate Beta-Bernoulli validation"
+        );
+    }
+
+    /// EA-as-PPL F2: on a fixed-structure product-Normal model, a single block
+    /// move over ALL sites targets the same (analytic) posterior as the
+    /// single-site kernel — the prior-cancellation collapse `log α = β·Δloglik`.
+    #[test]
+    #[allow(clippy::needless_borrows_for_generic_args)] // &model_fn is reused across loop iterations
+    fn test_block_vs_sequential_single_site() {
+        use crate::runtime::interpreters::PriorHandler;
+
+        // Two independent Normal(0,1) sites, each observed with sd 1:
+        // posterior per site is Normal(y/2, 1/2).
+        let (y0, y1) = (1.0, -0.5);
+        let model_fn = move || {
+            sample(addr!("x", 0), Normal::new(0.0, 1.0).unwrap()).and_then(move |x0| {
+                sample(addr!("x", 1), Normal::new(0.0, 1.0).unwrap()).and_then(move |x1| {
+                    observe(addr!("y", 0), Normal::new(x0, 1.0).unwrap(), y0).and_then(move |_| {
+                        observe(addr!("y", 1), Normal::new(x1, 1.0).unwrap(), y1)
+                            .map(move |_| (x0, x1))
+                    })
+                })
+            })
+        };
+
+        let mut rng = StdRng::seed_from_u64(44);
+        let (_, mut current) = run(
+            PriorHandler {
+                rng: &mut rng,
+                trace: Trace::default(),
+            },
+            model_fn(),
+        );
+        let block = [addr!("x", 0), addr!("x", 1)];
+        let mut xs0 = Vec::new();
+        let mut xs1 = Vec::new();
+        for it in 0..6000 {
+            let (_, t) = block_regeneration_mh(&mut rng, &model_fn, &current, &block, 1.0);
+            current = t;
+            if it >= 500 {
+                xs0.push(current.get_f64(&addr!("x", 0)).unwrap());
+                xs1.push(current.get_f64(&addr!("x", 1)).unwrap());
+            }
+        }
+        for (xs, y) in [(&xs0, y0), (&xs1, y1)] {
+            let mean: f64 = xs.iter().sum::<f64>() / xs.len() as f64;
+            let var: f64 = xs.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / xs.len() as f64;
+            assert!(
+                (mean - y / 2.0).abs() < 0.08,
+                "posterior mean {} vs analytic {}",
+                mean,
+                y / 2.0
+            );
+            assert!((var - 0.5).abs() < 0.08, "posterior var {} vs 0.5", var);
+        }
+    }
+
+    /// EA-as-PPL F2: trans-dimensional block regeneration. A Bernoulli switch
+    /// gates an extra Normal site; the block = {switch, extra} move opens and
+    /// closes the branch, and the fresh/vanished bookkeeping must reproduce the
+    /// analytic posterior over the switch.
+    #[test]
+    #[allow(clippy::needless_borrows_for_generic_args)] // &model_fn is reused across loop iterations
+    fn test_block_regen_transdimensional() {
+        use crate::runtime::interpreters::PriorHandler;
+
+        let y = 1.5;
+        let p_switch = 0.3;
+        let model_fn = move || {
+            sample(addr!("b"), Bernoulli::new(p_switch).unwrap()).and_then(move |b| {
+                if b {
+                    sample(addr!("x"), Normal::new(0.0, 1.0).unwrap()).and_then(move |x| {
+                        observe(addr!("y"), Normal::new(x, 1.0).unwrap(), y).map(move |_| b)
+                    })
+                } else {
+                    observe(addr!("y"), Normal::new(0.0, 2.0).unwrap(), y).map(move |_| b)
+                }
+            })
+        };
+
+        // Analytic: p(y|b=1) = N(y; 0, sqrt(2)) (x marginalized), p(y|b=0) = N(y; 0, 2).
+        let lik1 = normal_logpdf(y, 0.0, std::f64::consts::SQRT_2).exp();
+        let lik0 = normal_logpdf(y, 0.0, 2.0).exp();
+        let post_b1 = p_switch * lik1 / (p_switch * lik1 + (1.0 - p_switch) * lik0);
+
+        let mut rng = StdRng::seed_from_u64(55);
+        let (_, mut current) = run(
+            PriorHandler {
+                rng: &mut rng,
+                trace: Trace::default(),
+            },
+            model_fn(),
+        );
+        let block = [addr!("b"), addr!("x")];
+        let mut b_sum = 0.0;
+        let mut n = 0.0;
+        for it in 0..20000 {
+            let (_, t) = block_regeneration_mh(&mut rng, &model_fn, &current, &block, 1.0);
+            current = t;
+            if it >= 1000 {
+                b_sum += if current.get_bool(&addr!("b")).unwrap() {
+                    1.0
+                } else {
+                    0.0
+                };
+                n += 1.0;
+            }
+        }
+        let b_mean = b_sum / n;
+        assert!(
+            (b_mean - post_b1).abs() < 0.03,
+            "P(b=1) estimate {} vs analytic {}",
+            b_mean,
+            post_b1
+        );
+    }
+
+    /// EA-as-PPL F2 (FG-48 style): every state the block-regeneration chain
+    /// returns carries accumulators equal to a fresh from-scratch re-score.
+    #[test]
+    #[allow(clippy::needless_borrows_for_generic_args)] // &model_fn is reused across loop iterations
+    fn test_block_regen_fresh_rescore_equality() {
+        use crate::runtime::interpreters::PriorHandler;
+
+        let model_fn = || {
+            sample(addr!("a"), Normal::new(0.0, 1.0).unwrap()).and_then(|a| {
+                sample(addr!("b"), Normal::new(a, 1.0).unwrap()).and_then(move |b| {
+                    observe(addr!("y"), Normal::new(a + b, 0.5).unwrap(), 0.7).map(move |_| (a, b))
+                })
+            })
+        };
+        let mut rng = StdRng::seed_from_u64(66);
+        let (_, mut current) = run(
+            PriorHandler {
+                rng: &mut rng,
+                trace: Trace::default(),
+            },
+            model_fn(),
+        );
+        let block = [addr!("a")];
+        for _ in 0..50 {
+            let (_, t) = block_regeneration_mh(&mut rng, &model_fn, &current, &block, 1.0);
+            let (_, rescored) = run(
+                ScoreGivenTrace {
+                    base: t.clone(),
+                    trace: Trace::default(),
+                },
+                model_fn(),
+            );
+            assert!(
+                (t.total_log_weight() - rescored.total_log_weight()).abs() < 1e-12,
+                "returned trace's accumulators diverge from a fresh re-score"
+            );
+            current = t;
+        }
+    }
 
     #[test]
     fn gaussian_walk_proposal_produces_variation() {

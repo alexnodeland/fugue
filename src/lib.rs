@@ -26,7 +26,8 @@ pub use core::model::{
 };
 pub use runtime::handler::Handler;
 pub use runtime::interpreters::{
-    PriorHandler, ReplayHandler, SafeReplayHandler, SafeScoreGivenTrace, ScoreGivenTrace,
+    score_given_trace_reconciled, PriorHandler, ReconcileReport, ReplayHandler, SafeReplayHandler,
+    SafeScoreGivenTrace, ScoreGivenTrace,
 };
 pub use runtime::trace::{Choice, ChoiceValue, Trace};
 
@@ -47,10 +48,15 @@ pub use inference::mcmc_utils::{
     DiminishingAdaptation,
 };
 pub use inference::mh::{
-    adaptive_mcmc_chain, adaptive_mcmc_chain_with_overrides, adaptive_single_site_mh, SiteProposal,
+    adaptive_mcmc_chain, adaptive_mcmc_chain_with_overrides, adaptive_single_site_mh,
+    block_regeneration_mh, SiteProposal,
 };
 pub use inference::smc::{
-    adaptive_smc, effective_sample_size, Particle, ResamplingMethod, SMCConfig,
+    adaptive_smc, adaptive_smc_with_kernel, decode_particle, decode_particles,
+    effective_sample_size, multinomial_resample, normalize_particles, rejuvenate_particles,
+    resample_particles, smc_prior_particles, stratified_resample, systematic_resample,
+    try_decode_particle, CrossoverKernel, NoKernel, Particle, PopulationKernel, ResamplingMethod,
+    SMCConfig, SMCResult,
 };
 pub use inference::validation::{
     ks_test_distribution, test_conjugate_beta_bernoulli_model, test_conjugate_normal_model,

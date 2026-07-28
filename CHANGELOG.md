@@ -10,7 +10,72 @@ For the initial 0.1.0 release notes, see `.github/CHANGELOG.md`.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-28
+
+EA-as-PPL upstream primitives (F1-F6 of the cross-repo plan, tracking issue
+[#44](https://github.com/alexnodeland/fugue/issues/44)): the additive machinery
+that lets an evolutionary-computation layer run genuinely PPL-native inference
+- population-coupled SMC moves, block regeneration, and trace surgery.
+
 ### Added
+
+- **Population-coupled SMC kernels (F4)**: object-safe `PopulationKernel<A>`
+  trait with the pi_beta-product invariance contract (W/T/S/E) documented on
+  the trait; `NoKernel` identity kernel; generic mask-driven `CrossoverKernel`
+  (pairwise block-swap Metropolis move on the product target - a symmetric
+  involution, Hastings ratio 1); and `adaptive_smc_with_kernel`, which invokes
+  the kernel after each intermediate resample + rejuvenation and never at the
+  terminal beta = 1 step (FG-43). `adaptive_smc` is now defined as
+  `adaptive_smc_with_kernel(.., &mut NoKernel)` with its signature unchanged.
+  Pinned by product-invariance, weight-preservation (bit-identical across a
+  sweep), log-evidence non-corruption vs analytic marginal likelihood (FG-58),
+  and joint-support truncation tests.
+- **Block-regeneration MH (F2)**: `block_regeneration_mh` - delete the choices
+  at an address set S, replay the model via `score_given_trace_reconciled`
+  (fresh prior draws at S), and accept with the prior-cancelling ratio
+  including fresh/vanished RJMCMC bookkeeping. For fixed structure the ratio
+  collapses to `beta * delta-loglik`. Note: unlike the single-site kernels
+  there is deliberately **no dimension-selection term** - the block is fixed by
+  the caller, not selected uniformly from a state-dependent site set. Pinned by
+  conjugate Beta-Bernoulli validation, product-Normal analytic posterior,
+  trans-dimensional switch-gated-branch analytic posterior, and fresh-rescore
+  equality (FG-48) tests.
+- **Trace subtree surgery (F3)**: boundary-aware `Address::has_prefix`
+  (recognizes `#`, `::`, `/` segment separators; does not treat `"gene"` as a
+  prefix of `"generation"`) and `Trace::{extract_prefix, truncate_prefix,
+  graft_prefix}`. All three deliberately leave the flat, non-address-keyed log
+  accumulators zeroed/stale - the only correct recomputation is a model
+  re-score, which the F2/F4 kernels perform. Pinned by boundary, round-trip,
+  graft-then-rescore-equality, and accumulator-zeroing tests.
+- **Decode-replay helpers (F5)**: `decode_particle` / `decode_particles`
+  recover the model return value (e.g. a decoded genome) from a particle trace
+  by replaying under `ScoreGivenTrace`; fallible `try_decode_particle` (backed
+  by `SafeScoreGivenTrace`) for traces of uncertain provenance. `Particle`
+  deliberately does not cache the return value (would force `A: Clone` through
+  resampling and break the FG-59 move-not-clone construction).
+- **Crate-root re-export widening (F6)**: `SMCResult` (previously returned by
+  `adaptive_smc` yet unreachable by name from the root), `smc_prior_particles`,
+  `normalize_particles`, `resample_particles`, `rejuvenate_particles`,
+  `systematic_resample`, `stratified_resample`, `multinomial_resample`,
+  `score_given_trace_reconciled`, `ReconcileReport`, plus all new F2/F4/F5
+  items. Pinned by a root-import integration test.
+
+### Fixed
+
+- **SMC rejuvenation now moves non-F64 sites (F1)**: `tempered_single_site_mh`
+  previously collected only `ChoiceValue::F64` sites and returned
+  `current.clone()` otherwise, so a population of pure Bool/U64/Usize traces
+  (bit-string or permutation genomes) was silently frozen during rejuvenation.
+  It now picks the target uniformly over all sites and dispatches by value type
+  through the same typed proposal machinery as `adaptive_single_site_mh`
+  (flip for Bool, reflected discrete walk for U64, prior-resample for Usize,
+  integer walk for I64, Gaussian/log-space walk for F64), with the tempered
+  trans-dimensional acceptance
+  `delta-log-prior + beta * delta-loglik + (log q_rev - log q_fwd) + dim_term`.
+  Pinned by a Bool-population movement regression and an independent-Bernoulli
+  analytic-posterior test.
+
+### Added (carried from the pre-0.2.1 unreleased queue)
 
 - **Incremental HMC session API**: `HmcSession` exposes the HMC kernel one
   transition at a time (`step`, `step_recorded` with full leapfrog
