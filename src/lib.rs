@@ -48,8 +48,9 @@ pub use inference::mcmc_utils::{
     DiminishingAdaptation,
 };
 pub use inference::mh::{
-    adaptive_mcmc_chain, adaptive_mcmc_chain_with_overrides, adaptive_single_site_mh,
-    block_regeneration_mh, SiteProposal,
+    adaptive_mcmc_chain, adaptive_mcmc_chain_thinned, adaptive_mcmc_chain_with_overrides,
+    adaptive_mcmc_chain_with_overrides_thinned, adaptive_single_site_mh, block_regeneration_mh,
+    SiteProposal,
 };
 pub use inference::smc::{
     adaptive_smc, adaptive_smc_with_kernel, decode_particle, decode_particles,
