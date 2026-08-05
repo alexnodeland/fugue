@@ -10,6 +10,8 @@ For the initial 0.1.0 release notes, see `.github/CHANGELOG.md`.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-08-05
+
 ### Added
 
 - **Retention thinning on the adaptive MCMC chain drivers**:
