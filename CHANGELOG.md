@@ -10,6 +10,34 @@ For the initial 0.1.0 release notes, see `.github/CHANGELOG.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **Retention thinning on the adaptive MCMC chain drivers**:
+  `adaptive_mcmc_chain_thinned` and
+  `adaptive_mcmc_chain_with_overrides_thinned` take a `thin: usize` and push
+  only every `thin`-th draw. `adaptive_mcmc_chain` and
+  `adaptive_mcmc_chain_with_overrides` are now `thin = 1` wrappers with their
+  signatures and behaviour unchanged.
+
+  Purely a **memory** change with no statistical content. The existing drivers
+  materialize every iteration — an `(A, Trace)` per step, pushed into the `Vec`
+  returned by value — so a caller that wanted a thinned subsequence (the common
+  case for autocorrelated single-site draws) had to hold the entire chain live
+  before discarding most of it. For a structure-varying model with ~140 sites
+  over a 10 000-step chain that is ~10 000 `Trace` clones of ~140 `BTreeMap`
+  entries resident at once to keep 500, which on a 32-bit wasm heap is a
+  plausible OOM rather than mere waste — and the caller's only lever was to
+  shorten the chain, paying in statistics for a memory problem.
+
+  **The retained draws are bit-identical to thinning the full chain.** `thin`
+  gates the `push` and nothing else: every transition still runs, so the RNG is
+  consumed in the same order and quantity and the kept draws are the *same*
+  draws, not merely draws from the same distribution. Retained indices are
+  `0, thin, 2·thin, …`, matching `Iterator::step_by`; `thin = 0` normalizes to
+  `1`. Pinned by an equality test against `step_by` at three strides over a
+  multi-site model, asserting both values and trace weights, plus the two edge
+  cases.
+
 ## [0.2.1] - 2026-07-28
 
 EA-as-PPL upstream primitives (F1-F6 of the cross-repo plan, tracking issue

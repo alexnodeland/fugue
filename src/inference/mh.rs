@@ -1023,8 +1023,55 @@ pub fn adaptive_mcmc_chain<A: Clone, R: Rng>(
     n_samples: usize,
     n_warmup: usize,
 ) -> Vec<(A, Trace)> {
+    adaptive_mcmc_chain_thinned(rng, model_fn, n_samples, n_warmup, 1)
+}
+
+/// Like [`adaptive_mcmc_chain`], but retaining only every `thin`-th draw.
+///
+/// # Why this exists
+///
+/// [`adaptive_mcmc_chain`] materializes **every** iteration: it pushes an
+/// `(A, Trace)` per step into the `Vec` it returns by value. A caller that only
+/// wants a thinned subsequence — which is the common case, because
+/// autocorrelated single-site draws are usually thinned before use — has no way
+/// to say so, and pays peak memory for the whole chain before discarding most
+/// of it one line later.
+///
+/// The cost is not theoretical. A structure-varying model with ~140 sites over
+/// a 10 000-step chain holds ~10 000 `Trace` clones of ~140 `BTreeMap` entries
+/// live simultaneously, to keep 500 of them. On a 32-bit wasm heap that is a
+/// plausible out-of-memory rather than mere waste, and it scales with
+/// `n_samples` — so the caller's only lever is to shorten the chain, i.e. to
+/// pay in statistics for a memory problem.
+///
+/// # What is guaranteed
+///
+/// **The surviving draws are bit-identical to thinning the full chain.** The
+/// loop still runs `n_samples` iterations, every transition is still attempted,
+/// and the RNG is consumed in exactly the same order and quantity — `thin` gates
+/// the `push` and nothing else. So for any `thin`:
+///
+/// ```text
+/// adaptive_mcmc_chain_thinned(seeded_rng(s), f, n, w, thin)
+///     == adaptive_mcmc_chain(seeded_rng(s), f, n, w)
+///            .into_iter().step_by(thin).collect()
+/// ```
+///
+/// Retained indices are `0, thin, 2·thin, …`, matching
+/// [`Iterator::step_by`]. `thin = 0` is treated as `1`.
+///
+/// This is a memory optimization with no statistical content: thinning a chain
+/// discards information and is *not* a way to improve mixing. Use it when the
+/// draws were going to be thinned anyway.
+pub fn adaptive_mcmc_chain_thinned<A: Clone, R: Rng>(
+    rng: &mut R,
+    model_fn: impl Fn() -> Model<A>,
+    n_samples: usize,
+    n_warmup: usize,
+    thin: usize,
+) -> Vec<(A, Trace)> {
     let overrides: HashMap<Address, SiteProposal> = HashMap::new();
-    adaptive_mcmc_chain_with_overrides(rng, model_fn, n_samples, n_warmup, &overrides)
+    adaptive_mcmc_chain_with_overrides_thinned(rng, model_fn, n_samples, n_warmup, &overrides, thin)
 }
 
 /// Like [`adaptive_mcmc_chain`], but with explicit per-address `f64` proposal
@@ -1041,7 +1088,23 @@ pub fn adaptive_mcmc_chain_with_overrides<A: Clone, R: Rng>(
     n_warmup: usize,
     overrides: &HashMap<Address, SiteProposal>,
 ) -> Vec<(A, Trace)> {
-    let mut samples = Vec::with_capacity(n_samples);
+    adaptive_mcmc_chain_with_overrides_thinned(rng, model_fn, n_samples, n_warmup, overrides, 1)
+}
+
+/// [`adaptive_mcmc_chain_with_overrides`] with retention thinning — see
+/// [`adaptive_mcmc_chain_thinned`] for what `thin` does and does not change.
+pub fn adaptive_mcmc_chain_with_overrides_thinned<A: Clone, R: Rng>(
+    rng: &mut R,
+    model_fn: impl Fn() -> Model<A>,
+    n_samples: usize,
+    n_warmup: usize,
+    overrides: &HashMap<Address, SiteProposal>,
+    thin: usize,
+) -> Vec<(A, Trace)> {
+    // A `thin` of 0 would divide by zero below; it can only mean "keep
+    // everything", which is what 1 does.
+    let thin = thin.max(1);
+    let mut samples = Vec::with_capacity(n_samples.div_ceil(thin));
     let mut adaptation = DiminishingAdaptation::new(0.44, 0.7);
     let mut kind_cache: HashMap<Address, SiteProposal> = HashMap::new();
 
@@ -1087,7 +1150,7 @@ pub fn adaptive_mcmc_chain_with_overrides<A: Clone, R: Rng>(
 
     // Sampling phase: FG-57 freeze adaptation so the recorded draws come from a
     // single fixed transition kernel.
-    for _ in 0..n_samples {
+    for i in 0..n_samples {
         if let Some((a, t, lw, structure_changed)) = single_site_mh_step(
             rng,
             &model_fn,
@@ -1106,7 +1169,14 @@ pub fn adaptive_mcmc_chain_with_overrides<A: Clone, R: Rng>(
                 sites = current_trace.choices.keys().cloned().collect();
             }
         }
-        samples.push((current_a.clone(), current_trace.clone()));
+        // `thin` gates retention and nothing else — the transition above ran
+        // regardless, so the chain's arithmetic and its RNG consumption are
+        // identical at every `thin`. That is what makes the retained draws
+        // bit-identical to `step_by(thin)` over the unthinned chain, and it is
+        // why this must stay *below* the step rather than wrapping it.
+        if i % thin == 0 {
+            samples.push((current_a.clone(), current_trace.clone()));
+        }
     }
 
     samples
@@ -1132,6 +1202,78 @@ mod tests {
     use crate::runtime::handler::run;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
+
+    /// **Thinning must not change the chain — only what is kept from it.**
+    ///
+    /// This is the whole contract of `adaptive_mcmc_chain_thinned`, and it is
+    /// the reason the parameter can be added without any statistical review:
+    /// the transition still runs on every iteration, so the RNG is consumed
+    /// identically and the retained draws are the *same draws*, not merely
+    /// draws from the same distribution.
+    ///
+    /// Asserted on the values and on the trace weights, at three strides, over
+    /// a model with more than one site so a structural difference would show.
+    #[test]
+    fn thinning_retains_exactly_the_draws_step_by_would() {
+        let model_fn = || {
+            sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap()).and_then(|mu| {
+                sample(addr!("sigma"), LogNormal::new(0.0, 1.0).unwrap()).and_then(move |s| {
+                    observe(addr!("y"), Normal::new(mu, s).unwrap(), 0.7).map(move |_| (mu, s))
+                })
+            })
+        };
+
+        // The unthinned reference, from a fixed seed.
+        let full = adaptive_mcmc_chain(&mut StdRng::seed_from_u64(0xF117), model_fn, 200, 50);
+        assert_eq!(full.len(), 200);
+
+        for thin in [1usize, 7, 20] {
+            let thinned = adaptive_mcmc_chain_thinned(
+                &mut StdRng::seed_from_u64(0xF117),
+                model_fn,
+                200,
+                50,
+                thin,
+            );
+            let expected: Vec<_> = full.iter().step_by(thin).collect();
+            assert_eq!(
+                thinned.len(),
+                expected.len(),
+                "thin={thin}: kept {} draws, step_by kept {}",
+                thinned.len(),
+                expected.len()
+            );
+            for (i, (got, want)) in thinned.iter().zip(&expected).enumerate() {
+                assert_eq!(
+                    got.0, want.0,
+                    "thin={thin}: draw {i} differs in value — the chain itself moved"
+                );
+                assert_eq!(
+                    got.1.total_log_weight(),
+                    want.1.total_log_weight(),
+                    "thin={thin}: draw {i} differs in trace weight"
+                );
+            }
+        }
+    }
+
+    /// `thin = 0` cannot mean "keep nothing" — it is normalized to 1 rather
+    /// than dividing by zero.
+    #[test]
+    fn thinning_by_zero_keeps_everything() {
+        let model_fn = || sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap());
+        let got = adaptive_mcmc_chain_thinned(&mut StdRng::seed_from_u64(7), model_fn, 32, 8, 0);
+        assert_eq!(got.len(), 32);
+    }
+
+    /// A stride longer than the chain keeps exactly the first draw, matching
+    /// `step_by`'s behaviour rather than returning nothing.
+    #[test]
+    fn thinning_longer_than_the_chain_keeps_the_first_draw() {
+        let model_fn = || sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap());
+        let got = adaptive_mcmc_chain_thinned(&mut StdRng::seed_from_u64(7), model_fn, 16, 4, 1000);
+        assert_eq!(got.len(), 1);
+    }
 
     /// EA-as-PPL F2: block regeneration over the single latent site of a
     /// Beta-Bernoulli model is an independence sampler from the prior and must
