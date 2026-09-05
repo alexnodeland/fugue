@@ -1045,6 +1045,11 @@ impl<T: Clone + 'static> Distribution<T> for DynDist<T> {
     fn clone_box(&self) -> Box<dyn Distribution<T>> {
         self.0.clone_box()
     }
+    fn support(&self) -> fugue::Support {
+        // Forward the wrapped distribution's support so MH proposal selection
+        // (FG-N1) sees the real bounds, not the `Real` default.
+        self.0.support()
+    }
 }
 
 // ---------------------------------------------------------------------------

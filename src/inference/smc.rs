@@ -880,16 +880,8 @@ fn tempered_single_site_mh<A, R: Rng>(
     let scale = adaptation.get_scale(&target);
 
     let overrides: HashMap<Address, SiteProposal> = HashMap::new();
-    let mut kind_cache: HashMap<Address, SiteProposal> = HashMap::new();
-    let (_a_prop, prop_trace, _prop_lw, lqf, lqr, _structure_changed) = propose_and_score(
-        rng,
-        model_fn,
-        current,
-        &target,
-        scale,
-        &overrides,
-        &mut kind_cache,
-    );
+    let (_a_prop, prop_trace, _prop_lw, lqf, lqr, _structure_changed) =
+        propose_and_score(rng, model_fn, current, &target, scale, &overrides);
 
     // Score the current state (also refreshes accumulators for the trace we
     // return on rejection, FG-40).

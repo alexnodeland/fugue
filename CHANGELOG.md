@@ -10,6 +10,46 @@ For the initial 0.1.0 release notes, see `.github/CHANGELOG.md`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`f64` proposal selection is now a function of the site's distribution,
+  never of its current value (FG-N1)**. `Distribution<T>` gains a
+  `support(&self) -> Support` method (default `Support::Real`; `Uniform` and
+  `Beta` report `Bounded { lower, upper }`, `LogNormal`, `Exponential`,
+  `Gamma`, `Weibull`, `ChiSquared` and `InverseGamma` report `Positive`), and
+  the single-site kernels pick the proposal from it via
+  `proposal_kind_for_support`: `Real` -> Gaussian walk, `Positive` -> log-space
+  walk (with the FG-02 Jacobian), `Bounded` -> Gaussian walk reflected at both
+  bounds. Explicit `SiteProposal` overrides still win.
+
+  The previous selector chose the log-space walk iff `current > 0` **and** the
+  prior density at a probe value of `-1.0` was `-inf`. For `Uniform(-0.5, 0.5)`
+  the probe is `-inf` (the support does not contain `-1`), so a positive first
+  draw put the site on a walk that can never propose a negative value, and the
+  kind was cached per address, so the whole chain inherited the sign of its
+  first state (`P(x > 0) = 1.0` against a truth of `0.5`, seed-dependent). In
+  SMC rejuvenation the kind was re-chosen per call from the current state, so
+  the move was not pi_beta-invariant: a Gaussian step from `x < 0` to `x' > 0`
+  has a reverse density of zero that the code treated as symmetric, and mass
+  leaked one way until the population sat entirely in the positive half. A
+  kernel whose shape depends on the current value is not invariant for the
+  target; the support is a property of the site and is safe to select on. The
+  probe and the per-address kind cache are gone: nothing about the kind is
+  cached across executions, so a distribution whose bounds depend on another
+  site (`Uniform(0, sigma)`) gets the bounds of the execution being proposed.
+  Foreign distributions that leave the default `Real` get the Gaussian walk,
+  which is always correct (out-of-support proposals score `-inf` and reject),
+  merely less efficient than a declared support.
+
+  Pinned by `fgn1_bounded_prior_containing_negatives_visits_both_signs` (six
+  seeds, `P(x > 0) ~ 0.5`), `fgn1_bounded_prior_matches_analytic_mean_under_factor`
+  (`rho ∝ e^{2x}` on `[-1/2, 1/2]`: mean `0.1565`, not the confined `0.291`),
+  `fgn1_proposal_kind_is_a_function_of_the_support`, and
+  `fgn1_smc_rejuvenation_is_invariant_on_bounded_prior_with_negatives` (mean,
+  sign mass, and analytic log-evidence through ten rejuvenation steps per
+  tempering stage). Both chain tests fail on the pre-fix selector. The FG-02
+  and FG-42 regressions are unchanged and still pass.
+
 ## [0.2.2] - 2026-08-05
 
 ### Added

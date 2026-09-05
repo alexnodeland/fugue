@@ -17,8 +17,8 @@ pub use core::address::Address;
 // `addr!` macro is exported at the crate root via #[macro_export]
 pub use core::distribution::{
     Bernoulli, Beta, Binomial, Categorical, Cauchy, ChiSquared, DiscreteUniform, Distribution,
-    Exponential, Gamma, InverseGamma, Laplace, LogNormal, Normal, Poisson, StudentT, Uniform,
-    Weibull,
+    Exponential, Gamma, InverseGamma, Laplace, LogNormal, Normal, Poisson, StudentT, Support,
+    Uniform, Weibull,
 };
 pub use core::model::{
     factor, guard, observe, pure, sample, sample_bool, sample_f64, sample_i64, sample_u64,

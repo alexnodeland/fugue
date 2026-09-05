@@ -203,3 +203,58 @@ fn fg43_fg58_tempered_smc_matches_conjugate_evidence_and_mean() {
         result.log_evidence
     );
 }
+
+// ---------------------------------------------------------------------------
+// FG-N1 (SMC side): the rejuvenation kernel must be π_β-invariant on a bounded
+// prior whose support contains negatives but not -1. The pre-fix kernel chose
+// its proposal kind per call from the *current value* (log-space iff current > 0
+// and the density probe at -1 was -inf): from x < 0 it proposed a Gaussian step
+// that could land at x' > 0, from where only the log-space walk (never negative)
+// was used - and the code treated both as symmetric. Mass leaked one way until
+// the whole population sat in (0, 1/2]. Target rho(x) ∝ exp(2x) on [-1/2, 1/2]:
+// E[x] = e^{-1}/(2 sinh 1) = 0.156518, P(x > 0) = ((e-1)/2)/sinh(1) = 0.731059;
+// the confined population has E[x] = 0.290988, P(x > 0) = 1.
+// ---------------------------------------------------------------------------
+#[test]
+fn fgn1_smc_rejuvenation_is_invariant_on_bounded_prior_with_negatives() {
+    let model_fn = || {
+        sample(addr!("x"), Uniform::new(-0.5, 0.5).unwrap())
+            .bind(|x| factor(2.0 * x).map(move |_| x))
+    };
+    let config = SMCConfig {
+        resampling_method: ResamplingMethod::Systematic,
+        // A low threshold forces several intermediate tempering steps, each
+        // followed by resample + rejuvenation, so a non-invariant kernel has
+        // many chances to drift the population.
+        ess_threshold: 0.9,
+        rejuvenation_steps: 10,
+    };
+    let mut rng = StdRng::seed_from_u64(20260905);
+    let result = adaptive_smc(&mut rng, 2_000, model_fn, config);
+
+    let mean: f64 = result
+        .iter()
+        .map(|p| p.weight * p.trace.get_f64(&addr!("x")).unwrap())
+        .sum();
+    let p_pos: f64 = result
+        .iter()
+        .filter(|p| p.trace.get_f64(&addr!("x")).unwrap() > 0.0)
+        .map(|p| p.weight)
+        .sum();
+    assert!(
+        (mean - 0.156_518).abs() < 0.03,
+        "SMC posterior mean {mean:.4} vs analytic 0.1565 (confined value: 0.291)"
+    );
+    assert!(
+        (p_pos - 0.731_059).abs() < 0.06,
+        "SMC P(x > 0) = {p_pos:.3} vs analytic 0.731 (confined value: 1.0)"
+    );
+    // Log-evidence is untouched by an invariant kernel: log Z = log sinh(1)
+    // (the prior density 1 on a unit-width interval times ∫ e^{2x}).
+    assert!(
+        (result.log_evidence - 1.0_f64.sinh().ln()).abs() < 0.05,
+        "log-evidence {:.4} vs analytic {:.4}",
+        result.log_evidence,
+        1.0_f64.sinh().ln()
+    );
+}

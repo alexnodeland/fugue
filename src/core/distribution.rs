@@ -36,6 +36,42 @@ pub type LogF64 = f64;
 /// let count: u64 = events.sample(&mut rng);  // Natural count type
 /// let count_prob = events.log_prob(&count);
 /// ```
+/// The support of a continuous (`f64`-valued) distribution, as far as an
+/// inference kernel needs to know it (FG-N1).
+///
+/// Metropolis-Hastings proposal selection must be a function of the *site*, not
+/// of the value currently at the site: a kernel whose shape depends on the
+/// current state is not, in general, invariant for the target. `Support` is the
+/// static description each distribution advertises for that purpose via
+/// [`Distribution::support`]:
+///
+/// - [`Support::Real`] - the whole real line (the default). Proposals are a
+///   symmetric Gaussian walk; anything the density rejects scores `-inf` and is
+///   simply rejected, so this is always *correct*, merely less efficient for a
+///   distribution that is really constrained.
+/// - [`Support::Positive`] - `(0, +inf)`. Proposals walk in log space with the
+///   exact Jacobian correction (FG-02).
+/// - [`Support::Bounded`] - a finite interval `[lower, upper]`. Proposals are a
+///   Gaussian walk reflected at both bounds (symmetric, so no Hastings term),
+///   which can reach every point of the interval from every other one.
+///
+/// Discrete distributions never consult this and leave the default.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Support {
+    /// Unconstrained: `(-inf, +inf)`. Also the conservative default for a
+    /// distribution that does not describe its support.
+    Real,
+    /// Strictly positive: `(0, +inf)`.
+    Positive,
+    /// A finite interval.
+    Bounded {
+        /// Lower bound of the interval.
+        lower: f64,
+        /// Upper bound of the interval.
+        upper: f64,
+    },
+}
+
 pub trait Distribution<T>: Send + Sync {
     /// Generate a random sample (with its natural type), `T`, from the distribution, using the provided random number generator, `rng`.
     ///
@@ -91,6 +127,29 @@ pub trait Distribution<T>: Send + Sync {
     /// distributions.push(Uniform::new(-1.0, 1.0).unwrap().clone_box());
     /// ```
     fn clone_box(&self) -> Box<dyn Distribution<T>>;
+
+    /// The distribution's support, used by the MCMC kernels to pick a proposal
+    /// that is a function of the site alone (FG-N1). See [`Support`].
+    ///
+    /// Defaults to [`Support::Real`], which is always *safe*: out-of-support
+    /// proposals score `-inf` and are rejected. Continuous distributions with a
+    /// constrained support should override it so the samplers can use a
+    /// log-space or reflected walk instead. Discrete distributions leave the
+    /// default; it is never consulted for them.
+    ///
+    /// ```rust
+    /// # use fugue::*;
+    /// # use fugue::core::distribution::Support;
+    /// assert_eq!(Normal::new(0.0, 1.0).unwrap().support(), Support::Real);
+    /// assert_eq!(Gamma::new(2.0, 1.0).unwrap().support(), Support::Positive);
+    /// assert_eq!(
+    ///     Uniform::new(-0.5, 0.5).unwrap().support(),
+    ///     Support::Bounded { lower: -0.5, upper: 0.5 }
+    /// );
+    /// ```
+    fn support(&self) -> Support {
+        Support::Real
+    }
 }
 
 /// A continuous distribution characterized by its mean, `mu`, and standard deviation, `sigma`.
@@ -299,6 +358,12 @@ impl Uniform {
     }
 }
 impl Distribution<f64> for Uniform {
+    fn support(&self) -> Support {
+        Support::Bounded {
+            lower: self.low,
+            upper: self.high,
+        }
+    }
     fn sample(&self, rng: &mut dyn RngCore) -> f64 {
         // Parameter validation
         if self.low >= self.high || !self.low.is_finite() || !self.high.is_finite() {
@@ -404,6 +469,9 @@ impl LogNormal {
     }
 }
 impl Distribution<f64> for LogNormal {
+    fn support(&self) -> Support {
+        Support::Positive
+    }
     fn sample(&self, rng: &mut dyn RngCore) -> f64 {
         if self.sigma <= 0.0 {
             return f64::NAN;
@@ -494,6 +562,9 @@ impl Exponential {
     }
 }
 impl Distribution<f64> for Exponential {
+    fn support(&self) -> Support {
+        Support::Positive
+    }
     fn sample(&self, rng: &mut dyn RngCore) -> f64 {
         if self.rate <= 0.0 {
             return f64::NAN;
@@ -888,6 +959,12 @@ impl Beta {
     }
 }
 impl Distribution<f64> for Beta {
+    fn support(&self) -> Support {
+        Support::Bounded {
+            lower: 0.0,
+            upper: 1.0,
+        }
+    }
     fn sample(&self, rng: &mut dyn RngCore) -> f64 {
         if self.alpha <= 0.0 || self.beta <= 0.0 {
             return f64::NAN;
@@ -1028,6 +1105,9 @@ impl Gamma {
     }
 }
 impl Distribution<f64> for Gamma {
+    fn support(&self) -> Support {
+        Support::Positive
+    }
     fn sample(&self, rng: &mut dyn RngCore) -> f64 {
         if self.shape <= 0.0 || self.rate <= 0.0 {
             return f64::NAN;
@@ -1608,6 +1688,9 @@ impl Weibull {
     }
 }
 impl Distribution<f64> for Weibull {
+    fn support(&self) -> Support {
+        Support::Positive
+    }
     fn sample(&self, rng: &mut dyn RngCore) -> f64 {
         if self.shape <= 0.0 || self.scale <= 0.0 {
             return f64::NAN;
@@ -1690,6 +1773,9 @@ impl ChiSquared {
     }
 }
 impl Distribution<f64> for ChiSquared {
+    fn support(&self) -> Support {
+        Support::Positive
+    }
     fn sample(&self, rng: &mut dyn RngCore) -> f64 {
         if self.k <= 0.0 {
             return f64::NAN;
@@ -1775,6 +1861,9 @@ impl InverseGamma {
     }
 }
 impl Distribution<f64> for InverseGamma {
+    fn support(&self) -> Support {
+        Support::Positive
+    }
     fn sample(&self, rng: &mut dyn RngCore) -> f64 {
         if self.shape <= 0.0 || self.rate <= 0.0 {
             return f64::NAN;
