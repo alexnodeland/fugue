@@ -1,5 +1,7 @@
 //! Regression tests for the July 2026 audit findings owned by the f-runtime
-//! work package: FG-19, FG-20, FG-21, FG-26, FG-47, FG-48, FG-52, FG-54, FG-61.
+//! work package: FG-19, FG-20, FG-21, FG-26, FG-47, FG-48, FG-52, FG-54, FG-61;
+//! plus the September 2026 follow-ups FG-N4 (left-nested `bind` envelope and
+//! the stack-safe shapes) and FG-N5 (`sequence_vec` over runs of `Pure`).
 //!
 //! Each test names the finding it guards in a comment and is written so it would
 //! FAIL on the pre-fix code.
@@ -645,4 +647,195 @@ fn fg11_site_cache_invalidates_on_equal_count_branch_switch() {
             .all(|(_, t)| t.total_log_weight().is_finite()),
         "a sampled trace had a non-finite weight"
     );
+}
+
+// ===========================================================================
+// FG-N5: `sequence_vec` / `traverse_vec` / `plate!` must not recurse at
+// CONSTRUCTION over runs of `Pure`. `bind` on a `Pure` calls its continuation
+// immediately, and the continuation tail-calls the next element's, so a run of
+// k consecutive `pure`s was k nested frames — `plate!(i in 0..100_000 =>
+// pure(i))` overflowed before `run` was reached. Driven on a 512 KiB stack.
+// ===========================================================================
+#[test]
+fn fgn5_plate_over_pure_is_stack_safe_at_construction() {
+    let handle = std::thread::Builder::new()
+        .stack_size(512 * 1024)
+        .spawn(|| {
+            let n = 100_000usize;
+            // Construction is the part that overflowed; `run` is trivially fine.
+            let model = plate!(i in 0..n => pure(i));
+            let mut rng = StdRng::seed_from_u64(5);
+            let (vals, trace) = run(
+                PriorHandler {
+                    rng: &mut rng,
+                    trace: Trace::default(),
+                },
+                model,
+            );
+            assert_eq!(vals.len(), n);
+            assert!(vals.iter().enumerate().all(|(i, &v)| i == v), "order lost");
+            assert!(trace.choices.is_empty());
+        })
+        .expect("spawn");
+    handle
+        .join()
+        .expect("plate! over pure overflowed the stack at construction (FG-N5)");
+}
+
+// FG-N5 (mixed shape): runs of `Pure` interleaved with effects, in every
+// arrangement — long pure runs, alternating, effects at both ends — must build
+// and run on a small stack AND preserve input order across the batch
+// boundaries.
+#[test]
+fn fgn5_sequence_vec_mixed_pure_and_effects_preserves_order_on_small_stack() {
+    let handle = std::thread::Builder::new()
+        .stack_size(512 * 1024)
+        .spawn(|| {
+            let n = 60_000usize;
+            let models: Vec<Model<f64>> = (0..n)
+                .map(|i| {
+                    // Effects at i % 7 == 0 (including i = 0), pure elsewhere:
+                    // runs of six pures between effects.
+                    if i % 7 == 0 {
+                        sample(addr!("e", i), Normal::new(i as f64, 1e-9).unwrap())
+                    } else {
+                        pure(i as f64)
+                    }
+                })
+                .collect();
+            let mut rng = StdRng::seed_from_u64(6);
+            let (vals, trace) = run(
+                PriorHandler {
+                    rng: &mut rng,
+                    trace: Trace::default(),
+                },
+                fugue::sequence_vec(models),
+            );
+            assert_eq!(vals.len(), n);
+            for (i, v) in vals.iter().enumerate() {
+                assert!((v - i as f64).abs() < 1e-6, "position {i} holds {v}");
+            }
+            assert_eq!(trace.choices.len(), n.div_ceil(7));
+
+            // Effects at both ends with a single long pure run in the middle.
+            let mut models: Vec<Model<u64>> =
+                vec![sample(addr!("head"), Poisson::new(1.0).unwrap())];
+            models.extend((0..50_000u64).map(pure));
+            models.push(sample(addr!("tail"), Poisson::new(1.0).unwrap()));
+            let (vals, trace) = run(
+                PriorHandler {
+                    rng: &mut rng,
+                    trace: Trace::default(),
+                },
+                fugue::sequence_vec(models),
+            );
+            assert_eq!(vals.len(), 50_002);
+            assert_eq!(&vals[1..50_001], &(0..50_000u64).collect::<Vec<_>>()[..]);
+            assert_eq!(trace.choices.len(), 2);
+        })
+        .expect("spawn");
+    handle
+        .join()
+        .expect("mixed sequence_vec overflowed the stack (FG-N5)");
+}
+
+// ===========================================================================
+// FG-N4: a LEFT-nested bind chain — `let mut m = ..; for .. { m = m.bind(..) }`
+// — wraps the first node's continuation once per iteration, so interpreting it
+// costs O(N) stack frames and O(N^2) closure re-wrapping. The FG-19 trampoline
+// removes recursion ACROSS nodes, not within one node's continuation tower. This
+// is inherent to the CPS encoding and is documented rather than fixed: the two
+// tests below pin the documented envelope (a few thousand observes on a 2 MiB
+// thread stack — the probe measured ~5 000 fine / 10 000 overflowing) and the
+// recommended stack-safe shapes.
+// ===========================================================================
+fn left_nested_observes(n: usize) -> Model<f64> {
+    sample(addr!("mu"), Normal::new(0.0, 2.0).unwrap()).bind(move |mu| {
+        let mut m = pure(mu);
+        for i in 0..n {
+            m = m.bind(move |mu| {
+                observe(addr!("y", i), Normal::new(mu, 1.0).unwrap(), 0.5).map(move |_| mu)
+            });
+        }
+        m
+    })
+}
+
+#[test]
+fn fgn4_left_nested_bind_chain_of_a_few_thousand_observes_runs() {
+    // Rust's default spawned-thread stack (and the `cargo test` thread stack).
+    let handle = std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(|| {
+            let n = 3_000usize;
+            let mut rng = StdRng::seed_from_u64(4);
+            let (mu, trace) = run(
+                PriorHandler {
+                    rng: &mut rng,
+                    trace: Trace::default(),
+                },
+                left_nested_observes(n),
+            );
+            assert!(mu.is_finite());
+            assert!(trace.log_likelihood.is_finite());
+        })
+        .expect("spawn");
+    handle
+        .join()
+        .expect("a 3 000-observe left-nested bind chain overflowed a 2 MiB stack (FG-N4 envelope)");
+}
+
+// FG-N4 (recommended shapes): the same 100 000 observations expressed with
+// `traverse_vec` (independent sites) and as a RIGHT-nested chain built from the
+// back (sequentially dependent sites) both run on a 512 KiB stack.
+#[test]
+fn fgn4_traverse_vec_and_right_nested_fold_are_stack_safe_for_100k_observes() {
+    let handle = std::thread::Builder::new()
+        .stack_size(512 * 1024)
+        .spawn(|| {
+            let n = 100_000usize;
+            let ys: Vec<f64> = (0..n).map(|i| (i % 7) as f64 * 0.1).collect();
+
+            // (a) independent observations: traverse_vec / plate!.
+            let ys_a = ys.clone();
+            let model_a = sample(addr!("mu"), Normal::new(0.0, 2.0).unwrap()).bind(move |mu| {
+                traverse_vec(ys_a.into_iter().enumerate().collect(), move |(i, y)| {
+                    observe(addr!("y", i), Normal::new(mu, 1.0).unwrap(), y)
+                })
+                .map(move |_| mu)
+            });
+
+            // (b) sequentially dependent sites: fold from the BACK so each
+            // continuation returns the rest of the chain instead of wrapping it.
+            // x_t ~ N(x_{t-1}, 1), y_t ~ N(x_t, 1); the continuation type
+            // `Box<dyn FnOnce(f64) -> Model<f64> + Send>` threads x_{t-1}.
+            let mut rest: Box<dyn FnOnce(f64) -> Model<f64> + Send> = Box::new(pure);
+            for (t, y) in ys.into_iter().enumerate().rev() {
+                let next = rest;
+                rest = Box::new(move |prev: f64| {
+                    sample(addr!("x", t), Normal::new(prev, 1.0).unwrap()).bind(move |xt| {
+                        observe(addr!("y", t), Normal::new(xt, 1.0).unwrap(), y)
+                            .bind(move |_| next(xt))
+                    })
+                });
+            }
+            let model_b = rest(0.0);
+
+            let mut rng = StdRng::seed_from_u64(44);
+            for model in [model_a, model_b] {
+                let (v, trace) = run(
+                    PriorHandler {
+                        rng: &mut rng,
+                        trace: Trace::default(),
+                    },
+                    model,
+                );
+                assert!(v.is_finite());
+                assert!(trace.log_likelihood.is_finite());
+            }
+        })
+        .expect("spawn");
+    handle
+        .join()
+        .expect("recommended stack-safe shapes overflowed a 512 KiB stack (FG-N4)");
 }

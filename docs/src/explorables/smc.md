@@ -151,6 +151,40 @@ fn state_space(ys: Vec<f64>) -> Model<Vec<f64>> {
 }
 ```
 
+```admonish warning title="This loop is quadratic — for long series, build the chain from the back"
+`m = m.bind(..)` re-wraps the first node's continuation on every iteration, so a
+series of `T` steps costs `T` stack frames and `O(T²)` closure work to
+interpret — a few thousand steps on a 2 MiB thread stack, less on wasm. It is
+kept here because it reads top-to-bottom like the model. For a long series,
+fold from the **back**, so each continuation returns the rest of the chain
+instead of wrapping it; `x_{t-1}` is threaded through the continuation's
+argument:
+
+~~~rust,ignore
+fn state_space(ys: Vec<f64>) -> Model<Vec<f64>> {
+    // "given x_{t-1} and the path so far, run steps t..T": built last-to-first.
+    let mut rest: Box<dyn FnOnce(f64, Vec<f64>) -> Model<Vec<f64>> + Send> =
+        Box::new(|_prev, xs| pure(xs));
+    for (t, yt) in ys.into_iter().enumerate().rev() {
+        let next = rest;
+        rest = Box::new(move |prev, mut xs| {
+            let sd = if t == 0 { 1.0 } else { STEP };
+            sample(addr!("x", t), Normal::new(prev, sd).unwrap()).bind(move |xt| {
+                observe(addr!("y", t), Normal::new(xt, OBS).unwrap(), yt).bind(move |_| {
+                    xs.push(xt);
+                    next(xt, xs)
+                })
+            })
+        });
+    }
+    rest(0.0, Vec::new())
+}
+~~~
+
+This runs in constant stack for any `T` (FG-N4). Independent sites need none
+of this: use `plate!` / `traverse_vec`.
+```
+
 Run Sequential Monte Carlo over it. The config is the same knobs you just played
 with:
 

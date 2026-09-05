@@ -463,6 +463,42 @@ pub trait ModelExt<A>: Sized {
     /// let model = sample(addr!("x"), Normal::new(0.0, 1.0).unwrap())
     ///     .bind(|x| sample(addr!("y"), Normal::new(x, 0.1).unwrap()));
     /// ```
+    ///
+    /// # Loops: do not left-nest (FG-N4)
+    ///
+    /// `bind` on an effectful model wraps that model's continuation:
+    /// `k_new = |x| k_old(x).bind(k)`. The idiom
+    ///
+    /// ```rust
+    /// # use fugue::*;
+    /// # let data = vec![0.1, 0.2];
+    /// let mut m = pure(0.0);
+    /// for (i, y) in data.into_iter().enumerate() {
+    ///     m = m.bind(move |mu| observe(addr!("y", i), Normal::new(mu, 1.0).unwrap(), y).map(move |_| mu));
+    /// }
+    /// ```
+    ///
+    /// therefore builds a **left-nested** tower: the first node's continuation is
+    /// wrapped once per iteration, so interpreting it costs one stack frame per
+    /// iteration and `O(N²)` closure re-wrapping. The interpreter's trampoline
+    /// (FG-19) is iterative *across* nodes but cannot flatten a single node's
+    /// continuation; this is inherent to the CPS encoding. Measured envelope in
+    /// a debug build: a few thousand nodes on a 2 MiB thread stack (~5 000 fine,
+    /// 10 000 overflows), ~20 000 on 8 MiB, and wasm main-thread stacks are
+    /// smaller still.
+    ///
+    /// Use one of these shapes instead, both of which run in constant stack for
+    /// any `N`:
+    ///
+    /// - **Independent sites**: [`traverse_vec`](crate::traverse_vec) /
+    ///   [`sequence_vec`](crate::sequence_vec) / [`plate!`](crate::plate), e.g.
+    ///   `traverse_vec(data, move |(i, y)| observe(addr!("y", i), Normal::new(mu, 1.0).unwrap(), y))`.
+    /// - **Sequentially dependent sites**: build the chain from the **back**, so
+    ///   each continuation *returns* the rest instead of wrapping it —
+    ///   `let mut rest: Box<dyn FnOnce(f64) -> Model<f64> + Send> = Box::new(pure);
+    ///   for t in (0..n).rev() { let next = rest; rest = Box::new(move |prev| sample(..prev..).bind(move |x| next(x))); }`.
+    ///   Recursive builders (`fn build(i) -> Model { sample(..).bind(move |x| build(i + 1)) }`)
+    ///   are right-nested by construction and equally fine.
     fn bind<B>(self, k: impl FnOnce(A) -> Model<B> + Send + 'static) -> Model<B>;
 
     /// Apply a function, `f`, to transform the result of this model.
@@ -648,17 +684,54 @@ pub fn sequence_vec<A: Send + 'static>(models: Vec<Model<A>>) -> Model<Vec<A>> {
     // Model<Vec<A>>` = "given the results of `m0..m_{k-1}`, finish the vector".
     // `cont_0(vec![])` executes `m0` first, preserving input/address order with no
     // terminal reverse.
+    //
+    // FG-N5: a `Pure` element is peeled at CONSTRUCTION, not deferred. Wrapping
+    // it as `pure(a).bind(|a| { acc.push(a); next(acc) })` is fine for one
+    // element, but `bind` on `Pure` calls its continuation immediately, and that
+    // continuation tail-calls `next` — so a RUN of k consecutive `Pure`s is k
+    // nested calls on the stack, and `plate!(i in 0..100_000 => pure(i))`
+    // overflowed before `run` was ever reached. Consecutive `Pure` values are
+    // therefore batched into ONE closure that extends the accumulator and makes
+    // a single call to the continuation that follows the run. Every remaining
+    // continuation is either such a batch or an effectful `bind` (which returns
+    // its node without calling anything), so construction and interpretation
+    // both stay O(1) in stack depth whatever the mix of `pure` and effects.
     let n = models.len();
     let mut cont: Box<dyn FnOnce(Vec<A>) -> Model<Vec<A>> + Send> = Box::new(pure);
-    for m in models.into_iter().rev() {
-        let next = cont;
-        cont = Box::new(move |mut acc: Vec<A>| {
-            m.bind(move |a| {
-                acc.push(a);
-                next(acc)
-            })
-        });
+    // Values of the run of `Pure`s currently being collected, in REVERSE input
+    // order (we iterate the models back to front).
+    let mut pure_run: Vec<A> = Vec::new();
+
+    fn flush_pures<A: Send + 'static>(
+        pure_run: &mut Vec<A>,
+        cont: Box<dyn FnOnce(Vec<A>) -> Model<Vec<A>> + Send>,
+    ) -> Box<dyn FnOnce(Vec<A>) -> Model<Vec<A>> + Send> {
+        if pure_run.is_empty() {
+            return cont;
+        }
+        let mut values = std::mem::take(pure_run);
+        values.reverse(); // back to input order
+        Box::new(move |mut acc: Vec<A>| {
+            acc.extend(values);
+            cont(acc)
+        })
     }
+
+    for m in models.into_iter().rev() {
+        match m {
+            Model::Pure(a) => pure_run.push(a),
+            m => {
+                let next = flush_pures(&mut pure_run, cont);
+                cont = Box::new(move |mut acc: Vec<A>| {
+                    m.bind(move |a| {
+                        acc.push(a);
+                        next(acc)
+                    })
+                });
+            }
+        }
+    }
+    cont = flush_pures(&mut pure_run, cont);
     cont(Vec::with_capacity(n))
 }
 

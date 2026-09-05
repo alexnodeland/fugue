@@ -115,6 +115,36 @@ For the initial 0.1.0 release notes, see `.github/CHANGELOG.md`.
   at intermediate `beta`) and
   `fgn3_crossover_kernel_without_rejuvenation_is_applied_and_invariant`
   (analytic posterior means and log-evidence through the crossover sweeps).
+- **`sequence_vec` / `traverse_vec` / `plate!` no longer recurse at
+  construction over runs of `Pure` (FG-N5)**. `bind` on a `Pure` calls its
+  continuation immediately and that continuation tail-called the next
+  element's, so `k` consecutive `pure`s were `k` nested frames and
+  `plate!(i in 0..100_000 => pure(i))` overflowed before `run` was reached
+  (the FG-19 fix covered effectful elements only). Consecutive `Pure` values
+  are now batched into one closure that extends the accumulator and calls the
+  following continuation once; construction and interpretation are O(1) in
+  stack depth for any mix of `pure` and effects, and input order is preserved
+  across batch boundaries. Pinned by
+  `fgn5_plate_over_pure_is_stack_safe_at_construction` (100 000 `pure`s on a
+  512 KiB stack; overflows pre-fix) and
+  `fgn5_sequence_vec_mixed_pure_and_effects_preserves_order_on_small_stack`.
+- **Left-nested `bind` chains are documented as O(N) stack / O(N²) time, with
+  the stack-safe shapes spelled out (FG-N4)**. `let mut m = ..; for .. { m =
+  m.bind(..) }` wraps the first node's continuation once per iteration; the
+  FG-19 trampoline removes recursion *across* nodes, not inside one node's
+  continuation tower, and this is inherent to the CPS encoding (a
+  Codensity-style `Model` would remove it and is out of scope for a patch
+  release). Measured envelope in a debug build: ~5 000 observes on a 2 MiB
+  thread stack (10 000 overflows), ~20 000 on 8 MiB (40 000 overflows), with
+  20 000 nodes taking 20 s. `ModelExt::bind` now says so and names the
+  alternatives - `traverse_vec` / `plate!` for independent sites, a
+  build-from-the-back fold whose continuations *return* the rest of the chain
+  for sequentially dependent ones - and the `monad` and `smc` explorables,
+  which taught the left-nested loop, carry a warning with the right-nested
+  version. Pinned by `fgn4_left_nested_bind_chain_of_a_few_thousand_observes_runs`
+  (3 000 observes on 2 MiB: the documented envelope stays true) and
+  `fgn4_traverse_vec_and_right_nested_fold_are_stack_safe_for_100k_observes`
+  (both recommended shapes at 100 000 observes on 512 KiB).
 
 ### Added
 
