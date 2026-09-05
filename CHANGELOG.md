@@ -76,6 +76,27 @@ For the initial 0.1.0 release notes, see `.github/CHANGELOG.md`.
   rejuvenation: log-evidence `ln 1/2`, zero weight on the `NaN` region,
   half-normal mean `0.798` rather than the prior mean `0`), and
   `test_log_sum_exp_treats_nan_as_neg_inf`.
+- **Reverse-move densities come from the re-scored current trace, not the
+  caller's stored `logp` (FG-N6)**. `block_regeneration_mh` now reads the
+  block and vanished-site `logp` terms (and builds its block-deleted base)
+  from the `ScoreGivenTrace` re-score it already performs; the SMC
+  rejuvenation kernel scores first and proposes from the re-scored trace; and
+  `adaptive_single_site_mh` proposes from the re-scored trace (see X-5 below).
+  Every re-scoring entry point already paid for `cur_scored` and then ignored
+  it. A trace assembled with `insert_choice(.., 0.0)` - every fugue-evo
+  `to_trace` / `trace_of` - stores `logp = 0` at each site, so the
+  reverse-birth term of a block move or a branch-closing proposal was summed
+  as zero and `log alpha` inflated by exactly the missing prior density on the
+  very transition meant to correct for the dimension change. `ScoreGivenTrace`
+  consumes no randomness, so for handler-produced traces nothing changes: the
+  draws are bit-identical.
+
+  Pinned by three exact-equivalence tests
+  (`fgn6_{single_site_mh,block_regeneration,smc_rejuvenation}_from_zero_logp_*`):
+  from the same seed a step started on the zero-`logp` trace must make the
+  same decision and land on the same fully scored state as one started on the
+  scored trace, over hundreds of seeds that include branch-closing moves. The
+  block and rejuvenation tests fail on the pre-fix code.
 
 ### Added
 

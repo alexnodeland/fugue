@@ -1018,6 +1018,13 @@ pub fn adaptive_single_site_mh_cached<A, R: Rng>(
 /// If the reconciling replay reports an address conflict (the model visits the
 /// same address twice, FG-47), the move is treated as a rejection and the
 /// (re-scored) current state is returned.
+///
+/// `current` is re-scored first and every quantity above - the block-deleted
+/// base, `logp(a)` for the block and for vanished sites, `log_prior` and
+/// `loglik` - is read from that re-score, never from the caller's stored
+/// accumulators or per-choice `logp` (FG-N6). A trace assembled by hand with
+/// `insert_choice(.., 0.0)` is therefore handled exactly like a freshly scored
+/// one.
 pub fn block_regeneration_mh<A, R: Rng>(
     rng: &mut R,
     model_fn: impl Fn() -> Model<A>,
@@ -1036,8 +1043,11 @@ pub fn block_regeneration_mh<A, R: Rng>(
 
     // Delete the block, then replay: removed addresses the model re-visits are
     // drawn fresh from their prior (reported in `fresh_addresses`); addresses
-    // the model no longer visits are `vanished_addresses`.
-    let mut base = current.clone();
+    // the model no longer visits are `vanished_addresses`. The base is the
+    // RE-SCORED current state (FG-N6): same values, but every per-choice `logp`
+    // is the model's, and addresses `current` carried that the model never
+    // visits are already gone.
+    let mut base = cur_scored.clone();
     for a in block {
         base.choices.remove(a);
     }
@@ -1053,14 +1063,21 @@ pub fn block_regeneration_mh<A, R: Rng>(
         .sum();
     // Block ∩ vanished = ∅ (vanished is computed against the block-deleted
     // base), so the two reverse-birth sums never double-count a site.
+    //
+    // FG-N6: the reverse-move densities are read from `cur_scored`, never from
+    // the caller's `current`. The two agree for a trace produced by a handler,
+    // but a trace assembled with `insert_choice(.., 0.0)` (every fugue-evo
+    // `to_trace`) stores `logp = 0` at every site, which would zero the
+    // reverse-birth term and inflate `log α` on the very transition that is
+    // supposed to correct it.
     let log_q_rev: f64 = block
         .iter()
-        .filter_map(|a| current.choices.get(a).map(|c| c.logp))
+        .filter_map(|a| cur_scored.choices.get(a).map(|c| c.logp))
         .sum::<f64>()
         + report
             .vanished_addresses
             .iter()
-            .filter_map(|a| current.choices.get(a).map(|c| c.logp))
+            .filter_map(|a| cur_scored.choices.get(a).map(|c| c.logp))
             .sum::<f64>();
 
     let loglik = |t: &Trace| t.log_likelihood + t.log_factors;

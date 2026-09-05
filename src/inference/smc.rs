@@ -870,21 +870,13 @@ fn tempered_single_site_mh<A, R: Rng>(
     beta: f64,
     adaptation: &mut DiminishingAdaptation,
 ) -> Trace {
-    if current.choices.is_empty() {
-        // Nothing to move; doing nothing is trivially π_β-invariant.
-        return current.clone();
-    }
-
-    let sites: Vec<Address> = current.choices.keys().cloned().collect();
-    let target = sites[rng.gen_range(0..sites.len())].clone();
-    let scale = adaptation.get_scale(&target);
-
-    let overrides: HashMap<Address, SiteProposal> = HashMap::new();
-    let (_a_prop, prop_trace, _prop_lw, lqf, lqr, _structure_changed) =
-        propose_and_score(rng, model_fn, current, &target, scale, &overrides);
-
-    // Score the current state (also refreshes accumulators for the trace we
-    // return on rejection, FG-40).
+    // Score the current state FIRST (FG-N6). The site list, the proposal base
+    // and every reverse-move (death) density are read from `cur_scored`, never
+    // from the caller's per-choice `logp` — a particle whose trace was assembled
+    // with `insert_choice(.., 0.0)` would otherwise zero the death term and
+    // over-accept structure-shrinking moves. The re-score also refreshes the
+    // accumulators of the trace returned on rejection (FG-40). `ScoreGivenTrace`
+    // consumes no randomness, so the RNG stream is unchanged by the reorder.
     let (_, cur_scored) = run(
         ScoreGivenTrace {
             base: current.clone(),
@@ -892,6 +884,19 @@ fn tempered_single_site_mh<A, R: Rng>(
         },
         model_fn(),
     );
+
+    if cur_scored.choices.is_empty() {
+        // Nothing to move; doing nothing is trivially π_β-invariant.
+        return cur_scored;
+    }
+
+    let sites: Vec<Address> = cur_scored.choices.keys().cloned().collect();
+    let target = sites[rng.gen_range(0..sites.len())].clone();
+    let scale = adaptation.get_scale(&target);
+
+    let overrides: HashMap<Address, SiteProposal> = HashMap::new();
+    let (_a_prop, prop_trace, _prop_lw, lqf, lqr, _structure_changed) =
+        propose_and_score(rng, model_fn, &cur_scored, &target, scale, &overrides);
 
     let dim_term = (sites.len() as f64).ln() - (prop_trace.choices.len() as f64).ln();
     let logd = |t: &Trace| t.log_prior + beta * particle_log_likelihood(t);
