@@ -10,6 +10,8 @@ For the initial 0.1.0 release notes, see `.github/CHANGELOG.md`.
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-09-05
+
 ### Fixed
 
 - **`f64` proposal selection is now a function of the site's distribution,
