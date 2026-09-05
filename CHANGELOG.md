@@ -146,6 +146,21 @@ For the initial 0.1.0 release notes, see `.github/CHANGELOG.md`.
   `fgn4_traverse_vec_and_right_nested_fold_are_stack_safe_for_100k_observes`
   (both recommended shapes at 100 000 observes on 512 KiB).
 
+### Changed
+
+- **Maintainer binaries are no longer `[dev-dependencies]` (FG-N8)**.
+  `cargo-llvm-cov`, `mdbook`, `mdbook-mermaid`, `mdbook-katex`,
+  `mdbook-admonish`, `mdbook-linkcheck` and `mdbook-toc` are tools the
+  maintainer runs, not libraries this crate links; declaring them compiled
+  their entire dependency trees (`reqwest`, `tokio`, ...) into every
+  `cargo test` and `cargo clippy --all-targets`. They are `cargo install`ed
+  instead (`make install-dev-tools`; the coverage and docs workflows already
+  did this). `clap` and `proptest`, declared but referenced by no target,
+  went at the same time. `Cargo.lock` shrinks from 461 to 99 packages; the
+  published library's `[dependencies]` are untouched. The MSRV CI job keeps
+  its manifest-trimming step as a guard for the one remaining dev-dependency
+  (`criterion`).
+
 ### Added
 
 - **Single-step MH with overrides and a no-rescore variant (X-5)**.

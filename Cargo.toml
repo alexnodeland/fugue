@@ -17,11 +17,10 @@ edition = "2021"
 # `src/inference/abc.rs`, stable only since 1.87.0. rustc 1.87.0 compiles
 # `[dependencies]` (the graph a downstream consumer actually pulls in)
 # cleanly with zero `incompatible_msrv` findings anywhere in the crate.
-# dev-dependencies (mdbook + plugins, criterion, proptest, ...) are NOT held
-# to this floor -- they're maintainer tooling, not part of the published
-# library -- so the MSRV CI job (.github/workflows/ci.yml) checks `--lib`
-# only, against a temporarily dev-dependency-free manifest. See that job's
-# comments for why.
+# dev-dependencies (criterion) are NOT held to this floor -- bench tooling,
+# not part of the published library -- so the MSRV CI job
+# (.github/workflows/ci.yml) checks `--lib` only, against a temporarily
+# dev-dependency-free manifest. See that job's comments for why.
 rust-version = "1.87"
 license = "MIT"
 description = "Monadic PPL with numerically stable inference and comprehensive diagnostics."
@@ -48,21 +47,18 @@ rand = "0.8"
 rand_distr = "0.4"
 libm = "0.2"
 
-[dev-dependencies]  
-# CLI dependencies
-clap = { version = "4", features = ["derive"] }
-# Testing dependencies  
-proptest = "1.0"
-cargo-llvm-cov = "0.6.18"
+[dev-dependencies]
 # Benchmarking dependencies
 criterion = { version = "0.5", features = ["html_reports"] }
-# Documentation Dependencies
-mdbook = "0.4.52"
-mdbook-mermaid = "0.15.0"
-mdbook-katex = "0.9.4"
-mdbook-admonish = "1.20.0"
-mdbook-linkcheck = "0.7.7"
-mdbook-toc = "0.14.2"
+# FG-N8: `cargo-llvm-cov`, `mdbook` and its five plugins used to be listed
+# here. They are *binaries* the maintainer runs, not libraries this crate
+# links, and declaring them as dev-dependencies compiled their whole
+# dependency trees (reqwest, tokio, ...) into every `cargo test` and
+# `cargo clippy --all-targets` for nothing -- 461 lock packages, now 99.
+# They are installed with `cargo install` instead: see `make install-dev-tools`,
+# the coverage workflow (`cargo install cargo-llvm-cov`) and the docs workflow
+# (`cargo install mdbook ...`). `clap` and `proptest` were declared but not
+# referenced by any target and went at the same time.
 
 [[bench]]
 name = "mcmc_benchmarks"
