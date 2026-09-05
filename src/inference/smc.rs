@@ -431,6 +431,10 @@ pub trait PopulationKernel<A> {
     /// Apply one population sweep in place. `beta` is the current tempering
     /// exponent; `model_fn` reconstructs the single-execution model whose
     /// tempered density defines the (product) target.
+    ///
+    /// The particles handed in carry **uniform** weights (`weight = 1/n`,
+    /// `log_weight = -ln n`, FG-N7): every sweep runs right after a resample.
+    /// Contract (W) asks the kernel to leave them so.
     fn sweep(
         &mut self,
         rng: &mut dyn rand::RngCore,
@@ -438,6 +442,16 @@ pub trait PopulationKernel<A> {
         model_fn: &dyn Fn() -> Model<A>,
         beta: f64,
     );
+
+    /// `true` iff `sweep` is a no-op, so the driver may skip the tempering
+    /// ladder entirely when there is also no per-particle rejuvenation (the
+    /// FG-43 single-reweight shortcut). Defaults to `false`; only
+    /// [`NoKernel`] overrides it. A kernel that moves particles must not
+    /// return `true`: with `rejuvenation_steps == 0` the shortcut would
+    /// otherwise silently skip it (FG-N3).
+    fn is_identity(&self) -> bool {
+        false
+    }
 }
 
 /// The identity population kernel: does nothing. [`adaptive_smc`] is defined
@@ -452,6 +466,10 @@ impl<A> PopulationKernel<A> for NoKernel {
         _: &dyn Fn() -> Model<A>,
         _: f64,
     ) {
+    }
+
+    fn is_identity(&self) -> bool {
+        true
     }
 }
 
@@ -657,6 +675,14 @@ pub fn adaptive_smc<A, R: Rng>(
 /// β = 1 step returns the weighted particles without resampling or moves
 /// (FG-43), so the kernel never touches the returned weighted population. See
 /// [`PopulationKernel`] for the invariance contract the kernel must satisfy.
+///
+/// The FG-43 shortcut — a single prior-importance reweight with no tempering
+/// ladder — is taken only when there is **nothing that moves particles**:
+/// `rejuvenation_steps == 0` *and* [`PopulationKernel::is_identity`]. A
+/// non-identity kernel with `rejuvenation_steps == 0` therefore still runs
+/// the full ladder and is swept at every intermediate step (FG-N3; it used to
+/// be silently ignored). Particles enter each sweep with uniform
+/// `weight`/`log_weight` (FG-N7).
 pub fn adaptive_smc_with_kernel<A, R, K>(
     rng: &mut R,
     num_particles: usize,
@@ -691,8 +717,9 @@ where
     let target_ess = (config.ess_threshold * n as f64).clamp(1.0, n as f64);
     let mut adaptation = DiminishingAdaptation::new(0.44, 0.7);
 
-    if config.rejuvenation_steps == 0 {
-        // Without a rejuvenation move the particle positions never change, so a
+    if config.rejuvenation_steps == 0 && kernel.is_identity() {
+        // Without any move — no per-particle rejuvenation AND an identity
+        // population kernel (FG-N3) — the particle positions never change, so a
         // multi-step temper and a single 0→1 jump give identical weighted
         // populations. Resampling here would only add variance (FG-43), so we do
         // a single pure importance-sampling reweight: log Ẑ = log-mean-likelihood
@@ -744,9 +771,22 @@ where
             if beta < 1.0 {
                 let weights: Vec<f64> = log_w.iter().map(|lw| lw.exp()).collect();
                 let indices = resample_indices(rng, &weights, config.resampling_method);
-                particles = indices.iter().map(|&i| particles[i].clone()).collect();
+                // Resampled clones carry uniform weights (FG-N7): the kernel
+                // sweep below sees `weight = 1/n`, `log_weight = -ln n`, not
+                // the stale importance weights of the particles they were
+                // copied from.
+                let log_uniform = -(n as f64).ln();
+                particles = indices
+                    .iter()
+                    .map(|&i| {
+                        let mut p = particles[i].clone();
+                        p.weight = 1.0 / n as f64;
+                        p.log_weight = log_uniform;
+                        p
+                    })
+                    .collect();
                 for lw in log_w.iter_mut() {
-                    *lw = -(n as f64).ln();
+                    *lw = log_uniform;
                 }
 
                 // π_β-invariant MH rejuvenation. Weights stay uniform (FG-13): an

@@ -97,6 +97,24 @@ For the initial 0.1.0 release notes, see `.github/CHANGELOG.md`.
   same decision and land on the same fully scored state as one started on the
   scored trace, over hundreds of seeds that include branch-closing moves. The
   block and rejuvenation tests fail on the pre-fix code.
+- **`adaptive_smc_with_kernel` no longer ignores the kernel when
+  `rejuvenation_steps == 0`, and particles enter every sweep with uniform
+  weights (FG-N3, FG-N7)**. `PopulationKernel` gains `is_identity(&self) ->
+  bool` (default `false`; `NoKernel` returns `true`), and the FG-43 shortcut -
+  a single prior-importance reweight with no tempering ladder - is taken only
+  when there is nothing that moves particles: no rejuvenation *and* an
+  identity kernel. A `CrossoverKernel` with `rejuvenation_steps == 0` (the
+  configuration fugue-evo's grammar SMC ships by default) used to be
+  silently skipped because `kernel.sweep` lives inside the ladder the shortcut
+  bypasses. Resampled clones now carry `weight = 1/n`, `log_weight = -ln n`
+  instead of the beta-stale importance weights of the particles they were
+  copied from, matching what the `PopulationKernel` contract (W) already told
+  kernel authors to expect. Pinned by
+  `fgn3_non_identity_kernel_is_applied_with_zero_rejuvenation_steps` (a
+  recording kernel that asserts the weight contract on entry and is swept only
+  at intermediate `beta`) and
+  `fgn3_crossover_kernel_without_rejuvenation_is_applied_and_invariant`
+  (analytic posterior means and log-evidence through the crossover sweeps).
 
 ### Added
 
