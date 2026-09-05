@@ -274,3 +274,132 @@ fn fg41_discrete_walk_recovers_poisson_at_boundary() {
         "Poisson(1) P(k=0) {p0:.4} != 0.3679 (boundary asymmetry?)"
     );
 }
+
+// ---------------------------------------------------------------------------
+// FG-N1: the f64 proposal kind must be a function of the site's distribution,
+// never of the value currently at the site. The pre-fix selector routed a site
+// to the log-space walk iff `current > 0` and the prior density at the probe
+// `-1.0` was `-inf`. For `Uniform(-0.5, 0.5)` that probe is `-inf` (the support
+// does not contain -1), so a positive first draw put the chain on a log-space
+// walk that can never propose a negative value - and the kind was cached per
+// address, so the whole chain inherited the sign of its first state. Simulation
+// of the exact pre-fix kernel: P(x > 0) = 1.000 (truth 0.5).
+//
+// Analytic references for the target rho(x) ∝ exp(2x) on [-1/2, 1/2]:
+//   Z          = ∫ e^{2x} dx           = sinh(1)                = 1.175201
+//   E[x]       = (1/Z) ∫ x e^{2x} dx   = (1/2)·e^{-1} / sinh(1) = 0.156518
+//   P(x > 0)   = (1/Z) ∫_0^{1/2} e^{2x} = ((e-1)/2) / sinh(1)   = 0.731059
+// A chain confined to (0, 1/2] instead has E[x] = 0.25 / ((e-1)/2) = 0.290988
+// and P(x > 0) = 1.
+// ---------------------------------------------------------------------------
+
+/// rho(x) ∝ exp(2x) on the prior's support: a site the pre-fix kernel confined.
+fn fgn1_tilted_uniform() -> Model<f64> {
+    sample(addr!("x"), Uniform::new(-0.5, 0.5).unwrap()).bind(|x| factor(2.0 * x).map(move |_| x))
+}
+
+const FGN1_MEAN: f64 = 0.156_518;
+const FGN1_P_POS: f64 = 0.731_059;
+
+#[test]
+fn fgn1_bounded_prior_containing_negatives_visits_both_signs() {
+    // Plain prior, no factor: P(x > 0) = 0.5 exactly, E[x] = 0.
+    let model_fn = || sample(addr!("x"), Uniform::new(-0.5, 0.5).unwrap());
+    // Several seeds: the pre-fix defect is seed-dependent (it engages when the
+    // FIRST draw is positive), so a single lucky seed must not mask it.
+    for seed in [1u64, 2, 3, 4, 5, 6] {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let samples = adaptive_mcmc_chain(&mut rng, model_fn, 10_000, 2_000);
+        let xs = f64_values(&samples, &addr!("x"));
+        let n = xs.len() as f64;
+        let p_pos = xs.iter().filter(|&&x| x > 0.0).count() as f64 / n;
+        let mean = xs.iter().sum::<f64>() / n;
+        let sd = (xs.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / (n - 1.0)).sqrt();
+        let se = sd / effective_sample_size_mcmc(&xs).sqrt();
+        assert!(
+            xs.iter().all(|&x| (-0.5..0.5).contains(&x)),
+            "seed {seed}: a sample escaped the support"
+        );
+        // Binomial SE of a sign frequency at ESS ~ a few hundred is ~0.03; the
+        // pre-fix value is exactly 1.0 or 0.0 (both ~15 SE away).
+        assert!(
+            (p_pos - 0.5).abs() < 0.12,
+            "seed {seed}: P(x > 0) = {p_pos:.3}, expected 0.5 - chain stuck on one sign"
+        );
+        assert!(
+            mean.abs() < 4.0 * se,
+            "seed {seed}: mean {mean:.4} not within 4·SE ({:.4}) of 0",
+            4.0 * se
+        );
+    }
+}
+
+#[test]
+fn fgn1_bounded_prior_matches_analytic_mean_under_factor() {
+    let mut rng = StdRng::seed_from_u64(20260905);
+    let samples = adaptive_mcmc_chain(&mut rng, fgn1_tilted_uniform, 20_000, 4_000);
+    let xs = f64_values(&samples, &addr!("x"));
+    let n = xs.len() as f64;
+    let mean = xs.iter().sum::<f64>() / n;
+    let sd = (xs.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / (n - 1.0)).sqrt();
+    let se = sd / effective_sample_size_mcmc(&xs).sqrt();
+    let p_pos = xs.iter().filter(|&&x| x > 0.0).count() as f64 / n;
+
+    assert!(
+        (mean - FGN1_MEAN).abs() < 4.0 * se,
+        "mean {mean:.4} not within 4·SE ({:.4}) of {FGN1_MEAN}",
+        4.0 * se
+    );
+    // The confined chain's mean is 0.291: rule it out explicitly.
+    assert!(
+        mean < 0.24,
+        "mean {mean:.4} collapsed toward the positive-half value 0.291"
+    );
+    assert!(
+        (p_pos - FGN1_P_POS).abs() < 0.06,
+        "P(x > 0) = {p_pos:.3}, expected {FGN1_P_POS}"
+    );
+}
+
+// FG-N1 (kind is read from `Distribution::support`): a bounded site is given the
+// reflected walk, a positive one the log-space walk, an unconstrained one the
+// Gaussian walk - and never from the current value.
+#[test]
+fn fgn1_proposal_kind_is_a_function_of_the_support() {
+    use fugue::core::distribution::Support;
+    use fugue::inference::mh::proposal_kind_for_support;
+    assert_eq!(
+        proposal_kind_for_support(Uniform::new(-0.5, 0.5).unwrap().support()),
+        SiteProposal::Reflect {
+            lower: -0.5,
+            upper: 0.5
+        }
+    );
+    assert_eq!(
+        proposal_kind_for_support(Beta::new(2.0, 3.0).unwrap().support()),
+        SiteProposal::Reflect {
+            lower: 0.0,
+            upper: 1.0
+        }
+    );
+    for positive in [
+        Gamma::new(3.0, 2.0).unwrap().support(),
+        Exponential::new(1.0).unwrap().support(),
+        LogNormal::new(0.0, 1.0).unwrap().support(),
+        InverseGamma::new(2.0, 1.0).unwrap().support(),
+        Weibull::new(1.0, 1.5).unwrap().support(),
+        ChiSquared::new(3.0).unwrap().support(),
+    ] {
+        assert_eq!(positive, Support::Positive);
+        assert_eq!(proposal_kind_for_support(positive), SiteProposal::LogSpace);
+    }
+    for real in [
+        Normal::new(0.0, 1.0).unwrap().support(),
+        StudentT::new(3.0, 0.0, 1.0).unwrap().support(),
+        Cauchy::new(0.0, 1.0).unwrap().support(),
+        Laplace::new(0.0, 1.0).unwrap().support(),
+    ] {
+        assert_eq!(real, Support::Real);
+        assert_eq!(proposal_kind_for_support(real), SiteProposal::Gaussian);
+    }
+}

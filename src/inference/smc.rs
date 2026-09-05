@@ -59,7 +59,7 @@ use crate::core::address::Address;
 use crate::core::model::Model;
 use crate::core::numerical::log_sum_exp;
 use crate::inference::mcmc_utils::DiminishingAdaptation;
-use crate::inference::mh::{propose_and_score, SiteProposal};
+use crate::inference::mh::{mh_accept, propose_and_score, SiteProposal};
 use crate::runtime::handler::run;
 use crate::runtime::interpreters::{PriorHandler, ScoreGivenTrace};
 use crate::runtime::trace::Trace;
@@ -431,6 +431,10 @@ pub trait PopulationKernel<A> {
     /// Apply one population sweep in place. `beta` is the current tempering
     /// exponent; `model_fn` reconstructs the single-execution model whose
     /// tempered density defines the (product) target.
+    ///
+    /// The particles handed in carry **uniform** weights (`weight = 1/n`,
+    /// `log_weight = -ln n`, FG-N7): every sweep runs right after a resample.
+    /// Contract (W) asks the kernel to leave them so.
     fn sweep(
         &mut self,
         rng: &mut dyn rand::RngCore,
@@ -438,6 +442,16 @@ pub trait PopulationKernel<A> {
         model_fn: &dyn Fn() -> Model<A>,
         beta: f64,
     );
+
+    /// `true` iff `sweep` is a no-op, so the driver may skip the tempering
+    /// ladder entirely when there is also no per-particle rejuvenation (the
+    /// FG-43 single-reweight shortcut). Defaults to `false`; only
+    /// [`NoKernel`] overrides it. A kernel that moves particles must not
+    /// return `true`: with `rejuvenation_steps == 0` the shortcut would
+    /// otherwise silently skip it (FG-N3).
+    fn is_identity(&self) -> bool {
+        false
+    }
 }
 
 /// The identity population kernel: does nothing. [`adaptive_smc`] is defined
@@ -452,6 +466,10 @@ impl<A> PopulationKernel<A> for NoKernel {
         _: &dyn Fn() -> Model<A>,
         _: f64,
     ) {
+    }
+
+    fn is_identity(&self) -> bool {
+        true
     }
 }
 
@@ -478,8 +496,12 @@ pub struct CrossoverKernel {
     /// be value-independent (depend only on the address structure) and
     /// symmetric in its two trace arguments for the move to be a symmetric
     /// involution (Hastings ratio 1).
+    ///
+    /// `Send` so a kernel can be moved to a worker thread along with the rest
+    /// of an SMC run (FG-N9); closures that only capture `Send` state already
+    /// satisfy it.
     #[allow(clippy::type_complexity)]
-    pub mask: Box<dyn Fn(&Trace, &Trace, &mut dyn rand::RngCore) -> Vec<Address>>,
+    pub mask: Box<dyn Fn(&Trace, &Trace, &mut dyn rand::RngCore) -> Vec<Address> + Send>,
 }
 
 /// Build two children by exchanging the choices at `swap` between `a` and `b`.
@@ -657,6 +679,14 @@ pub fn adaptive_smc<A, R: Rng>(
 /// β = 1 step returns the weighted particles without resampling or moves
 /// (FG-43), so the kernel never touches the returned weighted population. See
 /// [`PopulationKernel`] for the invariance contract the kernel must satisfy.
+///
+/// The FG-43 shortcut — a single prior-importance reweight with no tempering
+/// ladder — is taken only when there is **nothing that moves particles**:
+/// `rejuvenation_steps == 0` *and* [`PopulationKernel::is_identity`]. A
+/// non-identity kernel with `rejuvenation_steps == 0` therefore still runs
+/// the full ladder and is swept at every intermediate step (FG-N3; it used to
+/// be silently ignored). Particles enter each sweep with uniform
+/// `weight`/`log_weight` (FG-N7).
 pub fn adaptive_smc_with_kernel<A, R, K>(
     rng: &mut R,
     num_particles: usize,
@@ -691,8 +721,9 @@ where
     let target_ess = (config.ess_threshold * n as f64).clamp(1.0, n as f64);
     let mut adaptation = DiminishingAdaptation::new(0.44, 0.7);
 
-    if config.rejuvenation_steps == 0 {
-        // Without a rejuvenation move the particle positions never change, so a
+    if config.rejuvenation_steps == 0 && kernel.is_identity() {
+        // Without any move — no per-particle rejuvenation AND an identity
+        // population kernel (FG-N3) — the particle positions never change, so a
         // multi-step temper and a single 0→1 jump give identical weighted
         // populations. Resampling here would only add variance (FG-43), so we do
         // a single pure importance-sampling reweight: log Ẑ = log-mean-likelihood
@@ -744,9 +775,22 @@ where
             if beta < 1.0 {
                 let weights: Vec<f64> = log_w.iter().map(|lw| lw.exp()).collect();
                 let indices = resample_indices(rng, &weights, config.resampling_method);
-                particles = indices.iter().map(|&i| particles[i].clone()).collect();
+                // Resampled clones carry uniform weights (FG-N7): the kernel
+                // sweep below sees `weight = 1/n`, `log_weight = -ln n`, not
+                // the stale importance weights of the particles they were
+                // copied from.
+                let log_uniform = -(n as f64).ln();
+                particles = indices
+                    .iter()
+                    .map(|&i| {
+                        let mut p = particles[i].clone();
+                        p.weight = 1.0 / n as f64;
+                        p.log_weight = log_uniform;
+                        p
+                    })
+                    .collect();
                 for lw in log_w.iter_mut() {
-                    *lw = -(n as f64).ln();
+                    *lw = log_uniform;
                 }
 
                 // π_β-invariant MH rejuvenation. Weights stay uniform (FG-13): an
@@ -870,29 +914,13 @@ fn tempered_single_site_mh<A, R: Rng>(
     beta: f64,
     adaptation: &mut DiminishingAdaptation,
 ) -> Trace {
-    if current.choices.is_empty() {
-        // Nothing to move; doing nothing is trivially π_β-invariant.
-        return current.clone();
-    }
-
-    let sites: Vec<Address> = current.choices.keys().cloned().collect();
-    let target = sites[rng.gen_range(0..sites.len())].clone();
-    let scale = adaptation.get_scale(&target);
-
-    let overrides: HashMap<Address, SiteProposal> = HashMap::new();
-    let mut kind_cache: HashMap<Address, SiteProposal> = HashMap::new();
-    let (_a_prop, prop_trace, _prop_lw, lqf, lqr, _structure_changed) = propose_and_score(
-        rng,
-        model_fn,
-        current,
-        &target,
-        scale,
-        &overrides,
-        &mut kind_cache,
-    );
-
-    // Score the current state (also refreshes accumulators for the trace we
-    // return on rejection, FG-40).
+    // Score the current state FIRST (FG-N6). The site list, the proposal base
+    // and every reverse-move (death) density are read from `cur_scored`, never
+    // from the caller's per-choice `logp` — a particle whose trace was assembled
+    // with `insert_choice(.., 0.0)` would otherwise zero the death term and
+    // over-accept structure-shrinking moves. The re-score also refreshes the
+    // accumulators of the trace returned on rejection (FG-40). `ScoreGivenTrace`
+    // consumes no randomness, so the RNG stream is unchanged by the reorder.
     let (_, cur_scored) = run(
         ScoreGivenTrace {
             base: current.clone(),
@@ -901,12 +929,26 @@ fn tempered_single_site_mh<A, R: Rng>(
         model_fn(),
     );
 
+    if cur_scored.choices.is_empty() {
+        // Nothing to move; doing nothing is trivially π_β-invariant.
+        return cur_scored;
+    }
+
+    let sites: Vec<Address> = cur_scored.choices.keys().cloned().collect();
+    let target = sites[rng.gen_range(0..sites.len())].clone();
+    let scale = adaptation.get_scale(&target);
+
+    let overrides: HashMap<Address, SiteProposal> = HashMap::new();
+    let (_a_prop, prop_trace, _prop_lw, lqf, lqr, _structure_changed) =
+        propose_and_score(rng, model_fn, &cur_scored, &target, scale, &overrides);
+
     let dim_term = (sites.len() as f64).ln() - (prop_trace.choices.len() as f64).ln();
+    let logd = |t: &Trace| t.log_prior + beta * particle_log_likelihood(t);
     let log_alpha = (prop_trace.log_prior - cur_scored.log_prior)
         + beta * (particle_log_likelihood(&prop_trace) - particle_log_likelihood(&cur_scored))
         + (lqr - lqf)
         + dim_term;
-    let accept = log_alpha >= 0.0 || rng.gen::<f64>() < log_alpha.exp();
+    let accept = mh_accept(rng, log_alpha, logd(&cur_scored), logd(&prop_trace));
     adaptation.update(&target, accept);
 
     if accept {
@@ -945,6 +987,12 @@ pub fn rejuvenate_particles<A, R: Rng>(
 ///
 /// This function properly handles extreme log-weights without underflow or overflow,
 /// which is critical for reliable SMC performance.
+///
+/// On return the two weight fields are **consistent**: `weight == exp(log_weight)`
+/// and `Σ weight = 1` (FG-N9). Previously `log_weight` was left as the
+/// *unnormalized* input while `weight` was normalized — and in the all-`-∞`
+/// fallback `weight` became `1/n` with `log_weight` still `-∞` — so the two
+/// fields disagreed depending on which function had produced the particle.
 pub fn normalize_particles(particles: &mut [Particle]) {
     use crate::core::numerical::log_sum_exp;
 
@@ -963,20 +1011,25 @@ pub fn normalize_particles(particles: &mut [Particle]) {
         let n = particles.len();
         for p in particles {
             p.weight = 1.0 / n as f64; // Uniform weights as fallback
+            p.log_weight = -(n as f64).ln();
         }
         return;
     }
 
-    // Normalize weights stably
+    // Normalize weights stably (NaN inputs count as -∞, FG-N2)
     for (p, &log_w) in particles.iter_mut().zip(&log_weights) {
-        p.weight = (log_w - log_norm).exp();
+        p.log_weight = crate::core::numerical::nan_to_neg_inf(log_w) - log_norm;
+        p.weight = p.log_weight.exp();
     }
 
-    // Ensure weights sum to 1.0 (handle small numerical errors)
+    // Ensure weights sum to 1.0 (handle small numerical errors), keeping the
+    // log-space field in step.
     let weight_sum: f64 = particles.iter().map(|p| p.weight).sum();
-    if weight_sum > 0.0 {
+    if weight_sum > 0.0 && weight_sum != 1.0 {
+        let log_sum = weight_sum.ln();
         for p in particles {
             p.weight /= weight_sum;
+            p.log_weight -= log_sum;
         }
     }
 }
@@ -1051,6 +1104,12 @@ pub fn decode_particle<A>(particle: &Particle, model_fn: impl Fn() -> Model<A>) 
 /// that IS a complete, in-support assignment for `model_fn` always scores a
 /// finite log-prior, so a non-finite one means the trace does not decode under
 /// this model.
+///
+/// The safe scorer keeps executing past a missing/mismatched site with a
+/// deterministic draw from that site's prior, so a model whose *structure*
+/// depends on the site (a grammar's leaf flag, a scale fed to `Normal::new`)
+/// terminates and returns `Err` rather than recursing without bound or
+/// panicking inside the likelihood.
 pub fn try_decode_particle<A>(
     particle: &Particle,
     model_fn: impl Fn() -> Model<A>,
@@ -1159,9 +1218,47 @@ mod tests {
             },
         ];
         normalize_particles(&mut particles);
-        // Fallback to uniform
+        // Fallback to uniform — in BOTH fields (FG-N9).
         assert!((particles[0].weight - 0.5).abs() < 1e-12);
         assert!((particles[1].weight - 0.5).abs() < 1e-12);
+        assert!((particles[0].log_weight - 0.5_f64.ln()).abs() < 1e-12);
+        assert!((particles[1].log_weight - 0.5_f64.ln()).abs() < 1e-12);
+    }
+
+    /// FG-N9: after normalization `weight == exp(log_weight)` for every
+    /// particle, whichever entry point produced it.
+    #[test]
+    fn normalize_particles_keeps_weight_and_log_weight_consistent() {
+        let mut particles: Vec<Particle> = [-3.0, 0.5, f64::NEG_INFINITY, 2.0, f64::NAN]
+            .iter()
+            .map(|&lw| Particle {
+                trace: Trace::default(),
+                weight: 0.0,
+                log_weight: lw,
+            })
+            .collect();
+        normalize_particles(&mut particles);
+        let total: f64 = particles.iter().map(|p| p.weight).sum();
+        assert!((total - 1.0).abs() < 1e-12);
+        for p in &particles {
+            assert!(
+                (p.weight - p.log_weight.exp()).abs() < 1e-12,
+                "{:?}",
+                (p.weight, p.log_weight)
+            );
+        }
+        assert_eq!(particles[2].weight, 0.0);
+        assert_eq!(particles[4].weight, 0.0); // NaN input = zero probability
+
+        let mut rng = StdRng::seed_from_u64(3);
+        let model_fn = || {
+            sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
+                .bind(|mu| observe(addr!("y"), Normal::new(mu, 0.5).unwrap(), 1.0).map(move |_| mu))
+        };
+        let prior = smc_prior_particles(&mut rng, 50, model_fn);
+        for p in &prior {
+            assert!((p.weight - p.log_weight.exp()).abs() < 1e-12);
+        }
     }
 
     /// Regression (EA-as-PPL F1): rejuvenation must move non-F64 sites. The
@@ -1242,7 +1339,8 @@ mod tests {
     /// A value-independent, pair-symmetric mask: each of the two sites is
     /// included in the swap independently with probability 1/2.
     #[allow(clippy::type_complexity)]
-    fn random_site_mask() -> Box<dyn Fn(&Trace, &Trace, &mut dyn rand::RngCore) -> Vec<Address>> {
+    fn random_site_mask(
+    ) -> Box<dyn Fn(&Trace, &Trace, &mut dyn rand::RngCore) -> Vec<Address> + Send> {
         Box::new(|a: &Trace, _b: &Trace, rng: &mut dyn rand::RngCore| {
             a.choices
                 .keys()

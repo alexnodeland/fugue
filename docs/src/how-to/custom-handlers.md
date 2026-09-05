@@ -338,4 +338,4 @@ struct MetricsHandler<H: Handler> {
 6. **Testing**: Comprehensive unit and integration tests
 7. **Documentation**: Clear API contracts and usage examples
 
-Custom handlers transform Fugue from a probabilistic programming framework into a platform for building specialized inference systems, analytics tools, and production-ready probabilistic applications.
+Custom handlers transform Fugue from a probabilistic programming framework into a platform for building specialized inference systems, analytics tools, and robust probabilistic applications.

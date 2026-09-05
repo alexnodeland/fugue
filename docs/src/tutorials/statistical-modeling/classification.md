@@ -429,7 +429,7 @@ mdbook build docs/
 2. **Model Flexibility**: Handle binary, multi-class, ordinal, and hierarchical outcomes
 3. **Robust Methods**: Constraint-aware MCMC prevents numerical issues
 4. **Principled Selection**: Use information criteria and Bayes factors for model choice
-5. **Production Ready**: Scalable workflows with proper diagnostics and validation
+5. **Robust Workflows**: Scalable inference with proper diagnostics and validation
 6. **Real-World Applications**: Flexible framework for diverse classification problems
 ```
 

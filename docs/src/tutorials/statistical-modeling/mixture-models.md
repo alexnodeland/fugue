@@ -451,7 +451,7 @@ cargo run --example mixture_models --features="plotting"
 2. **Latent Variables**: Elegant treatment of unobserved cluster structure
 3. **Bayesian Advantages**: Natural uncertainty quantification and model comparison
 4. **Advanced Methods**: Infinite mixtures and temporal extensions
-5. **Production Ready**: Scalable inference with proper diagnostics and validation
+5. **Robust Workflows**: Scalable inference with proper diagnostics and validation
 6. **Real-World Applications**: Clustering, anomaly detection, and population modeling
 ```
 

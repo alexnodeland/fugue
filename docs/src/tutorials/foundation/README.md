@@ -15,7 +15,7 @@ graph TB
     B --> E["Type-Safe Programming"] 
     C --> F["Advanced Inference"]
     
-    D --> G["Production Ready<br/>Probabilistic Models"]
+    D --> G["Robust<br/>Probabilistic Models"]
     E --> G
     F --> G
     
@@ -42,7 +42,7 @@ graph TB
 3. **[Trace Manipulation](./trace-manipulation.md)** *(~60 minutes)*
    - Deep dive into Fugue's runtime system
    - Learn custom inference and debugging techniques
-   - Build production-ready probabilistic applications
+   - Build robust, well-tested probabilistic applications
 
 ## Tutorial Overview
 
@@ -146,7 +146,7 @@ After completing these foundation tutorials, you will:
 - ✅ Manipulate execution traces for custom inference algorithms
 - ✅ Implement specialized handlers for unique requirements
 - ✅ Debug and optimize problematic models systematically  
-- ✅ Deploy production-ready probabilistic systems
+- ✅ Build well-tested probabilistic systems
 
 ### 🔧 **Production Skills**
 
@@ -251,7 +251,7 @@ If you encounter issues:
 Start your journey with **[Bayesian Coin Flip](./bayesian-coin-flip.md)** — the gateway to mastering probabilistic programming with Fugue.
 
 ```admonish success title="Foundation Tutorials"
-These tutorials transform you from a probabilistic programming novice to someone who can build sophisticated, type-safe, production-ready Bayesian models. Each concept builds on the previous, creating a complete mental model of how Fugue works.
+These tutorials transform you from a probabilistic programming novice to someone who can build sophisticated, type-safe, well-tested Bayesian models. Each concept builds on the previous, creating a complete mental model of how Fugue works.
 
 **Time Investment**: ~2.5 hours total  
 **Skill Level**: Beginner to Intermediate  

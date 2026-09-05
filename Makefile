@@ -38,8 +38,8 @@ install-tools: ## Install development tools (legacy - use install-dev-tools)
 	cargo install cargo-watch
 	cargo install cargo-edit
 
-install-dev-tools: ## Install development tools from dev-dependencies
-	@echo "Installing development tools from Cargo.toml dev-dependencies..."
+install-dev-tools: ## Install development tools (mdbook + plugins, cargo-llvm-cov, cargo-watch, cargo-edit)
+	@echo "Installing development tools (binaries; not Cargo.toml dependencies, FG-N8)..."
 	cargo install --list | grep -q "mdbook" || cargo install mdbook --locked
 	cargo install --list | grep -q "mdbook-mermaid" || cargo install mdbook-mermaid --locked
 	cargo install --list | grep -q "mdbook-admonish" || cargo install mdbook-admonish --locked

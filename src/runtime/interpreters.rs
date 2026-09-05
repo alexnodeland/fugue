@@ -3,11 +3,13 @@
 use crate::core::address::Address;
 use crate::core::distribution::Distribution;
 use crate::core::model::Model;
+use crate::core::numerical::nan_to_neg_inf;
 use crate::error::{ErrorCode, FugueError, FugueResult};
 use crate::runtime::handler::{run, Handler};
 use crate::runtime::trace::{Choice, ChoiceValue, Trace};
 
-use rand::RngCore;
+use rand::{RngCore, SeedableRng};
+use std::hash::{Hash, Hasher};
 
 /// Panic when a sample site reuses an address already recorded in this
 /// execution's output trace (FG-47).
@@ -72,12 +74,14 @@ macro_rules! for_each_value_type {
 }
 
 /// Generate the five identical `on_observe_*` methods (every handler scores an
-/// observation the same way: add its log-density to `log_likelihood`).
+/// observation the same way: add its log-density to `log_likelihood`). A `NaN`
+/// log-density (e.g. an observed `NaN`, or a distribution whose parameters
+/// went non-finite mid-model) is accumulated as `-∞` (FG-N2).
 macro_rules! impl_observe_methods {
     ($(($sample:ident, $observe:ident, $ty:ty, $variant:ident, $tyname:literal, $get:ident, $get_res:ident)),* $(,)?) => {
         $(
             fn $observe(&mut self, _addr: &Address, dist: &dyn Distribution<$ty>, value: $ty) {
-                self.trace.log_likelihood += dist.log_prob(&value);
+                self.trace.log_likelihood += nan_to_neg_inf(dist.log_prob(&value));
             }
         )*
     };
@@ -203,10 +207,39 @@ macro_rules! impl_safe_replay_sample_methods {
     };
 }
 
+/// The value a non-panicking scorer hands back to the program at a site it
+/// could NOT score (missing from the base trace, type-mismatched, or visited
+/// twice): a **deterministic draw from the site's own prior**, seeded by the
+/// address.
+///
+/// The score is already invalid at this point (the caller sees `-inf` or an
+/// `Err`), so the value carries no statistical meaning. What matters is that
+/// execution continues *inside the program's own support*. The previous
+/// behaviour, `Default::default()`, did not: a missing `Bool` came back as
+/// `false`, which for a grammar prior means "function node, recurse" at every
+/// depth (an unbounded recursion that overflows the stack); a missing `f64`
+/// scale came back as `0.0`, which `Normal::new(mu, 0.0).unwrap()` turns into a
+/// panic inside the likelihood. A prior draw is, by construction, a value the
+/// program can be handed.
+///
+/// Seeding from the address (its cached SipHash, fixed keys) keeps the scorers
+/// pure functions of `(base, model)` — same input, same output — while giving
+/// different sites independent draws, so a chain of missing `#leaf` decisions
+/// terminates the way the prior does rather than repeating one outcome forever.
+fn fallback_prior_draw<T>(addr: &Address, dist: &dyn Distribution<T>) -> T {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    addr.hash(&mut hasher);
+    let mut rng = rand::rngs::StdRng::seed_from_u64(hasher.finish());
+    dist.sample(&mut rng)
+}
+
 /// `SafeScoreGivenTrace`: like `ScoreGivenTrace` but returns an invalid (`-inf`)
 /// trace instead of panicking on a missing/mismatched address, and stores a
 /// FRESH choice with the newly computed logp (FG-48). A duplicate address
-/// invalidates the trace (FG-47).
+/// invalidates the trace (FG-47). At a site it cannot score it hands the
+/// program a deterministic prior draw (see [`fallback_prior_draw`]) so the
+/// program keeps executing inside its own support instead of diverging on a
+/// `Default::default()` value.
 macro_rules! impl_safe_score_sample_methods {
     ($(($sample:ident, $observe:ident, $ty:ty, $variant:ident, $tyname:literal, $get:ident, $get_res:ident)),* $(,)?) => {
         $(
@@ -216,7 +249,11 @@ macro_rules! impl_safe_score_sample_methods {
                         eprintln!("Warning: {}", address_conflict_error(addr, "SafeScoreGivenTrace"));
                     }
                     self.trace.log_prior += f64::NEG_INFINITY;
-                    return <$ty as Default>::default();
+                    // Invalid already; keep the program inside its support.
+                    return self
+                        .base
+                        .$get(addr)
+                        .unwrap_or_else(|| fallback_prior_draw(addr, dist));
                 }
                 match self.base.$get_res(addr) {
                     Ok(x) => {
@@ -233,8 +270,17 @@ macro_rules! impl_safe_score_sample_methods {
                         if self.warn_on_error {
                             eprintln!("Warning: Failed to get {} at {}: {}", $tyname, addr, e);
                         }
+                        // The score is invalid (-inf sentinel). Hand the program a
+                        // deterministic prior draw so it keeps executing inside its
+                        // own support, and record it so the returned trace is a
+                        // complete assignment a caller can inspect.
                         self.trace.log_prior += f64::NEG_INFINITY;
-                        <$ty as Default>::default()
+                        let x = fallback_prior_draw(addr, dist);
+                        self.trace.choices.insert(
+                            addr.clone(),
+                            Choice { addr: addr.clone(), value: ChoiceValue::$variant(x), logp: dist.log_prob(&x) },
+                        );
+                        x
                     }
                 }
             }
@@ -247,7 +293,9 @@ macro_rules! impl_safe_score_sample_methods {
 /// instead of panicking: an address absent from the base trace or a type
 /// mismatch yields `ErrorCode::UnexpectedModelStructure`; a duplicate address
 /// yields `ErrorCode::AddressConflict`. On success it stores a fresh, correctly
-/// scored choice.
+/// scored choice. After a failure the program is handed a deterministic prior
+/// draw (see [`fallback_prior_draw`]) so it runs to completion inside its own
+/// support; the driver discards the trace and returns the recorded error.
 macro_rules! impl_strict_score_sample_methods {
     ($(($sample:ident, $observe:ident, $ty:ty, $variant:ident, $tyname:literal, $get:ident, $get_res:ident)),* $(,)?) => {
         $(
@@ -256,7 +304,10 @@ macro_rules! impl_strict_score_sample_methods {
                     if self.error.is_none() {
                         *self.error = Some(address_conflict_error(addr, "StrictScoreGivenTrace"));
                     }
-                    return <$ty as Default>::default();
+                    return self
+                        .base
+                        .$get(addr)
+                        .unwrap_or_else(|| fallback_prior_draw(addr, dist));
                 }
                 match self.base.$get_res(addr) {
                     Ok(x) => {
@@ -281,7 +332,14 @@ macro_rules! impl_strict_score_sample_methods {
                                 context: crate::error::ErrorContext::new().with_cause(cause),
                             });
                         }
-                        <$ty as Default>::default()
+                        // Keep executing inside the program's support; the trace
+                        // is discarded by the driver, which returns the error.
+                        let x = fallback_prior_draw(addr, dist);
+                        self.trace.choices.insert(
+                            addr.clone(),
+                            Choice { addr: addr.clone(), value: ChoiceValue::$variant(x), logp: dist.log_prob(&x) },
+                        );
+                        x
                     }
                 }
             }
@@ -304,7 +362,12 @@ macro_rules! impl_reconciling_score_sample_methods {
                         *self.error =
                             Some(address_conflict_error(addr, "ReconcilingScoreGivenTrace"));
                     }
-                    return <$ty as Default>::default();
+                    // Keep the program inside its support until the driver
+                    // returns the error (same hazard as the strict scorer).
+                    return self
+                        .base
+                        .$get(addr)
+                        .unwrap_or_else(|| dist.sample(self.rng));
                 }
                 let x = match self.base.$get(addr) {
                     Some(v) => v,
@@ -363,7 +426,7 @@ impl<'r, R: RngCore> Handler for PriorHandler<'r, R> {
     for_each_value_type!(impl_observe_methods);
 
     fn on_factor(&mut self, logw: f64) {
-        self.trace.log_factors += logw;
+        self.trace.log_factors += nan_to_neg_inf(logw);
     }
 
     fn finish(self) -> Trace {
@@ -418,7 +481,7 @@ impl<'r, R: RngCore> Handler for ReplayHandler<'r, R> {
     for_each_value_type!(impl_observe_methods);
 
     fn on_factor(&mut self, logw: f64) {
-        self.trace.log_factors += logw;
+        self.trace.log_factors += nan_to_neg_inf(logw);
     }
 
     fn finish(self) -> Trace {
@@ -458,6 +521,17 @@ impl<'r, R: RngCore> Handler for ReplayHandler<'r, R> {
 ///
 /// assert!(score_trace.total_log_weight().is_finite());
 /// ```
+///
+/// # Incompatible traces
+///
+/// This is the fast path and it **panics** on an address missing from `base`
+/// or present with another value type (`"missing value for site …"`). For a
+/// trace of uncertain provenance use [`score_given_trace_strict`] (an `Err`
+/// naming the first offending site), [`SafeScoreGivenTrace`] (a `-inf`
+/// `log_prior` sentinel), or [`score_given_trace_reconciled`] (fresh prior draws
+/// at the new sites, reported). All three keep executing the program past the
+/// failure with a prior draw at the unscorable site, so a program whose control
+/// flow depends on that site terminates inside its own support.
 pub struct ScoreGivenTrace {
     /// Base trace containing the fixed choices to score.
     pub base: Trace,
@@ -469,7 +543,7 @@ impl Handler for ScoreGivenTrace {
     for_each_value_type!(impl_observe_methods);
 
     fn on_factor(&mut self, logw: f64) {
-        self.trace.log_factors += logw;
+        self.trace.log_factors += nan_to_neg_inf(logw);
     }
 
     fn finish(self) -> Trace {
@@ -526,7 +600,7 @@ impl<'r, R: RngCore> Handler for SafeReplayHandler<'r, R> {
     for_each_value_type!(impl_observe_methods);
 
     fn on_factor(&mut self, logw: f64) {
-        self.trace.log_factors += logw;
+        self.trace.log_factors += nan_to_neg_inf(logw);
     }
 
     fn finish(self) -> Trace {
@@ -538,8 +612,20 @@ impl<'r, R: RngCore> Handler for SafeReplayHandler<'r, R> {
 ///
 /// SafeScoreGivenTrace computes log-probability like ScoreGivenTrace, but handles
 /// missing addresses or type mismatches by returning negative infinity log-weight
-/// instead of panicking. Essential for production inference where trace validity
-/// cannot be guaranteed.
+/// instead of panicking. Use it when trace validity cannot be guaranteed.
+///
+/// # Structurally incompatible traces
+///
+/// The `-inf` `log_prior` is the *only* signal that the score is invalid; the
+/// returned value `A` and the returned trace's choices must not be read as a
+/// score of anything. At a site it cannot score the handler hands the program a
+/// **deterministic draw from that site's prior** (seeded by the address) and
+/// records it, so a program whose control flow depends on the site keeps
+/// executing inside its own support: a missing `Bool` no longer arrives as
+/// `false` (for a grammar prior: "recurse", at every depth, until the stack
+/// overflows) and a missing scale no longer arrives as `0.0` (which panics
+/// inside `Normal::new`). Same input, same output — the handler remains a pure
+/// function of `(base, model)`.
 ///
 /// Example:
 /// ```rust
@@ -580,7 +666,7 @@ impl Handler for SafeScoreGivenTrace {
     for_each_value_type!(impl_observe_methods);
 
     fn on_factor(&mut self, logw: f64) {
-        self.trace.log_factors += logw;
+        self.trace.log_factors += nan_to_neg_inf(logw);
     }
 
     fn finish(self) -> Trace {
@@ -603,6 +689,15 @@ impl Handler for SafeScoreGivenTrace {
 /// - visiting the same address twice -> [`ErrorCode::AddressConflict`].
 ///
 /// On success every visited site stores a fresh, correctly scored choice.
+///
+/// After the first failure the program still runs to completion — the handler
+/// cannot abort `run` — so the value returned at the failed site matters for
+/// *termination*, not for the score: it is a deterministic draw from the site's
+/// prior (seeded by the address), which keeps a program whose structure depends
+/// on that site inside its own support. `Default::default()`, the previous
+/// choice, did not: a grammar's missing `Bool` leaf flag read as "function
+/// node" at every depth and recursed until the stack overflowed, and a missing
+/// `f64` scale read as `0.0` and panicked inside the likelihood.
 pub struct StrictScoreGivenTrace<'e> {
     /// Base trace containing the fixed choices to score.
     pub base: Trace,
@@ -616,7 +711,7 @@ impl<'e> Handler for StrictScoreGivenTrace<'e> {
     for_each_value_type!(impl_observe_methods);
 
     fn on_factor(&mut self, logw: f64) {
-        self.trace.log_factors += logw;
+        self.trace.log_factors += nan_to_neg_inf(logw);
     }
 
     fn finish(self) -> Trace {
@@ -634,9 +729,12 @@ impl<'e> Handler for StrictScoreGivenTrace<'e> {
 /// from `base` (a branch opened by a differing latent value), or
 /// [`ErrorCode::AddressConflict`] if the model visits the same address twice.
 ///
-/// This is the mechanism the MCMC layer needs to stop crashing on
-/// structure-varying proposals; wiring it into the samplers is a separate work
-/// package.
+/// A structurally incompatible `base` is a well-defined `Err`, never a panic
+/// or a divergence: after the first missing/mismatched site the program is
+/// handed a deterministic prior draw at each unscorable site so it terminates
+/// inside its own support, and the `Err` reports the *first* offending address.
+/// If you want the trace scored *with* those fresh draws (and told which sites
+/// they were), use [`score_given_trace_reconciled`] instead.
 ///
 /// # Example
 ///
@@ -686,8 +784,10 @@ pub struct ReconcileReport {
     /// present with the wrong value type). Each was proposed fresh from its
     /// prior and its `log_prob` accumulated into `log_prior`.
     pub fresh_addresses: Vec<Address>,
-    /// Addresses present in the base trace that the model did NOT visit. Their
-    /// contribution should be dropped by the caller (e.g. removed from the
+    /// Addresses present in the base trace that the model did NOT visit, or
+    /// visited with a different value type (in which case the address also
+    /// appears in `fresh_addresses`: a type change is a death plus a birth).
+    /// Their contribution should be dropped by the caller (e.g. removed from the
     /// reverse-move density in an RJMCMC step).
     pub vanished_addresses: Vec<Address>,
 }
@@ -717,7 +817,7 @@ impl<'r, 'f, 'e, R: RngCore> Handler for ReconcilingScoreGivenTrace<'r, 'f, 'e, 
     for_each_value_type!(impl_observe_methods);
 
     fn on_factor(&mut self, logw: f64) {
-        self.trace.log_factors += logw;
+        self.trace.log_factors += nan_to_neg_inf(logw);
     }
 
     fn finish(self) -> Trace {
@@ -769,9 +869,13 @@ pub fn score_given_trace_reconciled<A, R: RngCore>(
 ) -> FugueResult<(A, Trace, ReconcileReport)> {
     let mut error: Option<FugueError> = None;
     let mut fresh_addresses: Vec<Address> = Vec::new();
-    // Snapshot base addresses up front so we can compute vanished ones after the
-    // run consumes the handler.
-    let base_addresses: Vec<Address> = base.choices.keys().cloned().collect();
+    // Snapshot base addresses (with their value types) up front so we can
+    // compute vanished ones after the run consumes the handler.
+    let base_addresses: Vec<(Address, &'static str)> = base
+        .choices
+        .iter()
+        .map(|(a, c)| (a.clone(), c.value.type_name()))
+        .collect();
     let handler = ReconcilingScoreGivenTrace {
         rng,
         base,
@@ -783,10 +887,19 @@ pub fn score_given_trace_reconciled<A, R: RngCore>(
     if let Some(e) = error {
         return Err(e);
     }
-    // Vanished = present in the base trace but not visited by this model run.
+    // Vanished = present in the base trace but not visited by this model run —
+    // or visited with a DIFFERENT value type, in which case the handler sampled
+    // it fresh (it is in `fresh`) and the old-typed site is gone (FG-N9): a
+    // type change is a death plus a birth, and both sides must be reported.
     let vanished_addresses: Vec<Address> = base_addresses
         .into_iter()
-        .filter(|addr| !trace.choices.contains_key(addr))
+        .filter(|(addr, ty)| {
+            trace
+                .choices
+                .get(addr)
+                .is_none_or(|c| c.value.type_name() != *ty)
+        })
+        .map(|(addr, _)| addr)
         .collect();
     Ok((
         a,

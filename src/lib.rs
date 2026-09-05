@@ -17,8 +17,8 @@ pub use core::address::Address;
 // `addr!` macro is exported at the crate root via #[macro_export]
 pub use core::distribution::{
     Bernoulli, Beta, Binomial, Categorical, Cauchy, ChiSquared, DiscreteUniform, Distribution,
-    Exponential, Gamma, InverseGamma, Laplace, LogNormal, Normal, Poisson, StudentT, Uniform,
-    Weibull,
+    Exponential, Gamma, InverseGamma, Laplace, LogNormal, Normal, Poisson, StudentT, Support,
+    Uniform, Weibull,
 };
 pub use core::model::{
     factor, guard, observe, pure, sample, sample_bool, sample_f64, sample_i64, sample_u64,
@@ -49,8 +49,9 @@ pub use inference::mcmc_utils::{
 };
 pub use inference::mh::{
     adaptive_mcmc_chain, adaptive_mcmc_chain_thinned, adaptive_mcmc_chain_with_overrides,
-    adaptive_mcmc_chain_with_overrides_thinned, adaptive_single_site_mh, block_regeneration_mh,
-    SiteProposal,
+    adaptive_mcmc_chain_with_overrides_thinned, adaptive_single_site_mh,
+    adaptive_single_site_mh_cached, adaptive_single_site_mh_with_overrides, block_regeneration_mh,
+    proposal_kind_for_support, SiteProposal,
 };
 pub use inference::smc::{
     adaptive_smc, adaptive_smc_with_kernel, decode_particle, decode_particles,

@@ -4,7 +4,7 @@
 <!-- toc -->
 ```
 
-Production deployment of probabilistic models requires **reliability engineering**, **performance optimization**, and **operational excellence** at scale. This guide establishes a mathematical framework for **fault tolerance**, **service reliability**, and **system observability** using Fugue's production-ready infrastructure patterns.
+Production deployment of probabilistic models requires **reliability engineering**, **performance optimization**, and **operational excellence** at scale. This guide establishes a mathematical framework for **fault tolerance**, **service reliability**, and **system observability** using Fugue's handler, trace and diagnostics infrastructure.
 
 ```admonish info title="Reliability Theory Framework"
 Production systems exhibit **stochastic reliability** characterized by:

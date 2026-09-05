@@ -17,13 +17,18 @@
 //! could, e.g., trap an unbounded parameter named `slope` in `[0,1]` and break
 //! ergodicity). The rules are:
 //!
-//! - **`f64`**: default to a symmetric **Gaussian** random walk. Out-of-support
-//!   proposals simply receive a `−inf` joint density and are rejected, so
-//!   ergodicity is preserved. A site is routed to a **log-space** walk (with the
-//!   exact Jacobian/Hastings correction) only when its current value is positive
-//!   *and* the site's prior density at a negative probe value is `−inf` — i.e.
-//!   the support is genuinely positive. A **reflected** `[a,b]` walk is used only
-//!   when explicitly requested per address.
+//! - **`f64`**: the kind is a function of the site's distribution alone, read
+//!   from [`Distribution::support`] (FG-N1): [`Support::Real`] gets a symmetric
+//!   **Gaussian** random walk (out-of-support proposals score `−inf` and are
+//!   rejected, so this is always correct, if not always efficient);
+//!   [`Support::Positive`] gets a **log-space** walk with the exact
+//!   Jacobian/Hastings correction (FG-02); [`Support::Bounded`] gets a
+//!   Gaussian walk **reflected** at both bounds (symmetric). The previous
+//!   heuristic chose log-space from `current > 0` plus a density probe at `−1`,
+//!   which confined a chain on e.g. `Uniform(−0.5, 0.5)` to the positive half
+//!   forever: a kernel whose shape depends on the current *value* is not
+//!   invariant for the target, and the kind was cached per address, so the
+//!   whole chain inherited its first state's sign.
 //! - **`usize` (categorical)**: propose by resampling from the site's **prior**
 //!   distribution. With `q = prior` the Hastings terms cancel the prior in the
 //!   target, so acceptance reduces to the likelihood ratio, and the proposal can
@@ -110,19 +115,15 @@
 //! assert!(!mu_samples.is_empty());
 //! ```
 use crate::core::address::Address;
-use crate::core::distribution::Distribution;
+use crate::core::distribution::{Distribution, Support};
 use crate::core::model::Model;
+use crate::core::numerical::nan_to_neg_inf;
 use crate::inference::mcmc_utils::DiminishingAdaptation;
 use crate::runtime::handler::{run, Handler};
 use crate::runtime::interpreters::{score_given_trace_reconciled, PriorHandler, ScoreGivenTrace};
 use crate::runtime::trace::{Choice, ChoiceValue, Trace};
 use rand::{Rng, RngCore};
 use std::collections::HashMap;
-
-/// Negative probe value used to detect positive-support `f64` sites (FG-42).
-/// A site whose prior density is `−inf` here (and whose current value is
-/// positive) is treated as positively constrained and given a log-space walk.
-const NEG_SUPPORT_PROBE: f64 = -1.0;
 
 /// Standard-normal draw via Box-Muller (shared by the random-walk proposals).
 fn gaussian_z(rng: &mut dyn RngCore) -> f64 {
@@ -137,11 +138,37 @@ fn normal_logpdf(x: f64, mean: f64, sd: f64) -> f64 {
     -0.5 * z * z - sd.ln() - 0.5 * (2.0 * std::f64::consts::PI).ln()
 }
 
+/// The Metropolis accept/reject decision, shared by every MH kernel in the
+/// crate.
+///
+/// `current_lw` / `prop_lw` are the log-densities of the current and proposed
+/// states under the (tempered) target and `log_alpha` the full log acceptance
+/// ratio built from them. When the *current* state has a non-finite density —
+/// `-∞` (started outside the support, e.g. via `guard`) or `NaN` (an invalid
+/// weight handed in by a caller-built trace) — `log_alpha` is `NaN` or `±∞` and
+/// the usual comparison would either reject forever (`NaN >= 0.0` is false and
+/// `u < exp(NaN)` is false) or be undefined. Such a state has zero target mass,
+/// so leaving it is always correct: accept any proposal with a *finite* density
+/// and stay otherwise (FG-N2). From a finite current state this is the ordinary
+/// `min(1, exp(log_alpha))` rule.
+pub(crate) fn mh_accept<R: Rng>(
+    rng: &mut R,
+    log_alpha: f64,
+    current_lw: f64,
+    prop_lw: f64,
+) -> bool {
+    if !current_lw.is_finite() {
+        return prop_lw.is_finite();
+    }
+    log_alpha >= 0.0 || rng.gen::<f64>() < log_alpha.exp()
+}
+
 /// User-facing per-address proposal override for `f64` sites (FG-42).
 ///
-/// The samplers pick a sensible proposal automatically from each site's support,
-/// but callers can force a specific kind via
-/// [`adaptive_mcmc_chain_with_overrides`].
+/// The samplers pick a proposal automatically from each site's
+/// [`Distribution::support`] (see [`proposal_kind_for_support`]), but callers
+/// can force a specific kind via [`adaptive_mcmc_chain_with_overrides`] or
+/// [`adaptive_single_site_mh_with_overrides`]. An explicit override always wins.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SiteProposal {
     /// Symmetric Gaussian random walk (default for unconstrained `f64`).
@@ -158,6 +185,22 @@ pub enum SiteProposal {
     },
     /// Independence proposal that resamples the site from its prior. FG-10.
     PriorResample,
+}
+
+/// The automatic `f64` proposal kind for a site whose distribution advertises
+/// `support` (FG-N1).
+///
+/// This is deliberately a function of the *distribution* only — never of the
+/// value currently at the site — so the single-site kernel has the same shape
+/// in every state and is invariant for the target. `Real` → Gaussian walk,
+/// `Positive` → log-space walk (FG-02 Jacobian included), `Bounded` → reflected
+/// walk within the bounds.
+pub fn proposal_kind_for_support(support: Support) -> SiteProposal {
+    match support {
+        Support::Real => SiteProposal::Gaussian,
+        Support::Positive => SiteProposal::LogSpace,
+        Support::Bounded { lower, upper } => SiteProposal::Reflect { lower, upper },
+    }
 }
 
 /// Trait for distribution-aware proposal strategies.
@@ -327,34 +370,22 @@ struct SingleSiteProposalHandler<'a, R: RngCore> {
     target: &'a Address,
     scale: f64,
     overrides: &'a HashMap<Address, SiteProposal>,
-    kind_cache: &'a mut HashMap<Address, SiteProposal>,
     log_q_forward: &'a mut f64,
     log_q_reverse: &'a mut f64,
     trace: Trace,
 }
 
 impl<'a, R: RngCore> SingleSiteProposalHandler<'a, R> {
-    /// Decide the `f64` proposal kind for the target site (FG-42), caching the
-    /// probe result so support detection happens at most once per address.
-    fn f64_kind(
-        &mut self,
-        addr: &Address,
-        current: f64,
-        dist: &dyn Distribution<f64>,
-    ) -> SiteProposal {
+    /// Decide the `f64` proposal kind for the target site: an explicit override
+    /// wins (FG-42); otherwise the kind is read from the distribution's declared
+    /// support (FG-N1). Nothing here looks at the current value, and nothing is
+    /// cached across executions — a distribution whose bounds depend on another
+    /// site (e.g. `Uniform(0, sigma)`) gets the bounds of *this* execution.
+    fn f64_kind(&self, addr: &Address, dist: &dyn Distribution<f64>) -> SiteProposal {
         if let Some(&k) = self.overrides.get(addr) {
             return k;
         }
-        if let Some(&k) = self.kind_cache.get(addr) {
-            return k;
-        }
-        let kind = if current > 0.0 && !dist.log_prob(&NEG_SUPPORT_PROBE).is_finite() {
-            SiteProposal::LogSpace
-        } else {
-            SiteProposal::Gaussian
-        };
-        self.kind_cache.insert(addr.clone(), kind);
-        kind
+        proposal_kind_for_support(dist.support())
     }
 }
 
@@ -365,7 +396,7 @@ impl<'a, R: RngCore> Handler for SingleSiteProposalHandler<'a, R> {
                 .base
                 .get_f64(addr)
                 .unwrap_or_else(|| dist.sample(self.rng));
-            let kind = self.f64_kind(addr, current, dist);
+            let kind = self.f64_kind(addr, dist);
             let (proposed, lqf, lqr) = match kind {
                 SiteProposal::Gaussian => {
                     let s = GaussianWalkProposal;
@@ -608,7 +639,7 @@ impl<'a, R: RngCore> Handler for SingleSiteProposalHandler<'a, R> {
     }
 
     fn on_factor(&mut self, logw: f64) {
-        self.trace.log_factors += logw;
+        self.trace.log_factors += nan_to_neg_inf(logw);
     }
 
     fn finish(self) -> Trace {
@@ -641,7 +672,6 @@ pub(crate) fn propose_and_score<A, F, R>(
     target: &Address,
     scale: f64,
     overrides: &HashMap<Address, SiteProposal>,
-    kind_cache: &mut HashMap<Address, SiteProposal>,
 ) -> (A, Trace, f64, f64, f64, bool)
 where
     F: Fn() -> Model<A>,
@@ -656,7 +686,6 @@ where
             target,
             scale,
             overrides,
-            kind_cache,
             log_q_forward: &mut lqf,
             log_q_reverse: &mut lqr,
             trace: Trace::default(),
@@ -668,9 +697,20 @@ where
     // stored prior log-density (the reverse-birth proposal density) to
     // `log_q_reverse` cancels its contribution to `current`'s joint in the
     // acceptance ratio, completing the RJMCMC dimension-matching (FG-20/FG-21).
+    //
+    // An address that is still present but with a DIFFERENT value type is a
+    // death of the old-typed site followed by a birth of the new-typed one: the
+    // handler already counted the birth (it sampled the site fresh and added
+    // its prior density to `log_q_forward`), so the old site's prior density
+    // must enter `log_q_reverse` here too, or the type-changing move is
+    // corrected on one side only (FG-N9).
     let mut died = 0usize;
     for (addr, choice) in &current.choices {
-        if !trace.choices.contains_key(addr) {
+        let survives = trace
+            .choices
+            .get(addr)
+            .is_some_and(|c| c.value.type_name() == choice.value.type_name());
+        if !survives {
             lqr += choice.logp;
             died += 1;
         }
@@ -703,7 +743,6 @@ fn single_site_mh_step<A, F, R>(
     sites: &[Address],
     adaptation: &mut DiminishingAdaptation,
     overrides: &HashMap<Address, SiteProposal>,
-    kind_cache: &mut HashMap<Address, SiteProposal>,
     adapt: bool,
 ) -> Option<(A, Trace, f64, bool)>
 where
@@ -716,9 +755,8 @@ where
     let target = sites[rng.gen_range(0..sites.len())].clone();
     let scale = adaptation.get_scale(&target);
 
-    let (a_prop, prop_trace, prop_lw, lqf, lqr, structure_changed) = propose_and_score(
-        rng, model_fn, current, &target, scale, overrides, kind_cache,
-    );
+    let (a_prop, prop_trace, prop_lw, lqf, lqr, structure_changed) =
+        propose_and_score(rng, model_fn, current, &target, scale, overrides);
 
     // log α = Δlog-joint + log q(x|x') − log q(x'|x) + dimension term.
     //
@@ -730,7 +768,7 @@ where
     // models the two site counts are equal and the term is exactly 0.
     let dim_term = (sites.len() as f64).ln() - (prop_trace.choices.len() as f64).ln();
     let log_alpha = prop_lw - current_lw + (lqr - lqf) + dim_term;
-    let accept = log_alpha >= 0.0 || rng.gen::<f64>() < log_alpha.exp();
+    let accept = mh_accept(rng, log_alpha, current_lw, prop_lw);
 
     if adapt {
         adaptation.update(&target, accept);
@@ -751,19 +789,10 @@ where
 /// based on the Metropolis-Hastings criterion (including the proposal/Hastings
 /// correction for asymmetric proposals).
 ///
-/// # Algorithm
-///
-/// 1. Score the current state once (reused on rejection — no redundant third
-///    model run, FG-12).
-/// 2. Randomly select a site and propose a new value using diminishing adaptive
-///    scaling, scoring the proposal in the same run (FG-11).
-/// 3. Accept with probability `min(1, exp(log α))` where
-///    `log α = Δlog-joint + q(x|x') − q(x'|x)` plus, for structure-varying
-///    proposals, the RJMCMC dimension term (0 for fixed-structure models).
-/// 4. Update adaptive scales using diminishing step sizes.
-///
-/// On acceptance the returned trace is freshly scored, so its
-/// `total_log_weight()` is correct (FG-40).
+/// This is [`adaptive_single_site_mh_with_overrides`] with no per-address
+/// overrides; see there for the algorithm, the contract on `current`, and the
+/// cheaper [`adaptive_single_site_mh_cached`] variant for callers that hold a
+/// scored trace and want to skip the re-score.
 ///
 /// # Arguments
 ///
@@ -809,22 +838,56 @@ pub fn adaptive_single_site_mh<A, R: Rng>(
     adaptation: &mut DiminishingAdaptation,
 ) -> (A, Trace) {
     let overrides: HashMap<Address, SiteProposal> = HashMap::new();
-    let mut kind_cache: HashMap<Address, SiteProposal> = HashMap::new();
+    adaptive_single_site_mh_with_overrides(rng, model_fn, current, adaptation, &overrides)
+}
 
-    if current.choices.is_empty() {
-        // No latent choices to update; just recover the model result.
-        let (a, _) = run(
-            ScoreGivenTrace {
-                base: current.clone(),
-                trace: Trace::default(),
-            },
-            model_fn(),
-        );
-        return (a, current.clone());
-    }
-
-    // Score the current state once. The model result `a_cur` is reused on
-    // rejection instead of re-executing the model a third time (FG-12).
+/// One adaptive single-site MH transition honouring per-address `f64` proposal
+/// overrides (X-5 / FG-42).
+///
+/// The single-step counterpart of [`adaptive_mcmc_chain_with_overrides`]: any
+/// address in `overrides` uses the given [`SiteProposal`] instead of the
+/// support-derived default, so e.g. a `Reflect { lower, upper }` bound can be
+/// applied through an incremental, caller-driven chain and not only through
+/// the batch driver.
+///
+/// # Algorithm
+///
+/// 1. Score `current` once with [`ScoreGivenTrace`]. This is what makes the
+///    step robust to a caller-built `current`: the proposal, the site list and
+///    every reverse-move (death) density are read from the *re-scored* trace,
+///    never from the per-choice `logp` values stored in `current` (FG-N6). A
+///    trace assembled with `insert_choice(.., 0.0)` is therefore handled
+///    exactly like a freshly scored one. The model result is reused on
+///    rejection (FG-12).
+/// 2. Randomly select a site and propose a new value using diminishing adaptive
+///    scaling, scoring the proposal in the same run (FG-11).
+/// 3. Accept with probability `min(1, exp(log α))` where
+///    `log α = Δlog-joint + q(x|x') − q(x'|x)` plus, for structure-varying
+///    proposals, the RJMCMC dimension term (0 for fixed-structure models).
+/// 4. Update adaptive scales using diminishing step sizes.
+///
+/// The returned trace is freshly scored in both branches — the accepted
+/// proposal, or the re-scored current state on rejection — so its
+/// `total_log_weight()` and per-choice `logp` are valid (FG-40) and it can be
+/// fed straight into [`adaptive_single_site_mh_cached`].
+///
+/// # Cost
+///
+/// Two model executions per transition (the re-score and the proposal).
+/// Callers that keep the scored trace between steps — every trace this function
+/// returns is one — can halve that with [`adaptive_single_site_mh_cached`].
+pub fn adaptive_single_site_mh_with_overrides<A, R: Rng>(
+    rng: &mut R,
+    model_fn: impl Fn() -> Model<A>,
+    current: &Trace,
+    adaptation: &mut DiminishingAdaptation,
+    overrides: &HashMap<Address, SiteProposal>,
+) -> (A, Trace) {
+    // Score the current state once. Everything downstream — the site list, the
+    // proposal base, the death densities — reads from `cur_scored`, not from the
+    // caller's stored accumulators / per-choice logp (FG-N6). The model result
+    // `a_cur` is reused on rejection instead of re-executing the model a third
+    // time (FG-12).
     let (a_cur, cur_scored) = run(
         ScoreGivenTrace {
             base: current.clone(),
@@ -832,34 +895,97 @@ pub fn adaptive_single_site_mh<A, R: Rng>(
         },
         model_fn(),
     );
-    let current_lw = cur_scored.total_log_weight();
 
+    if cur_scored.choices.is_empty() {
+        // No latent choices to update.
+        return (a_cur, cur_scored);
+    }
+
+    match adaptive_single_site_mh_cached(rng, &model_fn, &cur_scored, adaptation, overrides, true) {
+        Some((a_prop, prop_trace, _lw)) => (a_prop, prop_trace),
+        None => (a_cur, cur_scored),
+    }
+}
+
+/// One adaptive single-site MH transition from an **already-scored** current
+/// trace, with per-address overrides and no re-score (X-5).
+///
+/// This is the transition the chain drivers run internally, exposed for callers
+/// that drive a chain incrementally and already hold a scored state — which is
+/// every trace returned by [`adaptive_single_site_mh`],
+/// [`adaptive_single_site_mh_with_overrides`], [`PriorHandler`] /
+/// [`ScoreGivenTrace`] runs, and this function itself. It performs exactly
+/// **one** model execution (the proposal), half the cost of the re-scoring
+/// variants, and never re-executes the model on rejection (FG-12).
+///
+/// # Contract on `current`
+///
+/// `current` must be a **fully scored** trace for `model_fn`: its accumulators
+/// (`total_log_weight()`) and every choice's `logp` are read as-is and used as
+/// the current state's log-density and as the reverse-move densities of any
+/// sites the proposal makes vanish (FG-20/FG-21). A trace assembled by hand —
+/// e.g. `insert_choice(.., 0.0)` — violates this and over-accepts
+/// structure-shrinking moves until the first acceptance; pass such a trace
+/// through [`adaptive_single_site_mh_with_overrides`] (which re-scores it) or
+/// [`ScoreGivenTrace`] first.
+///
+/// # Returns
+///
+/// `Some((model_result, trace, log_weight))` on acceptance — the freshly scored
+/// proposal (FG-40), whose `log_weight == trace.total_log_weight()` — or `None`
+/// on rejection, in which case the caller keeps `current` unchanged. `adapt`
+/// controls whether the proposal scale for the chosen site is updated (FG-57:
+/// adapt during warmup, freeze during sampling).
+///
+/// ```rust
+/// use fugue::*;
+/// use fugue::inference::mh::adaptive_single_site_mh_cached;
+/// use rand::rngs::StdRng;
+/// use rand::SeedableRng;
+/// use std::collections::HashMap;
+///
+/// let model_fn = || {
+///     sample(addr!("x"), Uniform::new(-0.5, 0.5).unwrap())
+///         .bind(|x| observe(addr!("y"), Normal::new(x, 0.3).unwrap(), 0.2).map(move |_| x))
+/// };
+/// let mut rng = StdRng::seed_from_u64(7);
+/// let (_, mut current) = runtime::handler::run(
+///     PriorHandler { rng: &mut rng, trace: Trace::default() },
+///     model_fn(),
+/// );
+/// let mut adaptation = DiminishingAdaptation::new(0.44, 0.7);
+/// let mut overrides = HashMap::new();
+/// overrides.insert(addr!("x"), SiteProposal::Reflect { lower: -0.5, upper: 0.5 });
+///
+/// for _ in 0..100 {
+///     if let Some((_x, t, _lw)) =
+///         adaptive_single_site_mh_cached(&mut rng, &model_fn, &current, &mut adaptation, &overrides, true)
+///     {
+///         current = t; // accepted: the returned trace is scored and reusable
+///     }
+/// }
+/// assert!(current.total_log_weight().is_finite());
+/// ```
+pub fn adaptive_single_site_mh_cached<A, R: Rng>(
+    rng: &mut R,
+    model_fn: impl Fn() -> Model<A>,
+    current: &Trace,
+    adaptation: &mut DiminishingAdaptation,
+    overrides: &HashMap<Address, SiteProposal>,
+    adapt: bool,
+) -> Option<(A, Trace, f64)> {
     let sites: Vec<Address> = current.choices.keys().cloned().collect();
-    let target = sites[rng.gen_range(0..sites.len())].clone();
-    let scale = adaptation.get_scale(&target);
-
-    let (a_prop, prop_trace, prop_lw, lqf, lqr, _structure_changed) = propose_and_score(
+    single_site_mh_step(
         rng,
         &model_fn,
         current,
-        &target,
-        scale,
-        &overrides,
-        &mut kind_cache,
-    );
-
-    // Dimension term for structure-varying proposals (see `single_site_mh_step`);
-    // 0 for fixed-structure models.
-    let dim_term = (sites.len() as f64).ln() - (prop_trace.choices.len() as f64).ln();
-    let log_alpha = prop_lw - current_lw + (lqr - lqf) + dim_term;
-    let accept = log_alpha >= 0.0 || rng.gen::<f64>() < log_alpha.exp();
-    adaptation.update(&target, accept);
-
-    if accept {
-        (a_prop, prop_trace)
-    } else {
-        (a_cur, current.clone())
-    }
+        current.total_log_weight(),
+        &sites,
+        adaptation,
+        overrides,
+        adapt,
+    )
+    .map(|(a, t, lw, _structure_changed)| (a, t, lw))
 }
 
 /// One block-regeneration Metropolis–Hastings transition.
@@ -903,6 +1029,13 @@ pub fn adaptive_single_site_mh<A, R: Rng>(
 /// If the reconciling replay reports an address conflict (the model visits the
 /// same address twice, FG-47), the move is treated as a rejection and the
 /// (re-scored) current state is returned.
+///
+/// `current` is re-scored first and every quantity above - the block-deleted
+/// base, `logp(a)` for the block and for vanished sites, `log_prior` and
+/// `loglik` - is read from that re-score, never from the caller's stored
+/// accumulators or per-choice `logp` (FG-N6). A trace assembled by hand with
+/// `insert_choice(.., 0.0)` is therefore handled exactly like a freshly scored
+/// one.
 pub fn block_regeneration_mh<A, R: Rng>(
     rng: &mut R,
     model_fn: impl Fn() -> Model<A>,
@@ -921,8 +1054,11 @@ pub fn block_regeneration_mh<A, R: Rng>(
 
     // Delete the block, then replay: removed addresses the model re-visits are
     // drawn fresh from their prior (reported in `fresh_addresses`); addresses
-    // the model no longer visits are `vanished_addresses`.
-    let mut base = current.clone();
+    // the model no longer visits are `vanished_addresses`. The base is the
+    // RE-SCORED current state (FG-N6): same values, but every per-choice `logp`
+    // is the model's, and addresses `current` carried that the model never
+    // visits are already gone.
+    let mut base = cur_scored.clone();
     for a in block {
         base.choices.remove(a);
     }
@@ -938,23 +1074,32 @@ pub fn block_regeneration_mh<A, R: Rng>(
         .sum();
     // Block ∩ vanished = ∅ (vanished is computed against the block-deleted
     // base), so the two reverse-birth sums never double-count a site.
+    //
+    // FG-N6: the reverse-move densities are read from `cur_scored`, never from
+    // the caller's `current`. The two agree for a trace produced by a handler,
+    // but a trace assembled with `insert_choice(.., 0.0)` (every fugue-evo
+    // `to_trace`) stores `logp = 0` at every site, which would zero the
+    // reverse-birth term and inflate `log α` on the very transition that is
+    // supposed to correct it.
     let log_q_rev: f64 = block
         .iter()
-        .filter_map(|a| current.choices.get(a).map(|c| c.logp))
+        .filter_map(|a| cur_scored.choices.get(a).map(|c| c.logp))
         .sum::<f64>()
         + report
             .vanished_addresses
             .iter()
-            .filter_map(|a| current.choices.get(a).map(|c| c.logp))
+            .filter_map(|a| cur_scored.choices.get(a).map(|c| c.logp))
             .sum::<f64>();
 
     let loglik = |t: &Trace| t.log_likelihood + t.log_factors;
+    // Tempered log-density of each state, for the non-finite-current escape.
+    let logd = |t: &Trace| t.log_prior + beta * loglik(t);
     let log_alpha = (prop.log_prior - cur_scored.log_prior)
         + beta * (loglik(&prop) - loglik(&cur_scored))
         + log_q_rev
         - log_q_fwd;
 
-    if log_alpha >= 0.0 || rng.gen::<f64>() < log_alpha.exp() {
+    if mh_accept(rng, log_alpha, logd(&cur_scored), logd(&prop)) {
         (a_prop, prop)
     } else {
         (a_cur, cur_scored)
@@ -1106,7 +1251,6 @@ pub fn adaptive_mcmc_chain_with_overrides_thinned<A: Clone, R: Rng>(
     let thin = thin.max(1);
     let mut samples = Vec::with_capacity(n_samples.div_ceil(thin));
     let mut adaptation = DiminishingAdaptation::new(0.44, 0.7);
-    let mut kind_cache: HashMap<Address, SiteProposal> = HashMap::new();
 
     // Initialize with a prior sample (fresh, correct accumulators).
     let (mut current_a, mut current_trace) = run(
@@ -1136,7 +1280,6 @@ pub fn adaptive_mcmc_chain_with_overrides_thinned<A: Clone, R: Rng>(
             &sites,
             &mut adaptation,
             overrides,
-            &mut kind_cache,
             true, // adapt during warmup
         ) {
             current_a = a;
@@ -1159,7 +1302,6 @@ pub fn adaptive_mcmc_chain_with_overrides_thinned<A: Clone, R: Rng>(
             &sites,
             &mut adaptation,
             overrides,
-            &mut kind_cache,
             false, // frozen scales during sampling
         ) {
             current_a = a;
@@ -1679,7 +1821,6 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(99);
         let mut adaptation = DiminishingAdaptation::new(0.44, 0.7);
         let overrides: HashMap<Address, SiteProposal> = HashMap::new();
-        let mut kind_cache: HashMap<Address, SiteProposal> = HashMap::new();
 
         let (_a, mut current) = run(
             PriorHandler {
@@ -1701,7 +1842,6 @@ mod tests {
                 &sites,
                 &mut adaptation,
                 &overrides,
-                &mut kind_cache,
                 true,
             ) {
                 current = t;
@@ -1720,7 +1860,6 @@ mod tests {
                 &sites,
                 &mut adaptation,
                 &overrides,
-                &mut kind_cache,
                 false,
             ) {
                 current = t;
@@ -1743,7 +1882,6 @@ mod tests {
                 &sites,
                 &mut adaptation,
                 &overrides,
-                &mut kind_cache,
                 true,
             );
         }

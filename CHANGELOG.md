@@ -10,6 +10,242 @@ For the initial 0.1.0 release notes, see `.github/CHANGELOG.md`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`f64` proposal selection is now a function of the site's distribution,
+  never of its current value (FG-N1)**. `Distribution<T>` gains a
+  `support(&self) -> Support` method (default `Support::Real`; `Uniform` and
+  `Beta` report `Bounded { lower, upper }`, `LogNormal`, `Exponential`,
+  `Gamma`, `Weibull`, `ChiSquared` and `InverseGamma` report `Positive`), and
+  the single-site kernels pick the proposal from it via
+  `proposal_kind_for_support`: `Real` -> Gaussian walk, `Positive` -> log-space
+  walk (with the FG-02 Jacobian), `Bounded` -> Gaussian walk reflected at both
+  bounds. Explicit `SiteProposal` overrides still win.
+
+  The previous selector chose the log-space walk iff `current > 0` **and** the
+  prior density at a probe value of `-1.0` was `-inf`. For `Uniform(-0.5, 0.5)`
+  the probe is `-inf` (the support does not contain `-1`), so a positive first
+  draw put the site on a walk that can never propose a negative value, and the
+  kind was cached per address, so the whole chain inherited the sign of its
+  first state (`P(x > 0) = 1.0` against a truth of `0.5`, seed-dependent). In
+  SMC rejuvenation the kind was re-chosen per call from the current state, so
+  the move was not pi_beta-invariant: a Gaussian step from `x < 0` to `x' > 0`
+  has a reverse density of zero that the code treated as symmetric, and mass
+  leaked one way until the population sat entirely in the positive half. A
+  kernel whose shape depends on the current value is not invariant for the
+  target; the support is a property of the site and is safe to select on. The
+  probe and the per-address kind cache are gone: nothing about the kind is
+  cached across executions, so a distribution whose bounds depend on another
+  site (`Uniform(0, sigma)`) gets the bounds of the execution being proposed.
+  Foreign distributions that leave the default `Real` get the Gaussian walk,
+  which is always correct (out-of-support proposals score `-inf` and reject),
+  merely less efficient than a declared support.
+
+  Pinned by `fgn1_bounded_prior_containing_negatives_visits_both_signs` (six
+  seeds, `P(x > 0) ~ 0.5`), `fgn1_bounded_prior_matches_analytic_mean_under_factor`
+  (`rho ∝ e^{2x}` on `[-1/2, 1/2]`: mean `0.1565`, not the confined `0.291`),
+  `fgn1_proposal_kind_is_a_function_of_the_support`, and
+  `fgn1_smc_rejuvenation_is_invariant_on_bounded_prior_with_negatives` (mean,
+  sign mass, and analytic log-evidence through ten rejuvenation steps per
+  tempering stage). Both chain tests fail on the pre-fix selector. The FG-02
+  and FG-42 regressions are unchanged and still pass.
+- **`NaN` log-weights are sanitised to `-inf` and MH escapes a non-finite
+  state (FG-N2)**. A `NaN` log-density is now read as "probability zero" at
+  every accumulation point - `factor()` at construction, the `on_factor` and
+  `on_observe_*` methods of every shipped handler - and `log_sum_exp` /
+  `weighted_log_sum_exp` treat `NaN` terms as `-inf` (new helper
+  `core::numerical::nan_to_neg_inf`). The shared Metropolis decision
+  (`mh_accept`, used by the single-site kernels, `block_regeneration_mh` and
+  SMC rejuvenation) accepts any proposal with a finite density when the
+  *current* state's density is not finite, and stays otherwise.
+
+  Previously one `factor(NaN)` made the trace weight `NaN`; in SMC the
+  population normalizer became `NaN`, the ESS non-finite, and the tempering
+  ladder silently jumped to `beta = 1` with uniform prior weights and a `NaN`
+  evidence, returned without error; in MH `NaN >= 0.0` and `u < exp(NaN)` are
+  both false, so a chain initialised on a `NaN` state rejected every proposal
+  forever. Every consumer had been guarding this itself. There is no other
+  reading of an invalid weight under which the trace weight, the SMC
+  normalizer and the acceptance ratio all stay well-defined.
+
+  Pinned by `fgn2_factor_nan_accumulates_as_neg_inf`,
+  `fgn2_mh_chain_escapes_a_nan_start_and_targets_the_half_normal` (six seeds,
+  driven from the exact prior state through `adaptive_single_site_mh`),
+  `fgn2_mh_full_chain_driver_survives_nan_factor`,
+  `fgn2_smc_does_not_collapse_to_the_prior_on_nan_factor` (with and without
+  rejuvenation: log-evidence `ln 1/2`, zero weight on the `NaN` region,
+  half-normal mean `0.798` rather than the prior mean `0`), and
+  `test_log_sum_exp_treats_nan_as_neg_inf`.
+- **Reverse-move densities come from the re-scored current trace, not the
+  caller's stored `logp` (FG-N6)**. `block_regeneration_mh` now reads the
+  block and vanished-site `logp` terms (and builds its block-deleted base)
+  from the `ScoreGivenTrace` re-score it already performs; the SMC
+  rejuvenation kernel scores first and proposes from the re-scored trace; and
+  `adaptive_single_site_mh` proposes from the re-scored trace (see X-5 below).
+  Every re-scoring entry point already paid for `cur_scored` and then ignored
+  it. A trace assembled with `insert_choice(.., 0.0)` - every fugue-evo
+  `to_trace` / `trace_of` - stores `logp = 0` at each site, so the
+  reverse-birth term of a block move or a branch-closing proposal was summed
+  as zero and `log alpha` inflated by exactly the missing prior density on the
+  very transition meant to correct for the dimension change. `ScoreGivenTrace`
+  consumes no randomness, so for handler-produced traces nothing changes: the
+  draws are bit-identical.
+
+  Pinned by three exact-equivalence tests
+  (`fgn6_{single_site_mh,block_regeneration,smc_rejuvenation}_from_zero_logp_*`):
+  from the same seed a step started on the zero-`logp` trace must make the
+  same decision and land on the same fully scored state as one started on the
+  scored trace, over hundreds of seeds that include branch-closing moves. The
+  block and rejuvenation tests fail on the pre-fix code.
+- **`adaptive_smc_with_kernel` no longer ignores the kernel when
+  `rejuvenation_steps == 0`, and particles enter every sweep with uniform
+  weights (FG-N3, FG-N7)**. `PopulationKernel` gains `is_identity(&self) ->
+  bool` (default `false`; `NoKernel` returns `true`), and the FG-43 shortcut -
+  a single prior-importance reweight with no tempering ladder - is taken only
+  when there is nothing that moves particles: no rejuvenation *and* an
+  identity kernel. A `CrossoverKernel` with `rejuvenation_steps == 0` (the
+  configuration fugue-evo's grammar SMC ships by default) used to be
+  silently skipped because `kernel.sweep` lives inside the ladder the shortcut
+  bypasses. Resampled clones now carry `weight = 1/n`, `log_weight = -ln n`
+  instead of the beta-stale importance weights of the particles they were
+  copied from, matching what the `PopulationKernel` contract (W) already told
+  kernel authors to expect. Pinned by
+  `fgn3_non_identity_kernel_is_applied_with_zero_rejuvenation_steps` (a
+  recording kernel that asserts the weight contract on entry and is swept only
+  at intermediate `beta`) and
+  `fgn3_crossover_kernel_without_rejuvenation_is_applied_and_invariant`
+  (analytic posterior means and log-evidence through the crossover sweeps).
+- **`sequence_vec` / `traverse_vec` / `plate!` no longer recurse at
+  construction over runs of `Pure` (FG-N5)**. `bind` on a `Pure` calls its
+  continuation immediately and that continuation tail-called the next
+  element's, so `k` consecutive `pure`s were `k` nested frames and
+  `plate!(i in 0..100_000 => pure(i))` overflowed before `run` was reached
+  (the FG-19 fix covered effectful elements only). Consecutive `Pure` values
+  are now batched into one closure that extends the accumulator and calls the
+  following continuation once; construction and interpretation are O(1) in
+  stack depth for any mix of `pure` and effects, and input order is preserved
+  across batch boundaries. Pinned by
+  `fgn5_plate_over_pure_is_stack_safe_at_construction` (100 000 `pure`s on a
+  512 KiB stack; overflows pre-fix) and
+  `fgn5_sequence_vec_mixed_pure_and_effects_preserves_order_on_small_stack`.
+- **Left-nested `bind` chains are documented as O(N) stack / O(N²) time, with
+  the stack-safe shapes spelled out (FG-N4)**. `let mut m = ..; for .. { m =
+  m.bind(..) }` wraps the first node's continuation once per iteration; the
+  FG-19 trampoline removes recursion *across* nodes, not inside one node's
+  continuation tower, and this is inherent to the CPS encoding (a
+  Codensity-style `Model` would remove it and is out of scope for a patch
+  release). Measured envelope in a debug build: ~5 000 observes on a 2 MiB
+  thread stack (10 000 overflows), ~20 000 on 8 MiB (40 000 overflows), with
+  20 000 nodes taking 20 s. `ModelExt::bind` now says so and names the
+  alternatives - `traverse_vec` / `plate!` for independent sites, a
+  build-from-the-back fold whose continuations *return* the rest of the chain
+  for sequentially dependent ones - and the `monad` and `smc` explorables,
+  which taught the left-nested loop, carry a warning with the right-nested
+  version. Pinned by `fgn4_left_nested_bind_chain_of_a_few_thousand_observes_runs`
+  (3 000 observes on 2 MiB: the documented envelope stays true) and
+  `fgn4_traverse_vec_and_right_nested_fold_are_stack_safe_for_100k_observes`
+  (both recommended shapes at 100 000 observes on 512 KiB).
+
+### Changed
+
+- **Maintainer binaries are no longer `[dev-dependencies]` (FG-N8)**.
+  `cargo-llvm-cov`, `mdbook`, `mdbook-mermaid`, `mdbook-katex`,
+  `mdbook-admonish`, `mdbook-linkcheck` and `mdbook-toc` are tools the
+  maintainer runs, not libraries this crate links; declaring them compiled
+  their entire dependency trees (`reqwest`, `tokio`, ...) into every
+  `cargo test` and `cargo clippy --all-targets`. They are `cargo install`ed
+  instead (`make install-dev-tools`; the coverage and docs workflows already
+  did this). `clap` and `proptest`, declared but referenced by no target,
+  went at the same time. `Cargo.lock` shrinks from 461 to 99 packages; the
+  published library's `[dependencies]` are untouched. The MSRV CI job keeps
+  its manifest-trimming step as a guard for the one remaining dev-dependency
+  (`criterion`).
+- **FG-N9 lows**:
+  - *RJMCMC type-change bookkeeping*: a site that stays at the same address
+    but changes value type (`if b { sample("v", Normal) } else { sample("v",
+    Poisson) }`) is a death plus a birth. The single-site kernel counted only
+    the birth (the fresh sample's prior went into `log q_fwd`) and left the
+    old-typed site's prior out of `log q_rev`; `score_given_trace_reconciled`
+    likewise listed it under `fresh_addresses` but not `vanished_addresses`.
+    Both now report and correct both sides. Pinned by
+    `fgn9_type_change_at_same_address_is_corrected_on_both_sides` (analytic
+    `P(b=1)` with deliberately unequal prior entropies so the omission cannot
+    cancel; fails pre-fix) and
+    `fgn9_reconcile_report_lists_a_type_change_as_both_fresh_and_vanished`
+    (fails pre-fix).
+  - *`Particle` weight invariants*: `normalize_particles` now leaves
+    `weight == exp(log_weight)` and `Σ weight = 1` for every particle - it
+    used to normalize `weight` while leaving `log_weight` unnormalized, and in
+    the all-`-inf` fallback set `weight = 1/n` with `log_weight` still `-inf` -
+    so `smc_prior_particles`, `resample_particles` and `adaptive_smc` all
+    agree on what the two fields mean. NaN log-weights count as `-inf`
+    (FG-N2). Pinned by
+    `normalize_particles_keeps_weight_and_log_weight_consistent`.
+  - *`CrossoverKernel::mask` is `Box<dyn Fn(..) + Send>`* so a kernel can move
+    to a worker thread with the rest of an SMC run. Closures that capture only
+    `Send` state (every in-tree and fugue-evo mask) already satisfy it.
+  - *`Address::has_prefix`*: a lone trailing `':'` is no longer treated as a
+    segment separator - `"a:"` is not a prefix of `"a:b"`, and `"scope:"` is
+    not a prefix of `"scope::x"` (`"scope::"` still is). Pinned by
+    `fgn9_has_prefix_single_colon_is_not_a_separator`.
+  - *Docs*: the remaining "production-ready" claims in `AGENTS.md` and six
+    docs pages now say what the README says (well-tested, pre-1.0); the
+    `DiscreteUniform` distribution is no longer described as "future" in the
+    `Model::SampleI64` and `Handler::on_sample_i64` docs.
+- **A strict or safe score of a structurally incompatible trace is now
+  well-defined: it terminates and reports, instead of diverging or
+  panicking**. `StrictScoreGivenTrace` / `score_given_trace_strict` and
+  `SafeScoreGivenTrace` record the first missing or type-mismatched site and
+  then keep executing the program (a handler cannot abort `run`). They used to
+  hand the program `Default::default()` at that site - `false` for a `Bool`,
+  `0.0` for an `f64` - which is not a value the site's prior could have
+  produced. fugue-evo's grammar prior read a missing `#leaf` flag as
+  "function node, recurse" at every depth and overflowed the stack (reproduced
+  at depth ~2 700); a missing `sigma` arrived as `0.0` and
+  `Normal::new(mu, 0.0).unwrap()` panicked inside the likelihood. The scorers
+  (and the reconciling scorer's duplicate-address branch) now hand the program
+  a **deterministic draw from the site's own prior**, seeded by the address:
+  execution stays inside the program's support and terminates the way the
+  prior does, different sites get independent draws, and the scorers remain
+  pure functions of `(base, model)`. The score itself is unchanged in meaning -
+  `Err(UnexpectedModelStructure)` naming the first offending site from the
+  strict path, the `-inf` `log_prior` sentinel from the safe path (which also
+  records the fallback draws so the invalid trace is a complete assignment) -
+  and `try_decode_particle`, built on the safe scorer, now returns `Err` for
+  such particles rather than recursing or panicking. Well-formed traces are
+  untouched: the three scorers still agree with `ScoreGivenTrace` to the bit.
+  Documented on `ScoreGivenTrace` (which still panics, by design), both
+  non-panicking scorers, `score_given_trace_strict` and `try_decode_particle`.
+  Pinned by the seven tests in `tests/f_strict_score_divergence.rs`.
+
+### Added
+
+- **Single-step MH with overrides and a no-rescore variant (X-5)**.
+  `adaptive_single_site_mh_with_overrides(rng, model_fn, current, adaptation,
+  &overrides)` is the one-transition counterpart of
+  `adaptive_mcmc_chain_with_overrides`: a caller driving a chain incrementally
+  can now apply a `SiteProposal::Reflect { .. }` (or any other override) per
+  address, which previously only the batch driver honoured.
+  `adaptive_single_site_mh_cached(rng, model_fn, current, adaptation,
+  &overrides, adapt)` is the transition the chain drivers run internally,
+  exposed: it takes an **already-scored** `current` (every trace the other MH
+  entry points return is one), reads the current log-density from its
+  accumulators, executes the model exactly **once** (the proposal), and returns
+  `Some((result, scored_trace, log_weight))` on acceptance or `None` on
+  rejection - half the cost of the re-scoring variants, and pinned bit-for-bit
+  against `adaptive_mcmc_chain` from the same seed. `adapt` selects
+  adapt-vs-frozen scales (FG-57). `adaptive_single_site_mh` is now a thin
+  wrapper over the `_with_overrides` variant with its signature and its RNG
+  consumption unchanged. `proposal_kind_for_support` is exported at the root.
+
+  Contract on `current` for the cached variant, stated on the function: its
+  accumulators and per-choice `logp` are trusted, so a hand-assembled trace
+  (`insert_choice(.., 0.0)`) must go through a re-scoring entry point first.
+  The re-scoring variants take care of this themselves - see FG-N6 below - and
+  on rejection now return the **re-scored** current trace rather than a clone
+  of the caller's input, so every trace they return is a valid cached-step
+  input (FG-40).
+
 ## [0.2.2] - 2026-08-05
 
 ### Added

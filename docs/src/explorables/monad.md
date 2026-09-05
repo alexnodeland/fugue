@@ -135,6 +135,21 @@ fn main() {
 }
 ```
 
+```admonish warning title="Loops: prefer `plate!` / `traverse_vec` over `m = m.bind(..)`"
+The `for` loop in `model` is the clearest way to *show* what `bind` does, and it
+is fine at this size. It is not the shape to use for many observations. Each
+`m = m.bind(..)` wraps the first node's continuation one layer deeper, so
+interpreting the chain costs one stack frame per observation and quadratic
+closure re-wrapping — a few thousand nodes on a 2 MiB thread stack, less on the
+main thread of a wasm build. For independent observations write
+`traverse_vec(data, |(i, y)| observe(addr!("y", i), ..))` or
+`plate!(i in 0..n => ..)`, which the interpreter advances in constant stack
+(FG-19/FG-N5). For a chain where each step depends on the previous one, build
+it from the back so every continuation *returns* the rest instead of wrapping
+it — see the note on the [SMC page](smc.md). `Model::bind`'s rustdoc has the
+details.
+```
+
 Under the hood, the score is the `Model` enum. Every effect variant carries its
 address, its distribution, and a boxed continuation `k` — the rest of the score
 (abridged from `src/core/model.rs`):

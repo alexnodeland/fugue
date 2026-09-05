@@ -3,7 +3,38 @@
 //! This module provides numerically stable implementations of common operations in probabilistic programming.
 //! Proper numerical stability is crucial for reliable inference, especially when dealing with extreme probabilities.
 
+/// Map a `NaN` log-weight to `-∞`; every other value passes through unchanged.
+///
+/// A `NaN` log-density is an *invalid* term, and the only interpretation under
+/// which every consumer stays well-defined is "probability zero" (FG-N2):
+/// added into an accumulator it would otherwise poison the whole trace weight,
+/// inside [`log_sum_exp`] it would make a particle population's normalizer
+/// `NaN` (so SMC's ESS becomes non-finite and the tempering ladder silently
+/// jumps to `β = 1` with uniform weights), and in a Metropolis ratio it makes
+/// every comparison false so the chain can never move. The accumulation points
+/// (`factor`, the `on_factor`/`on_observe_*` handler methods) and the log-space
+/// reductions all route through this.
+///
+/// ```rust
+/// # use fugue::core::numerical::nan_to_neg_inf;
+/// assert_eq!(nan_to_neg_inf(f64::NAN), f64::NEG_INFINITY);
+/// assert_eq!(nan_to_neg_inf(-2.5), -2.5);
+/// assert_eq!(nan_to_neg_inf(f64::INFINITY), f64::INFINITY);
+/// ```
+#[inline]
+pub fn nan_to_neg_inf(logw: f64) -> f64 {
+    if logw.is_nan() {
+        f64::NEG_INFINITY
+    } else {
+        logw
+    }
+}
+
 /// Compute log(sum(exp(x_i))) stably by factoring out the max; returns -∞ if all inputs are -∞.
+///
+/// `NaN` inputs are treated as `-∞` (a zero-probability term, FG-N2) rather
+/// than propagating, so a single invalid log-weight cannot turn the normalizer
+/// of a whole population into `NaN`.
 ///
 /// Example:
 /// ```rust
@@ -27,8 +58,12 @@ pub fn log_sum_exp(log_values: &[f64]) -> f64 {
         return f64::NEG_INFINITY;
     }
 
-    // Compute sum(exp(x_i - max)) stably
-    let sum_exp: f64 = log_values.iter().map(|&x| (x - max_val).exp()).sum();
+    // Compute sum(exp(x_i - max)) stably. `f64::max` already ignores NaN when
+    // picking `max_val`; map NaN terms to −∞ here so they contribute exp(−∞) = 0.
+    let sum_exp: f64 = log_values
+        .iter()
+        .map(|&x| (nan_to_neg_inf(x) - max_val).exp())
+        .sum();
 
     if sum_exp == 0.0 {
         f64::NEG_INFINITY
@@ -66,7 +101,7 @@ pub fn weighted_log_sum_exp(log_values: &[f64], weights: &[f64]) -> f64 {
     let weighted_sum: f64 = log_values
         .iter()
         .zip(weights.iter())
-        .map(|(&x, &w)| w * (x - max_val).exp())
+        .map(|(&x, &w)| w * (nan_to_neg_inf(x) - max_val).exp())
         .sum();
 
     if weighted_sum == 0.0 {
@@ -200,6 +235,26 @@ mod tests {
         assert!((log1p_exp(50.0) - 50.0).abs() < 1e-10);
         assert!((log1p_exp(-50.0) - 1.9287498479639178e-22).abs() < 1e-31);
         assert_eq!(log1p_exp(-1000.0), 0.0);
+    }
+
+    // FG-N2: a NaN term is a zero-probability term, not a poison pill.
+    #[test]
+    fn test_log_sum_exp_treats_nan_as_neg_inf() {
+        assert_eq!(log_sum_exp(&[f64::NAN, 0.0]), 0.0);
+        assert_eq!(log_sum_exp(&[0.0, f64::NAN, 0.0]), 2.0_f64.ln());
+        assert_eq!(log_sum_exp(&[f64::NAN]), f64::NEG_INFINITY);
+        assert_eq!(
+            log_sum_exp(&[f64::NAN, f64::NEG_INFINITY]),
+            f64::NEG_INFINITY
+        );
+        assert_eq!(
+            weighted_log_sum_exp(&[f64::NAN, 0.0], &[0.5, 0.5]),
+            0.5_f64.ln()
+        );
+        assert_eq!(
+            weighted_log_sum_exp(&[f64::NAN, f64::NAN], &[0.5, 0.5]),
+            f64::NEG_INFINITY
+        );
     }
 
     #[test]
