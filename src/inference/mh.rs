@@ -778,19 +778,10 @@ where
 /// based on the Metropolis-Hastings criterion (including the proposal/Hastings
 /// correction for asymmetric proposals).
 ///
-/// # Algorithm
-///
-/// 1. Score the current state once (reused on rejection — no redundant third
-///    model run, FG-12).
-/// 2. Randomly select a site and propose a new value using diminishing adaptive
-///    scaling, scoring the proposal in the same run (FG-11).
-/// 3. Accept with probability `min(1, exp(log α))` where
-///    `log α = Δlog-joint + q(x|x') − q(x'|x)` plus, for structure-varying
-///    proposals, the RJMCMC dimension term (0 for fixed-structure models).
-/// 4. Update adaptive scales using diminishing step sizes.
-///
-/// On acceptance the returned trace is freshly scored, so its
-/// `total_log_weight()` is correct (FG-40).
+/// This is [`adaptive_single_site_mh_with_overrides`] with no per-address
+/// overrides; see there for the algorithm, the contract on `current`, and the
+/// cheaper [`adaptive_single_site_mh_cached`] variant for callers that hold a
+/// scored trace and want to skip the re-score.
 ///
 /// # Arguments
 ///
@@ -836,21 +827,56 @@ pub fn adaptive_single_site_mh<A, R: Rng>(
     adaptation: &mut DiminishingAdaptation,
 ) -> (A, Trace) {
     let overrides: HashMap<Address, SiteProposal> = HashMap::new();
+    adaptive_single_site_mh_with_overrides(rng, model_fn, current, adaptation, &overrides)
+}
 
-    if current.choices.is_empty() {
-        // No latent choices to update; just recover the model result.
-        let (a, _) = run(
-            ScoreGivenTrace {
-                base: current.clone(),
-                trace: Trace::default(),
-            },
-            model_fn(),
-        );
-        return (a, current.clone());
-    }
-
-    // Score the current state once. The model result `a_cur` is reused on
-    // rejection instead of re-executing the model a third time (FG-12).
+/// One adaptive single-site MH transition honouring per-address `f64` proposal
+/// overrides (X-5 / FG-42).
+///
+/// The single-step counterpart of [`adaptive_mcmc_chain_with_overrides`]: any
+/// address in `overrides` uses the given [`SiteProposal`] instead of the
+/// support-derived default, so e.g. a `Reflect { lower, upper }` bound can be
+/// applied through an incremental, caller-driven chain and not only through
+/// the batch driver.
+///
+/// # Algorithm
+///
+/// 1. Score `current` once with [`ScoreGivenTrace`]. This is what makes the
+///    step robust to a caller-built `current`: the proposal, the site list and
+///    every reverse-move (death) density are read from the *re-scored* trace,
+///    never from the per-choice `logp` values stored in `current` (FG-N6). A
+///    trace assembled with `insert_choice(.., 0.0)` is therefore handled
+///    exactly like a freshly scored one. The model result is reused on
+///    rejection (FG-12).
+/// 2. Randomly select a site and propose a new value using diminishing adaptive
+///    scaling, scoring the proposal in the same run (FG-11).
+/// 3. Accept with probability `min(1, exp(log α))` where
+///    `log α = Δlog-joint + q(x|x') − q(x'|x)` plus, for structure-varying
+///    proposals, the RJMCMC dimension term (0 for fixed-structure models).
+/// 4. Update adaptive scales using diminishing step sizes.
+///
+/// The returned trace is freshly scored in both branches — the accepted
+/// proposal, or the re-scored current state on rejection — so its
+/// `total_log_weight()` and per-choice `logp` are valid (FG-40) and it can be
+/// fed straight into [`adaptive_single_site_mh_cached`].
+///
+/// # Cost
+///
+/// Two model executions per transition (the re-score and the proposal).
+/// Callers that keep the scored trace between steps — every trace this function
+/// returns is one — can halve that with [`adaptive_single_site_mh_cached`].
+pub fn adaptive_single_site_mh_with_overrides<A, R: Rng>(
+    rng: &mut R,
+    model_fn: impl Fn() -> Model<A>,
+    current: &Trace,
+    adaptation: &mut DiminishingAdaptation,
+    overrides: &HashMap<Address, SiteProposal>,
+) -> (A, Trace) {
+    // Score the current state once. Everything downstream — the site list, the
+    // proposal base, the death densities — reads from `cur_scored`, not from the
+    // caller's stored accumulators / per-choice logp (FG-N6). The model result
+    // `a_cur` is reused on rejection instead of re-executing the model a third
+    // time (FG-12).
     let (a_cur, cur_scored) = run(
         ScoreGivenTrace {
             base: current.clone(),
@@ -858,27 +884,97 @@ pub fn adaptive_single_site_mh<A, R: Rng>(
         },
         model_fn(),
     );
-    let current_lw = cur_scored.total_log_weight();
 
-    let sites: Vec<Address> = current.choices.keys().cloned().collect();
-    let target = sites[rng.gen_range(0..sites.len())].clone();
-    let scale = adaptation.get_scale(&target);
-
-    let (a_prop, prop_trace, prop_lw, lqf, lqr, _structure_changed) =
-        propose_and_score(rng, &model_fn, current, &target, scale, &overrides);
-
-    // Dimension term for structure-varying proposals (see `single_site_mh_step`);
-    // 0 for fixed-structure models.
-    let dim_term = (sites.len() as f64).ln() - (prop_trace.choices.len() as f64).ln();
-    let log_alpha = prop_lw - current_lw + (lqr - lqf) + dim_term;
-    let accept = mh_accept(rng, log_alpha, current_lw, prop_lw);
-    adaptation.update(&target, accept);
-
-    if accept {
-        (a_prop, prop_trace)
-    } else {
-        (a_cur, current.clone())
+    if cur_scored.choices.is_empty() {
+        // No latent choices to update.
+        return (a_cur, cur_scored);
     }
+
+    match adaptive_single_site_mh_cached(rng, &model_fn, &cur_scored, adaptation, overrides, true) {
+        Some((a_prop, prop_trace, _lw)) => (a_prop, prop_trace),
+        None => (a_cur, cur_scored),
+    }
+}
+
+/// One adaptive single-site MH transition from an **already-scored** current
+/// trace, with per-address overrides and no re-score (X-5).
+///
+/// This is the transition the chain drivers run internally, exposed for callers
+/// that drive a chain incrementally and already hold a scored state — which is
+/// every trace returned by [`adaptive_single_site_mh`],
+/// [`adaptive_single_site_mh_with_overrides`], [`PriorHandler`] /
+/// [`ScoreGivenTrace`] runs, and this function itself. It performs exactly
+/// **one** model execution (the proposal), half the cost of the re-scoring
+/// variants, and never re-executes the model on rejection (FG-12).
+///
+/// # Contract on `current`
+///
+/// `current` must be a **fully scored** trace for `model_fn`: its accumulators
+/// (`total_log_weight()`) and every choice's `logp` are read as-is and used as
+/// the current state's log-density and as the reverse-move densities of any
+/// sites the proposal makes vanish (FG-20/FG-21). A trace assembled by hand —
+/// e.g. `insert_choice(.., 0.0)` — violates this and over-accepts
+/// structure-shrinking moves until the first acceptance; pass such a trace
+/// through [`adaptive_single_site_mh_with_overrides`] (which re-scores it) or
+/// [`ScoreGivenTrace`] first.
+///
+/// # Returns
+///
+/// `Some((model_result, trace, log_weight))` on acceptance — the freshly scored
+/// proposal (FG-40), whose `log_weight == trace.total_log_weight()` — or `None`
+/// on rejection, in which case the caller keeps `current` unchanged. `adapt`
+/// controls whether the proposal scale for the chosen site is updated (FG-57:
+/// adapt during warmup, freeze during sampling).
+///
+/// ```rust
+/// use fugue::*;
+/// use fugue::inference::mh::adaptive_single_site_mh_cached;
+/// use rand::rngs::StdRng;
+/// use rand::SeedableRng;
+/// use std::collections::HashMap;
+///
+/// let model_fn = || {
+///     sample(addr!("x"), Uniform::new(-0.5, 0.5).unwrap())
+///         .bind(|x| observe(addr!("y"), Normal::new(x, 0.3).unwrap(), 0.2).map(move |_| x))
+/// };
+/// let mut rng = StdRng::seed_from_u64(7);
+/// let (_, mut current) = runtime::handler::run(
+///     PriorHandler { rng: &mut rng, trace: Trace::default() },
+///     model_fn(),
+/// );
+/// let mut adaptation = DiminishingAdaptation::new(0.44, 0.7);
+/// let mut overrides = HashMap::new();
+/// overrides.insert(addr!("x"), SiteProposal::Reflect { lower: -0.5, upper: 0.5 });
+///
+/// for _ in 0..100 {
+///     if let Some((_x, t, _lw)) =
+///         adaptive_single_site_mh_cached(&mut rng, &model_fn, &current, &mut adaptation, &overrides, true)
+///     {
+///         current = t; // accepted: the returned trace is scored and reusable
+///     }
+/// }
+/// assert!(current.total_log_weight().is_finite());
+/// ```
+pub fn adaptive_single_site_mh_cached<A, R: Rng>(
+    rng: &mut R,
+    model_fn: impl Fn() -> Model<A>,
+    current: &Trace,
+    adaptation: &mut DiminishingAdaptation,
+    overrides: &HashMap<Address, SiteProposal>,
+    adapt: bool,
+) -> Option<(A, Trace, f64)> {
+    let sites: Vec<Address> = current.choices.keys().cloned().collect();
+    single_site_mh_step(
+        rng,
+        &model_fn,
+        current,
+        current.total_log_weight(),
+        &sites,
+        adaptation,
+        overrides,
+        adapt,
+    )
+    .map(|(a, t, lw, _structure_changed)| (a, t, lw))
 }
 
 /// One block-regeneration Metropolis–Hastings transition.

@@ -77,6 +77,34 @@ For the initial 0.1.0 release notes, see `.github/CHANGELOG.md`.
   half-normal mean `0.798` rather than the prior mean `0`), and
   `test_log_sum_exp_treats_nan_as_neg_inf`.
 
+### Added
+
+- **Single-step MH with overrides and a no-rescore variant (X-5)**.
+  `adaptive_single_site_mh_with_overrides(rng, model_fn, current, adaptation,
+  &overrides)` is the one-transition counterpart of
+  `adaptive_mcmc_chain_with_overrides`: a caller driving a chain incrementally
+  can now apply a `SiteProposal::Reflect { .. }` (or any other override) per
+  address, which previously only the batch driver honoured.
+  `adaptive_single_site_mh_cached(rng, model_fn, current, adaptation,
+  &overrides, adapt)` is the transition the chain drivers run internally,
+  exposed: it takes an **already-scored** `current` (every trace the other MH
+  entry points return is one), reads the current log-density from its
+  accumulators, executes the model exactly **once** (the proposal), and returns
+  `Some((result, scored_trace, log_weight))` on acceptance or `None` on
+  rejection - half the cost of the re-scoring variants, and pinned bit-for-bit
+  against `adaptive_mcmc_chain` from the same seed. `adapt` selects
+  adapt-vs-frozen scales (FG-57). `adaptive_single_site_mh` is now a thin
+  wrapper over the `_with_overrides` variant with its signature and its RNG
+  consumption unchanged. `proposal_kind_for_support` is exported at the root.
+
+  Contract on `current` for the cached variant, stated on the function: its
+  accumulators and per-choice `logp` are trusted, so a hand-assembled trace
+  (`insert_choice(.., 0.0)`) must go through a re-scoring entry point first.
+  The re-scoring variants take care of this themselves - see FG-N6 below - and
+  on rejection now return the **re-scored** current trace rather than a clone
+  of the caller's input, so every trace they return is a valid cached-step
+  input (FG-40).
+
 ## [0.2.2] - 2026-08-05
 
 ### Added
