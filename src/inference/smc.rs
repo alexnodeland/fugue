@@ -1104,6 +1104,12 @@ pub fn decode_particle<A>(particle: &Particle, model_fn: impl Fn() -> Model<A>) 
 /// that IS a complete, in-support assignment for `model_fn` always scores a
 /// finite log-prior, so a non-finite one means the trace does not decode under
 /// this model.
+///
+/// The safe scorer keeps executing past a missing/mismatched site with a
+/// deterministic draw from that site's prior, so a model whose *structure*
+/// depends on the site (a grammar's leaf flag, a scale fed to `Normal::new`)
+/// terminates and returns `Err` rather than recursing without bound or
+/// panicking inside the likelihood.
 pub fn try_decode_particle<A>(
     particle: &Particle,
     model_fn: impl Fn() -> Model<A>,

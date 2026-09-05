@@ -192,6 +192,31 @@ For the initial 0.1.0 release notes, see `.github/CHANGELOG.md`.
     docs pages now say what the README says (well-tested, pre-1.0); the
     `DiscreteUniform` distribution is no longer described as "future" in the
     `Model::SampleI64` and `Handler::on_sample_i64` docs.
+- **A strict or safe score of a structurally incompatible trace is now
+  well-defined: it terminates and reports, instead of diverging or
+  panicking**. `StrictScoreGivenTrace` / `score_given_trace_strict` and
+  `SafeScoreGivenTrace` record the first missing or type-mismatched site and
+  then keep executing the program (a handler cannot abort `run`). They used to
+  hand the program `Default::default()` at that site - `false` for a `Bool`,
+  `0.0` for an `f64` - which is not a value the site's prior could have
+  produced. fugue-evo's grammar prior read a missing `#leaf` flag as
+  "function node, recurse" at every depth and overflowed the stack (reproduced
+  at depth ~2 700); a missing `sigma` arrived as `0.0` and
+  `Normal::new(mu, 0.0).unwrap()` panicked inside the likelihood. The scorers
+  (and the reconciling scorer's duplicate-address branch) now hand the program
+  a **deterministic draw from the site's own prior**, seeded by the address:
+  execution stays inside the program's support and terminates the way the
+  prior does, different sites get independent draws, and the scorers remain
+  pure functions of `(base, model)`. The score itself is unchanged in meaning -
+  `Err(UnexpectedModelStructure)` naming the first offending site from the
+  strict path, the `-inf` `log_prior` sentinel from the safe path (which also
+  records the fallback draws so the invalid trace is a complete assignment) -
+  and `try_decode_particle`, built on the safe scorer, now returns `Err` for
+  such particles rather than recursing or panicking. Well-formed traces are
+  untouched: the three scorers still agree with `ScoreGivenTrace` to the bit.
+  Documented on `ScoreGivenTrace` (which still panics, by design), both
+  non-panicking scorers, `score_given_trace_strict` and `try_decode_particle`.
+  Pinned by the seven tests in `tests/f_strict_score_divergence.rs`.
 
 ### Added
 
