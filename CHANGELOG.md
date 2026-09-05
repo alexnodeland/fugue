@@ -49,6 +49,33 @@ For the initial 0.1.0 release notes, see `.github/CHANGELOG.md`.
   sign mass, and analytic log-evidence through ten rejuvenation steps per
   tempering stage). Both chain tests fail on the pre-fix selector. The FG-02
   and FG-42 regressions are unchanged and still pass.
+- **`NaN` log-weights are sanitised to `-inf` and MH escapes a non-finite
+  state (FG-N2)**. A `NaN` log-density is now read as "probability zero" at
+  every accumulation point - `factor()` at construction, the `on_factor` and
+  `on_observe_*` methods of every shipped handler - and `log_sum_exp` /
+  `weighted_log_sum_exp` treat `NaN` terms as `-inf` (new helper
+  `core::numerical::nan_to_neg_inf`). The shared Metropolis decision
+  (`mh_accept`, used by the single-site kernels, `block_regeneration_mh` and
+  SMC rejuvenation) accepts any proposal with a finite density when the
+  *current* state's density is not finite, and stays otherwise.
+
+  Previously one `factor(NaN)` made the trace weight `NaN`; in SMC the
+  population normalizer became `NaN`, the ESS non-finite, and the tempering
+  ladder silently jumped to `beta = 1` with uniform prior weights and a `NaN`
+  evidence, returned without error; in MH `NaN >= 0.0` and `u < exp(NaN)` are
+  both false, so a chain initialised on a `NaN` state rejected every proposal
+  forever. Every consumer had been guarding this itself. There is no other
+  reading of an invalid weight under which the trace weight, the SMC
+  normalizer and the acceptance ratio all stay well-defined.
+
+  Pinned by `fgn2_factor_nan_accumulates_as_neg_inf`,
+  `fgn2_mh_chain_escapes_a_nan_start_and_targets_the_half_normal` (six seeds,
+  driven from the exact prior state through `adaptive_single_site_mh`),
+  `fgn2_mh_full_chain_driver_survives_nan_factor`,
+  `fgn2_smc_does_not_collapse_to_the_prior_on_nan_factor` (with and without
+  rejuvenation: log-evidence `ln 1/2`, zero weight on the `NaN` region,
+  half-normal mean `0.798` rather than the prior mean `0`), and
+  `test_log_sum_exp_treats_nan_as_neg_inf`.
 
 ## [0.2.2] - 2026-08-05
 

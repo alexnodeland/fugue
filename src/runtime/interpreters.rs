@@ -3,6 +3,7 @@
 use crate::core::address::Address;
 use crate::core::distribution::Distribution;
 use crate::core::model::Model;
+use crate::core::numerical::nan_to_neg_inf;
 use crate::error::{ErrorCode, FugueError, FugueResult};
 use crate::runtime::handler::{run, Handler};
 use crate::runtime::trace::{Choice, ChoiceValue, Trace};
@@ -72,12 +73,14 @@ macro_rules! for_each_value_type {
 }
 
 /// Generate the five identical `on_observe_*` methods (every handler scores an
-/// observation the same way: add its log-density to `log_likelihood`).
+/// observation the same way: add its log-density to `log_likelihood`). A `NaN`
+/// log-density (e.g. an observed `NaN`, or a distribution whose parameters
+/// went non-finite mid-model) is accumulated as `-∞` (FG-N2).
 macro_rules! impl_observe_methods {
     ($(($sample:ident, $observe:ident, $ty:ty, $variant:ident, $tyname:literal, $get:ident, $get_res:ident)),* $(,)?) => {
         $(
             fn $observe(&mut self, _addr: &Address, dist: &dyn Distribution<$ty>, value: $ty) {
-                self.trace.log_likelihood += dist.log_prob(&value);
+                self.trace.log_likelihood += nan_to_neg_inf(dist.log_prob(&value));
             }
         )*
     };
@@ -363,7 +366,7 @@ impl<'r, R: RngCore> Handler for PriorHandler<'r, R> {
     for_each_value_type!(impl_observe_methods);
 
     fn on_factor(&mut self, logw: f64) {
-        self.trace.log_factors += logw;
+        self.trace.log_factors += nan_to_neg_inf(logw);
     }
 
     fn finish(self) -> Trace {
@@ -418,7 +421,7 @@ impl<'r, R: RngCore> Handler for ReplayHandler<'r, R> {
     for_each_value_type!(impl_observe_methods);
 
     fn on_factor(&mut self, logw: f64) {
-        self.trace.log_factors += logw;
+        self.trace.log_factors += nan_to_neg_inf(logw);
     }
 
     fn finish(self) -> Trace {
@@ -469,7 +472,7 @@ impl Handler for ScoreGivenTrace {
     for_each_value_type!(impl_observe_methods);
 
     fn on_factor(&mut self, logw: f64) {
-        self.trace.log_factors += logw;
+        self.trace.log_factors += nan_to_neg_inf(logw);
     }
 
     fn finish(self) -> Trace {
@@ -526,7 +529,7 @@ impl<'r, R: RngCore> Handler for SafeReplayHandler<'r, R> {
     for_each_value_type!(impl_observe_methods);
 
     fn on_factor(&mut self, logw: f64) {
-        self.trace.log_factors += logw;
+        self.trace.log_factors += nan_to_neg_inf(logw);
     }
 
     fn finish(self) -> Trace {
@@ -580,7 +583,7 @@ impl Handler for SafeScoreGivenTrace {
     for_each_value_type!(impl_observe_methods);
 
     fn on_factor(&mut self, logw: f64) {
-        self.trace.log_factors += logw;
+        self.trace.log_factors += nan_to_neg_inf(logw);
     }
 
     fn finish(self) -> Trace {
@@ -616,7 +619,7 @@ impl<'e> Handler for StrictScoreGivenTrace<'e> {
     for_each_value_type!(impl_observe_methods);
 
     fn on_factor(&mut self, logw: f64) {
-        self.trace.log_factors += logw;
+        self.trace.log_factors += nan_to_neg_inf(logw);
     }
 
     fn finish(self) -> Trace {
@@ -717,7 +720,7 @@ impl<'r, 'f, 'e, R: RngCore> Handler for ReconcilingScoreGivenTrace<'r, 'f, 'e, 
     for_each_value_type!(impl_observe_methods);
 
     fn on_factor(&mut self, logw: f64) {
-        self.trace.log_factors += logw;
+        self.trace.log_factors += nan_to_neg_inf(logw);
     }
 
     fn finish(self) -> Trace {

@@ -117,6 +117,7 @@
 use crate::core::address::Address;
 use crate::core::distribution::{Distribution, Support};
 use crate::core::model::Model;
+use crate::core::numerical::nan_to_neg_inf;
 use crate::inference::mcmc_utils::DiminishingAdaptation;
 use crate::runtime::handler::{run, Handler};
 use crate::runtime::interpreters::{score_given_trace_reconciled, PriorHandler, ScoreGivenTrace};
@@ -135,6 +136,31 @@ fn gaussian_z(rng: &mut dyn RngCore) -> f64 {
 fn normal_logpdf(x: f64, mean: f64, sd: f64) -> f64 {
     let z = (x - mean) / sd;
     -0.5 * z * z - sd.ln() - 0.5 * (2.0 * std::f64::consts::PI).ln()
+}
+
+/// The Metropolis accept/reject decision, shared by every MH kernel in the
+/// crate.
+///
+/// `current_lw` / `prop_lw` are the log-densities of the current and proposed
+/// states under the (tempered) target and `log_alpha` the full log acceptance
+/// ratio built from them. When the *current* state has a non-finite density —
+/// `-∞` (started outside the support, e.g. via `guard`) or `NaN` (an invalid
+/// weight handed in by a caller-built trace) — `log_alpha` is `NaN` or `±∞` and
+/// the usual comparison would either reject forever (`NaN >= 0.0` is false and
+/// `u < exp(NaN)` is false) or be undefined. Such a state has zero target mass,
+/// so leaving it is always correct: accept any proposal with a *finite* density
+/// and stay otherwise (FG-N2). From a finite current state this is the ordinary
+/// `min(1, exp(log_alpha))` rule.
+pub(crate) fn mh_accept<R: Rng>(
+    rng: &mut R,
+    log_alpha: f64,
+    current_lw: f64,
+    prop_lw: f64,
+) -> bool {
+    if !current_lw.is_finite() {
+        return prop_lw.is_finite();
+    }
+    log_alpha >= 0.0 || rng.gen::<f64>() < log_alpha.exp()
 }
 
 /// User-facing per-address proposal override for `f64` sites (FG-42).
@@ -613,7 +639,7 @@ impl<'a, R: RngCore> Handler for SingleSiteProposalHandler<'a, R> {
     }
 
     fn on_factor(&mut self, logw: f64) {
-        self.trace.log_factors += logw;
+        self.trace.log_factors += nan_to_neg_inf(logw);
     }
 
     fn finish(self) -> Trace {
@@ -731,7 +757,7 @@ where
     // models the two site counts are equal and the term is exactly 0.
     let dim_term = (sites.len() as f64).ln() - (prop_trace.choices.len() as f64).ln();
     let log_alpha = prop_lw - current_lw + (lqr - lqf) + dim_term;
-    let accept = log_alpha >= 0.0 || rng.gen::<f64>() < log_alpha.exp();
+    let accept = mh_accept(rng, log_alpha, current_lw, prop_lw);
 
     if adapt {
         adaptation.update(&target, accept);
@@ -845,7 +871,7 @@ pub fn adaptive_single_site_mh<A, R: Rng>(
     // 0 for fixed-structure models.
     let dim_term = (sites.len() as f64).ln() - (prop_trace.choices.len() as f64).ln();
     let log_alpha = prop_lw - current_lw + (lqr - lqf) + dim_term;
-    let accept = log_alpha >= 0.0 || rng.gen::<f64>() < log_alpha.exp();
+    let accept = mh_accept(rng, log_alpha, current_lw, prop_lw);
     adaptation.update(&target, accept);
 
     if accept {
@@ -942,12 +968,14 @@ pub fn block_regeneration_mh<A, R: Rng>(
             .sum::<f64>();
 
     let loglik = |t: &Trace| t.log_likelihood + t.log_factors;
+    // Tempered log-density of each state, for the non-finite-current escape.
+    let logd = |t: &Trace| t.log_prior + beta * loglik(t);
     let log_alpha = (prop.log_prior - cur_scored.log_prior)
         + beta * (loglik(&prop) - loglik(&cur_scored))
         + log_q_rev
         - log_q_fwd;
 
-    if log_alpha >= 0.0 || rng.gen::<f64>() < log_alpha.exp() {
+    if mh_accept(rng, log_alpha, logd(&cur_scored), logd(&prop)) {
         (a_prop, prop)
     } else {
         (a_cur, cur_scored)

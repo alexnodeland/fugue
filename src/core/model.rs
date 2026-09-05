@@ -410,6 +410,11 @@ where
 /// - Adding custom log-likelihood terms
 /// - Implementing rejection sampling (using negative infinity)
 ///
+/// A `NaN` weight is mapped to `-∞` (probability zero) at construction (FG-N2):
+/// there is no other reading under which the trace weight, SMC's normalizer and
+/// the MH acceptance ratio all stay well-defined, and the handlers apply the
+/// same rule when they accumulate.
+///
 /// Example:
 /// ```rust
 /// # use fugue::*;
@@ -425,7 +430,7 @@ where
 /// ```
 pub fn factor(logw: LogF64) -> Model<()> {
     Model::Factor {
-        logw,
+        logw: crate::core::numerical::nan_to_neg_inf(logw),
         k: Box::new(pure),
     }
 }

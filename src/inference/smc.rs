@@ -59,7 +59,7 @@ use crate::core::address::Address;
 use crate::core::model::Model;
 use crate::core::numerical::log_sum_exp;
 use crate::inference::mcmc_utils::DiminishingAdaptation;
-use crate::inference::mh::{propose_and_score, SiteProposal};
+use crate::inference::mh::{mh_accept, propose_and_score, SiteProposal};
 use crate::runtime::handler::run;
 use crate::runtime::interpreters::{PriorHandler, ScoreGivenTrace};
 use crate::runtime::trace::Trace;
@@ -894,11 +894,12 @@ fn tempered_single_site_mh<A, R: Rng>(
     );
 
     let dim_term = (sites.len() as f64).ln() - (prop_trace.choices.len() as f64).ln();
+    let logd = |t: &Trace| t.log_prior + beta * particle_log_likelihood(t);
     let log_alpha = (prop_trace.log_prior - cur_scored.log_prior)
         + beta * (particle_log_likelihood(&prop_trace) - particle_log_likelihood(&cur_scored))
         + (lqr - lqf)
         + dim_term;
-    let accept = log_alpha >= 0.0 || rng.gen::<f64>() < log_alpha.exp();
+    let accept = mh_accept(rng, log_alpha, logd(&cur_scored), logd(&prop_trace));
     adaptation.update(&target, accept);
 
     if accept {
