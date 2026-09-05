@@ -122,7 +122,11 @@ impl Address {
     /// assert!(addr!("gene", 3).has_prefix("gene"));
     /// assert!(Address::new("node/0/1").has_prefix("node/0"));
     /// assert!(Address::new("scope::x").has_prefix("scope"));
+    /// assert!(Address::new("scope::x").has_prefix("scope::"));
     /// assert!(!Address::new("generation").has_prefix("gene"));
+    /// // A lone ':' is not a separator.
+    /// assert!(!Address::new("a:b").has_prefix("a:"));
+    /// assert!(!Address::new("scope::x").has_prefix("scope:"));
     /// ```
     pub fn has_prefix(&self, prefix: &str) -> bool {
         let s = self.as_str();
@@ -132,7 +136,12 @@ impl Address {
         if rest.is_empty() {
             return true;
         }
-        if matches!(prefix.chars().last(), Some('#' | '/' | ':')) {
+        // A prefix that itself ends in a separator (`"gene#"`, `"node/0/"`,
+        // `"scope::"`) matches whatever follows. A single trailing `':'` is NOT a
+        // separator (FG-N9): `"a:"` must not be a prefix of `"a:b"`, and
+        // `"scope:"` is not a prefix of `"scope::x"` (the rest `":x"` does not
+        // start with `"::"`).
+        if prefix.ends_with('#') || prefix.ends_with('/') || prefix.ends_with("::") {
             return true;
         }
         rest.starts_with('#') || rest.starts_with('/') || rest.starts_with("::")

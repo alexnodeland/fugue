@@ -2,13 +2,13 @@
 
 ## Project Overview
 
-Fugue is a **production-ready, monadic probabilistic programming library** for Rust. It enables elegant probabilistic program composition through `Model` values executed with pluggable interpreters and state-of-the-art inference algorithms.
+Fugue is a **monadic probabilistic programming library** for Rust (0.2.x, pre-1.0; see the README for the honest scope statement). It enables elegant probabilistic program composition through `Model` values executed with pluggable interpreters and state-of-the-art inference algorithms.
 
 ### Core Philosophy
 
 - **Monadic Design**: Compose probabilistic programs using pure functional abstractions
 - **Type Safety**: Natural return types for distributions (Bernoulli → `bool`, Poisson → `u64`)  
-- **Production Ready**: Numerically stable algorithms with comprehensive error handling
+- **Numerically careful**: log-space computation throughout, with explicit error handling
 - **Performance Focused**: Memory optimization, copy-on-write traces, efficient algorithms
 
 ## Architecture Overview
@@ -100,7 +100,7 @@ make coverage
 1. Design around existing `Handler` infrastructure
 2. Consider trace manipulation patterns
 3. Implement convergence diagnostics
-4. Provide both basic and production-ready variants
+4. Provide both basic and hardened (`Safe*`) variants where a failure mode exists
 
 ### Performance Optimization
 

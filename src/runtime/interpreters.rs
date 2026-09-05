@@ -689,8 +689,10 @@ pub struct ReconcileReport {
     /// present with the wrong value type). Each was proposed fresh from its
     /// prior and its `log_prob` accumulated into `log_prior`.
     pub fresh_addresses: Vec<Address>,
-    /// Addresses present in the base trace that the model did NOT visit. Their
-    /// contribution should be dropped by the caller (e.g. removed from the
+    /// Addresses present in the base trace that the model did NOT visit, or
+    /// visited with a different value type (in which case the address also
+    /// appears in `fresh_addresses`: a type change is a death plus a birth).
+    /// Their contribution should be dropped by the caller (e.g. removed from the
     /// reverse-move density in an RJMCMC step).
     pub vanished_addresses: Vec<Address>,
 }
@@ -772,9 +774,13 @@ pub fn score_given_trace_reconciled<A, R: RngCore>(
 ) -> FugueResult<(A, Trace, ReconcileReport)> {
     let mut error: Option<FugueError> = None;
     let mut fresh_addresses: Vec<Address> = Vec::new();
-    // Snapshot base addresses up front so we can compute vanished ones after the
-    // run consumes the handler.
-    let base_addresses: Vec<Address> = base.choices.keys().cloned().collect();
+    // Snapshot base addresses (with their value types) up front so we can
+    // compute vanished ones after the run consumes the handler.
+    let base_addresses: Vec<(Address, &'static str)> = base
+        .choices
+        .iter()
+        .map(|(a, c)| (a.clone(), c.value.type_name()))
+        .collect();
     let handler = ReconcilingScoreGivenTrace {
         rng,
         base,
@@ -786,10 +792,19 @@ pub fn score_given_trace_reconciled<A, R: RngCore>(
     if let Some(e) = error {
         return Err(e);
     }
-    // Vanished = present in the base trace but not visited by this model run.
+    // Vanished = present in the base trace but not visited by this model run —
+    // or visited with a DIFFERENT value type, in which case the handler sampled
+    // it fresh (it is in `fresh`) and the old-typed site is gone (FG-N9): a
+    // type change is a death plus a birth, and both sides must be reported.
     let vanished_addresses: Vec<Address> = base_addresses
         .into_iter()
-        .filter(|addr| !trace.choices.contains_key(addr))
+        .filter(|(addr, ty)| {
+            trace
+                .choices
+                .get(addr)
+                .is_none_or(|c| c.value.type_name() != *ty)
+        })
+        .map(|(addr, _)| addr)
         .collect();
     Ok((
         a,

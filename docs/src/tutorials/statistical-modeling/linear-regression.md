@@ -645,7 +645,7 @@ fn variable_selection_model(
 3. **Model Selection**: Principled comparison using marginal likelihood and Bayes factors
 4. **Scalability**: Hierarchical models and efficient computation for high-dimensional problems
 5. **Real-World Applications**: Flexible framework adaptable to diverse scientific domains
-6. **Production Ready**: Cross-validation, diagnostics, and robust inference workflows
+6. **Robust Workflows**: Cross-validation, diagnostics, and validated inference
 ```
 
 **Core Techniques:**

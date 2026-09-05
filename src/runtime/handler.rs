@@ -45,7 +45,7 @@ pub trait Handler {
     /// before the i64 sample path existed keep compiling unchanged; every
     /// handler shipped in this crate overrides it. A model only reaches this
     /// method if it contains a [`Model::SampleI64`](crate::Model::SampleI64)
-    /// node (e.g. a future `DiscreteUniform` distribution).
+    /// node (e.g. [`DiscreteUniform`](crate::DiscreteUniform)).
     fn on_sample_i64(&mut self, addr: &Address, _dist: &dyn Distribution<i64>) -> i64 {
         panic!(
             "handler does not implement on_sample_i64 (i64 sample site at {})",

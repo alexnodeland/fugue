@@ -496,8 +496,12 @@ pub struct CrossoverKernel {
     /// be value-independent (depend only on the address structure) and
     /// symmetric in its two trace arguments for the move to be a symmetric
     /// involution (Hastings ratio 1).
+    ///
+    /// `Send` so a kernel can be moved to a worker thread along with the rest
+    /// of an SMC run (FG-N9); closures that only capture `Send` state already
+    /// satisfy it.
     #[allow(clippy::type_complexity)]
-    pub mask: Box<dyn Fn(&Trace, &Trace, &mut dyn rand::RngCore) -> Vec<Address>>,
+    pub mask: Box<dyn Fn(&Trace, &Trace, &mut dyn rand::RngCore) -> Vec<Address> + Send>,
 }
 
 /// Build two children by exchanging the choices at `swap` between `a` and `b`.
@@ -983,6 +987,12 @@ pub fn rejuvenate_particles<A, R: Rng>(
 ///
 /// This function properly handles extreme log-weights without underflow or overflow,
 /// which is critical for reliable SMC performance.
+///
+/// On return the two weight fields are **consistent**: `weight == exp(log_weight)`
+/// and `Σ weight = 1` (FG-N9). Previously `log_weight` was left as the
+/// *unnormalized* input while `weight` was normalized — and in the all-`-∞`
+/// fallback `weight` became `1/n` with `log_weight` still `-∞` — so the two
+/// fields disagreed depending on which function had produced the particle.
 pub fn normalize_particles(particles: &mut [Particle]) {
     use crate::core::numerical::log_sum_exp;
 
@@ -1001,20 +1011,25 @@ pub fn normalize_particles(particles: &mut [Particle]) {
         let n = particles.len();
         for p in particles {
             p.weight = 1.0 / n as f64; // Uniform weights as fallback
+            p.log_weight = -(n as f64).ln();
         }
         return;
     }
 
-    // Normalize weights stably
+    // Normalize weights stably (NaN inputs count as -∞, FG-N2)
     for (p, &log_w) in particles.iter_mut().zip(&log_weights) {
-        p.weight = (log_w - log_norm).exp();
+        p.log_weight = crate::core::numerical::nan_to_neg_inf(log_w) - log_norm;
+        p.weight = p.log_weight.exp();
     }
 
-    // Ensure weights sum to 1.0 (handle small numerical errors)
+    // Ensure weights sum to 1.0 (handle small numerical errors), keeping the
+    // log-space field in step.
     let weight_sum: f64 = particles.iter().map(|p| p.weight).sum();
-    if weight_sum > 0.0 {
+    if weight_sum > 0.0 && weight_sum != 1.0 {
+        let log_sum = weight_sum.ln();
         for p in particles {
             p.weight /= weight_sum;
+            p.log_weight -= log_sum;
         }
     }
 }
@@ -1197,9 +1212,47 @@ mod tests {
             },
         ];
         normalize_particles(&mut particles);
-        // Fallback to uniform
+        // Fallback to uniform — in BOTH fields (FG-N9).
         assert!((particles[0].weight - 0.5).abs() < 1e-12);
         assert!((particles[1].weight - 0.5).abs() < 1e-12);
+        assert!((particles[0].log_weight - 0.5_f64.ln()).abs() < 1e-12);
+        assert!((particles[1].log_weight - 0.5_f64.ln()).abs() < 1e-12);
+    }
+
+    /// FG-N9: after normalization `weight == exp(log_weight)` for every
+    /// particle, whichever entry point produced it.
+    #[test]
+    fn normalize_particles_keeps_weight_and_log_weight_consistent() {
+        let mut particles: Vec<Particle> = [-3.0, 0.5, f64::NEG_INFINITY, 2.0, f64::NAN]
+            .iter()
+            .map(|&lw| Particle {
+                trace: Trace::default(),
+                weight: 0.0,
+                log_weight: lw,
+            })
+            .collect();
+        normalize_particles(&mut particles);
+        let total: f64 = particles.iter().map(|p| p.weight).sum();
+        assert!((total - 1.0).abs() < 1e-12);
+        for p in &particles {
+            assert!(
+                (p.weight - p.log_weight.exp()).abs() < 1e-12,
+                "{:?}",
+                (p.weight, p.log_weight)
+            );
+        }
+        assert_eq!(particles[2].weight, 0.0);
+        assert_eq!(particles[4].weight, 0.0); // NaN input = zero probability
+
+        let mut rng = StdRng::seed_from_u64(3);
+        let model_fn = || {
+            sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap())
+                .bind(|mu| observe(addr!("y"), Normal::new(mu, 0.5).unwrap(), 1.0).map(move |_| mu))
+        };
+        let prior = smc_prior_particles(&mut rng, 50, model_fn);
+        for p in &prior {
+            assert!((p.weight - p.log_weight.exp()).abs() < 1e-12);
+        }
     }
 
     /// Regression (EA-as-PPL F1): rejuvenation must move non-F64 sites. The
@@ -1280,7 +1333,8 @@ mod tests {
     /// A value-independent, pair-symmetric mask: each of the two sites is
     /// included in the swap independently with probability 1/2.
     #[allow(clippy::type_complexity)]
-    fn random_site_mask() -> Box<dyn Fn(&Trace, &Trace, &mut dyn rand::RngCore) -> Vec<Address>> {
+    fn random_site_mask(
+    ) -> Box<dyn Fn(&Trace, &Trace, &mut dyn rand::RngCore) -> Vec<Address> + Send> {
         Box::new(|a: &Trace, _b: &Trace, rng: &mut dyn rand::RngCore| {
             a.choices
                 .keys()

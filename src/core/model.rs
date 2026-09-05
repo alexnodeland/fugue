@@ -56,8 +56,8 @@ pub enum Model<A> {
         /// Continuation function to apply to the sampled value.
         k: Box<dyn FnOnce(usize) -> Model<A> + Send + 'static>,
     },
-    /// Sample from an i64 distribution (signed discrete distributions, e.g. a
-    /// future `DiscreteUniform` over a signed range).
+    /// Sample from an i64 distribution (signed discrete distributions, e.g.
+    /// [`DiscreteUniform`](crate::DiscreteUniform) over a signed range).
     SampleI64 {
         /// Unique identifier for this sampling site.
         addr: Address,

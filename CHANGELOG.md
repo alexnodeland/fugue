@@ -160,6 +160,38 @@ For the initial 0.1.0 release notes, see `.github/CHANGELOG.md`.
   published library's `[dependencies]` are untouched. The MSRV CI job keeps
   its manifest-trimming step as a guard for the one remaining dev-dependency
   (`criterion`).
+- **FG-N9 lows**:
+  - *RJMCMC type-change bookkeeping*: a site that stays at the same address
+    but changes value type (`if b { sample("v", Normal) } else { sample("v",
+    Poisson) }`) is a death plus a birth. The single-site kernel counted only
+    the birth (the fresh sample's prior went into `log q_fwd`) and left the
+    old-typed site's prior out of `log q_rev`; `score_given_trace_reconciled`
+    likewise listed it under `fresh_addresses` but not `vanished_addresses`.
+    Both now report and correct both sides. Pinned by
+    `fgn9_type_change_at_same_address_is_corrected_on_both_sides` (analytic
+    `P(b=1)` with deliberately unequal prior entropies so the omission cannot
+    cancel; fails pre-fix) and
+    `fgn9_reconcile_report_lists_a_type_change_as_both_fresh_and_vanished`
+    (fails pre-fix).
+  - *`Particle` weight invariants*: `normalize_particles` now leaves
+    `weight == exp(log_weight)` and `Σ weight = 1` for every particle - it
+    used to normalize `weight` while leaving `log_weight` unnormalized, and in
+    the all-`-inf` fallback set `weight = 1/n` with `log_weight` still `-inf` -
+    so `smc_prior_particles`, `resample_particles` and `adaptive_smc` all
+    agree on what the two fields mean. NaN log-weights count as `-inf`
+    (FG-N2). Pinned by
+    `normalize_particles_keeps_weight_and_log_weight_consistent`.
+  - *`CrossoverKernel::mask` is `Box<dyn Fn(..) + Send>`* so a kernel can move
+    to a worker thread with the rest of an SMC run. Closures that capture only
+    `Send` state (every in-tree and fugue-evo mask) already satisfy it.
+  - *`Address::has_prefix`*: a lone trailing `':'` is no longer treated as a
+    segment separator - `"a:"` is not a prefix of `"a:b"`, and `"scope:"` is
+    not a prefix of `"scope::x"` (`"scope::"` still is). Pinned by
+    `fgn9_has_prefix_single_colon_is_not_a_separator`.
+  - *Docs*: the remaining "production-ready" claims in `AGENTS.md` and six
+    docs pages now say what the README says (well-tested, pre-1.0); the
+    `DiscreteUniform` distribution is no longer described as "future" in the
+    `Model::SampleI64` and `Handler::on_sample_i64` docs.
 
 ### Added
 

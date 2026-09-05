@@ -568,7 +568,7 @@ impl BatchProcessor {
 2. **Handler Flexibility**: The same model can be executed in radically different ways
 3. **Replay Foundation**: MCMC and other algorithms depend on deterministic replay
 4. **Custom Strategies**: Implement specialized inference through custom handlers
-5. **Production Ready**: Memory optimization and diagnostics enable robust deployment
+5. **Robust Workflows**: Memory optimization and diagnostics for long-running inference
 6. **Debugging Power**: Trace analysis reveals numerical issues and convergence problems
 ```
 

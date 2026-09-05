@@ -697,9 +697,20 @@ where
     // stored prior log-density (the reverse-birth proposal density) to
     // `log_q_reverse` cancels its contribution to `current`'s joint in the
     // acceptance ratio, completing the RJMCMC dimension-matching (FG-20/FG-21).
+    //
+    // An address that is still present but with a DIFFERENT value type is a
+    // death of the old-typed site followed by a birth of the new-typed one: the
+    // handler already counted the birth (it sampled the site fresh and added
+    // its prior density to `log_q_forward`), so the old site's prior density
+    // must enter `log_q_reverse` here too, or the type-changing move is
+    // corrected on one side only (FG-N9).
     let mut died = 0usize;
     for (addr, choice) in &current.choices {
-        if !trace.choices.contains_key(addr) {
+        let survives = trace
+            .choices
+            .get(addr)
+            .is_some_and(|c| c.value.type_name() == choice.value.type_name());
+        if !survives {
             lqr += choice.logp;
             died += 1;
         }
