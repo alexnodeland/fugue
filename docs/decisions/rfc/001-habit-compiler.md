@@ -1,10 +1,13 @@
 # RFC-001: Habit compiler — compiling agent behavior into System-One flows
 
-- **Status:** Draft
+- **Status:** Draft. The design was iterated with @alexnodeland on 2026-09-23; the decisions are in §3.11.
 - **Authors:** @alexnodeland (drafted with Claude Code)
 - **Created:** 2026-09-23
 - **Updated:** 2026-09-23
-- **Supersedes / Related:** runnable spike in [`001-habit-compiler/spike/`](001-habit-compiler/spike/); TypeSafe AI's Jev (released 2026-09-15)
+- **Supersedes / Related:**
+  - runnable spike in [`001-habit-compiler/spike/`](001-habit-compiler/spike/);
+  - implementation planned in a new repo, **stretto**;
+  - TypeSafe AI's Jev (released 2026-09-15).
 
 ---
 
@@ -22,6 +25,8 @@ At each branch point a flow asks the cheapest resolver the posterior says is goo
 
 Fugue supplies the representation. A flow is a `Model`, its branch points are addressed sites, and the harness is a `Handler`. So one flow can be simulated, executed, audited against recorded traces and evaluated counterfactually, just by swapping the interpreter. A spike ([Appendix A](#appendix-a-the-spike)) does all four on fugue 0.2.3 with no changes to the library, using mocks for the tools, the LLM and Jev.
 
+The first implementation, **stretto**, is a Rust MCP proxy. It serves compiled flows to the agent as `plan_*`/`commit_*` macro-tools, and its first evaluation is on τ²-bench (§3.11).
+
 ---
 
 ## 2. Context / Motivation
@@ -32,6 +37,7 @@ Fugue supplies the representation. A flow is a `Model`, its branch points are ad
   - `Choice`: up to 255 options; returns per-option probabilities and a confidence.
   - `Score`: 2–10 ordered levels.
   - `Noul`: the probability that a statement is true.
+- **The API.** One call is `POST https://api.typesafe.ai/v1/systemone` with a bearer token. The body is `state` plus a map of questions; each question has a `type`, `instructions` and `criteria`.
 - **Questions are independent.** All questions in a call are evaluated "in parallel and in isolation". Adding questions barely changes latency, so TypeSafe recommends speculative fan-out.
 - **Speed, price and context.**
   - 70–500 ms end to end.
@@ -50,20 +56,42 @@ Fugue supplies the representation. A flow is a `Model`, its branch points are ad
 
 Three facts line up:
 
-1. **Agent traces contain implicit programs.** Many production agent workloads (triage, runbooks, CI repair, ticket handling) walk the same few paths through their tool space.
+1. **Agent traces contain implicit programs.** Tool sequences are far more predictable than their arguments (0.87 against 0.69 similarity across runs [17]). Mapped to a small harness-level alphabet, they cost under one bit per step [8].
 2. **System-One models make branch decisions cheap,** but only inside a program with typed branch points.
-3. **Nobody derives those programs from behavior.** Nearby work does something else with the traces (§2.3):
-   - workflow induction extracts routines for an LLM to reuse;
-   - process mining describes flows;
-   - runtime verification learns models of agents in order to monitor them.
+3. **Nobody derives those programs from behavior and resolves their branch points with calibrated decisions.** The nearest work does something else:
+   - it compiles traces into workflows, but leaves the branches to the LLM or to hand-written rules [24];
+   - it skips the LLM one step at a time on an uncalibrated score [13];
+   - or it learns models of agents only in order to monitor them [1–4].
 
 The missing piece is a compiler from (1) to (2), and a probabilistic programming language (PPL) is the natural home for what it produces.
 
 ### 2.3 Related work
 
-_Filled in from the literature scan; see Appendix B for links._
+Every piece of this exists, and most of it appeared in the last twelve months. Nothing we found combines the pieces. The scan was run on 2026-09-23; numbers in brackets refer to Appendix B.
 
-<!-- RELATED-WORK -->
+| Strand | Closest work | What it does | What it leaves open |
+|---|---|---|---|
+| Learned models of agents, for assurance | AgentGuard [1], TriCEGAR [2], ProbGuard [3], TraceToChain [4], ATLAS [9], PrefixGuard [10] | Learn an MDP, DTMC or automaton from traces (online in [1, 2]); model-check it; flag, re-prompt or halt the agent | Only monitors. Mostly point estimates; [4] is the Bayesian exception, and it runs offline. Abstractions are hand-made [1], derived from specs [3] or from an LLM [9], or refined from counterexamples [2] |
+| How predictable tool sequences are | Automata from Agent Traces [8], AutoTool [13], How Consistent Are LLM Agents? [17] | 0.93 bits/step on harness-level alphabets, with structure "shaped more by the harness than by the LLM" [8]. Next-tool entropy drops from 3.50 to 1.93 bits with 2nd-order context [13] | This is both our motivation and our warning: arguments vary much more than tool choice [17] |
+| Compiling traces into workflows | TraceCompiler [24], Speculative Macro Commit [16], Act While Thinking [14], AWM / plan caching / AgentRR [25] | Mine argument dataflow and recurring macros, and compile them into mostly deterministic workflows (34 calls down to 11 on one task [24]) | Branch points go to the LLM or to hand-written rules [24]. Speculation keeps the LLM confirming every step [14–16] |
+| Skipping the LLM | AutoTool [13] | Executes the predicted next tool without the LLM when a score clears a threshold and the arguments can be filled; capped at 30% of steps | One step at a time, on a heuristic, uncalibrated score, with no outcome model |
+| Calibrated escalation | R2V Agent, ReDAct [23] | A calibrated router decides when a small model should hand a step to a large one. Escalating about 15% of steps can match running the large model throughout | The fast path is a generative small model, not a typed choice among a flow's options |
+| World models of tool environments | ToolEmu [18], StableToolBench / MirrorAPI / GTM [19], WMA / WebDreamer [20], MCP-Cosmos [21] | Simulate tool responses for testing, training or planning | Never used to authorize execution. LLM simulators are unreliable [18, 20] |
+| Secure plan-then-execute; PPL + LLM | _pending: literature scan still running_ | | |
+
+**What is new here.** Stated narrowly:
+
+1. **Calibrated, typed decisions at branch points.** These are the points TraceCompiler leaves to the LLM and AutoTool approximates with a heuristic score. Each one is resolved by the habit, a System-One model, the LLM or a person, chosen by expected loss.
+2. **Two continuously updated Bayesian models over the live tool manifest:**
+   - one of the agent, P(action | abstract state), used to find flows;
+   - one of the environment, P(outcome | state, action), used to check them.
+
+   Prior work either models only the environment [1, 2] or merges the two into one chain [3, 4, 9].
+3. **The model authorizes execution.** Simulation and model checking decide whether a flow is promoted, rather than only raising alerts.
+4. **One artifact, four uses.** A flow is a fugue program. Simulating, executing, auditing and evaluating it counterfactually are four handlers over the same object, and logged propensities make the last one possible.
+5. **Semantic predicates in TriCEGAR-style refinement.** Predicates are System-One questions about the raw state, and one is kept when it raises the marginal likelihood of the traces.
+
+A skeptical reviewer could describe this as "AutoTool + TraceCompiler + TriCEGAR + R2V". That is roughly right, and it is the argument for building it: each of those pieces lacks something another one supplies.
 
 ### 2.4 Goals and non-goals
 
@@ -87,18 +115,18 @@ _Filled in from the literature scan; see Appendix B for links._
 
 ### 3.1 Architecture
 
-The agent's tool calls pass through the harness, which records them and executes them. Recorded traces feed the world model and the compiler. Compiled flows run in the flow runtime, which resolves each decision site with the habit, Jev, the LLM or a person.
+The agent keeps its own loop. The proxy sits between the agent and its tools: it records every call, and it serves compiled flows as extra tools.
 
 ```text
-agent ──tool calls──► harness (MCP proxy / hooks) ──────────────► tools
-                         │ record                      ▲ execute
-                         ▼                             │
-                   trace store ──► world model ──► compiler ──► flows (fugue Models)
-                                        ▲                          │
-                                        └──── outcomes ◄── runtime (fugue Handler)
-                                                                   │ each decision site
-                                                                   ▼
-                                                   habit │ Jev │ LLM │ human
+agent (any MCP client)
+  │ tools/call: real tools, plus plan_<flow> / commit_<flow>
+  ▼
+stretto proxy (Rust) ──record──► trace store ──► world model ──► compiler
+  │   ▲                                               ▲             │
+  │   └── flow runtime (fugue Handler) ◄── flows ◄────┼─────────────┘
+  │          │ at each decision site: habit │ Jev │ LLM hand-back
+  ▼          ▼                              outcomes
+MCP servers (real tools)
 ```
 
 ### 3.2 The mapping onto fugue
@@ -112,6 +140,7 @@ agent ──tool calls──► harness (MCP proxy / hooks) ──────�
 | Simulate a flow | `PriorHandler` | The world model "dreaming" |
 | Conformance and surprise | `ScoreGivenTrace`, `score_given_trace_reconciled` | `fresh`/`vanished` addresses are structural deviations |
 | Counterfactual evaluation | Re-score a logged trace under a target flow | Log-ratio at decision sites is the importance weight |
+| `commit_*` after `plan_*` | Replay the planned trace (`ReplayHandler`) up to the confirmation site, then continue into the write sites | Every decision resolves exactly as it did at plan time |
 | Sub-flow extraction and splicing | `Trace::extract_prefix` / `graft_prefix` | From the F3 trace-surgery work |
 | Flow structure search | `block_regeneration_mh`, `PopulationKernel`, fugue-evo | From the EA-as-PPL work |
 | Online belief over latent task phase | SMC / particle filter | |
@@ -138,7 +167,15 @@ agent ──tool calls──► harness (MCP proxy / hooks) ──────�
 
 ### 3.4 State abstraction by predicate refinement
 
-The world model is only as good as its state abstraction. In the spike, a single hidden bit (whether the logs located the bug) made the model believe the greedy habit succeeds 99.9% of the time. In the environment it succeeds 94.5% of the time. The refinement loop:
+The world model is only as good as its state abstraction, and every prior system reports this as its hardest part [1–4, 9]. In the spike, a single hidden bit (whether the logs located the bug) made the model believe the greedy habit succeeds 99.9% of the time. In the environment it succeeds 94.5% of the time.
+
+TriCEGAR [2] already refines abstractions of agent traces with counterexamples, using predicate trees over typed lifecycle events. We add three things:
+
+- predicates about the *raw* state, evaluated by a System-One model;
+- selection by marginal likelihood;
+- a refined model that goes on to authorize execution, not only monitoring.
+
+The loop:
 
 1. **Detect aliasing.** Look for:
    - contexts whose next-action distribution stays high-entropy;
@@ -148,10 +185,11 @@ The world model is only as good as its state abstraction. In the spike, a single
 3. **Evaluate cheaply.** Jev answers each candidate question over the stored traces. At Jev's pricing that costs cents per thousand traces.
 4. **Keep what explains the data.** Keep a predicate if it raises the marginal likelihood of the trace corpus under the world model. This is closed form for the Dirichlet model and SMC evidence for latent-variable variants. Bayesian model selection supplies the Occam penalty.
 
-This is counterexample-guided abstraction refinement (CEGAR), with a System-One model as the predicate evaluator. It is the part of the system that learns.
-
 ### 3.5 Compiling flows
 
+- **Traces first; the policy checks.**
+  - Structure, argument dataflow and branch probabilities are mined from traces.
+  - A written policy, where one exists, is used only to name flows and to check the rule guards. It is never used to invent structure.
 - **Candidate regions** are sub-graphs of the world model with:
   - high visitation;
   - low conditional entropy given the available predicates;
@@ -161,15 +199,28 @@ This is counterexample-guided abstraction refinement (CEGAR), with a System-One 
   - the options, which are the successor abstract actions;
   - instructions derived from the LLM's own rationales in the traces;
   - a *state slice*: the minimal fields that predicted the branch. Jev's accuracy drops with irrelevant state, so the slice matters.
-- **Arguments** are handled according to the tool's JSON Schema:
+- **"The LLM names it, Jev finds it."** When the agent calls a macro-tool it has already read the conversation, so intent, descriptions and the user's stated reasons cost nothing to pass as arguments. Jev handles the decisions that arise *mid-flow*, over data the LLM has not seen:
+  - matching descriptions to fetched records ("the Boston trip next week" → one of N reservations);
+  - classifying stated reasons against the policy's categories;
+  - judging tool outputs (error, retry, alternative path, or hand back);
+  - picking the next sub-flow when the rule guards do not settle it.
+- **Rule guards (dates, amounts, eligibility) are code, never Jev.** Jev cannot compare dates or do arithmetic.
+  - An LLM compiles the domain policy into typed guard predicates once, offline.
+  - Each guard is tested against the successful traces.
+  - A person reviews any disagreement.
+- **Arguments**, handled according to the tool's JSON Schema:
   - `enum` → `Choice`; `boolean` → `Noul`; an optional argument → a "was it stated?" `Noul`. TypeSafe's function-calling cookbook does exactly this.
-  - A free-text argument becomes a dataflow binding from an earlier output, when the traces show the value the LLM used appearing verbatim in a prior observation.
-  - Otherwise it becomes a narrow LLM slot. If neither works, the region is not compiled.
+  - A free-text argument becomes a dataflow binding: from a macro-tool input, or from an earlier output where the traces show the value appearing verbatim (TraceCompiler's provenance classes [24]).
+  - Otherwise the region is not compiled.
+- **Writes go through plan/commit pairs.**
+  - `plan_<flow>` runs the lookups, the guards and the Jev decisions without writing anything. It returns the exact proposed write calls plus a token.
+  - The agent shows the proposal to the user and obtains an explicit "yes", as τ²-bench's policies require.
+  - `commit_<flow>(token)` then executes exactly what was planned, by replaying the planned trace up to the confirmation site and continuing into the write sites.
 - **Output is a serializable flow IR** (sites, questions, bindings, guards). It is interpreted into a fugue `Model` at load time. fugue-wasm's `dsl.rs` already interprets a `prob!` subset into real `Model`s at runtime; the flow IR generalizes that.
-- **Macro-tools (optional).** A compiled flow can be re-exposed to the agent as a new MCP tool, so the agent calls a twelve-step routine as one action. In options-framework terms:
+- **Macro-tools as options.** The proxy serves each flow as a pair of MCP tools. In options-framework terms:
   - the initiation set is the applicability predicate;
   - the intra-option policy is the flow;
-  - termination is completion or escalation.
+  - termination is completion, or a hand-back that names the unresolved site.
 
 ### 3.6 Execution: arbitration, not pooling
 
@@ -177,7 +228,7 @@ At each decision site the runtime picks the cheapest resolver whose expected los
 
 1. **Habit.** The world model's posterior predictive. Free and instant. Used when its top option is confident *and* is backed by enough evidence.
 2. **System-One oracle (Jev).** Consulted only where the habit is unsure. Its answer is treated as an observation from a sensor with a per-site confusion matrix learned from outcomes (Dawid–Skene style). That also repairs the fact that Jev's per-question probabilities are not jointly coherent.
-3. **LLM.** When both of the above are unsure, or when the site's stakes are high.
+3. **LLM.** Inside a macro-tool this means a hand-back: the flow returns the unresolved site, its options and the evidence gathered so far, and the agent decides.
 4. **Human.** When the action is irreversible and confidence is below the site's bar.
 
 Stakes come from MCP tool annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`). These are untrusted hints with pessimistic defaults, so the harness cross-checks them against side effects observed in the traces.
@@ -196,7 +247,7 @@ These numbers come from mocks and say nothing about real workloads; the mechanis
 The runtime also:
 
 - **Records every resolved decision** with its propensity (`Choice::logp`), its resolver, its question and a hash of its state slice.
-- **Watches surprise.** It tracks surprise per step. When surprise exceeds the site's threshold it ends the flow and hands the partial trace back to the LLM as context.
+- **Watches surprise.** It tracks surprise per step. When surprise exceeds the site's threshold it ends the flow with a hand-back.
 - **Speculates safely.** It pre-executes the most likely next call only if that call is read-only and idempotent.
 
 ### 3.7 Evaluation and assurance
@@ -228,7 +279,7 @@ Compiled flows are the "plan-then-execute" and "action-selector" patterns from t
 - control flow is fixed before any untrusted tool output is read;
 - the System-One model can only choose among enumerated options, so injected content can at worst pick a different *allowed* branch.
 
-That bounds the blast radius but is not immunity, because Jev "does not treat state as hostile by default". So:
+That bounds the blast radius but is not immunity. Jev "does not treat state as hostile by default", and calibration measured on benign traffic need not survive an attack [Ray 2026]. So:
 
 - keep untrusted tool output out of the state slices of high-stakes sites whenever trusted fields can decide the branch;
 - attach provenance to state slices, and raise the confidence bar when untrusted content is present;
@@ -236,19 +287,21 @@ That bounds the blast radius but is not immunity, because Jev "does not treat st
 
 ### 3.9 Where it lives
 
-A new crate, `fugue-flow`, depending on `fugue-ppl`:
+The implementation lives in a new repo, **stretto**, like fugue-evo does. In a fugue, a stretto is where entries of the subject overlap and compress: here, many traces compress into one flow.
 
-| Module | Contents |
+The proxy brings dependencies fugue core should not carry: an async runtime, an MCP SDK, HTTP clients and benchmark glue.
+
+| Crate | Contents |
 |---|---|
-| `ingest` | Trace readers: MCP JSON-RPC (proxy), Claude Code hook events, OpenTelemetry GenAI spans |
-| `model` | Abstraction, Dirichlet/Beta world model, back-off, forgetting, evidence |
-| `refine` | Predicate proposal and evaluation loop |
-| `compile` | Region mining, question specs from JSON Schema, flow IR, IR → `Model` |
-| `runtime` | Async `Handler`, arbitration, escalation, propensity logging |
-| `oracle` | `Oracle` trait; `JevOracle` behind a feature flag; mock and replay oracles |
-| `audit` | Conformance, surprise, per-site calibration, counterfactual evaluation |
+| `stretto-trace` | Canonical episode schema. Ingest from τ²-bench trajectory logs and proxy logs, and later from OpenTelemetry GenAI spans |
+| `stretto-model` | Abstraction, Dirichlet/Beta world model with back-off, forgetting and evidence, on fugue |
+| `stretto-oracle` | `Oracle` trait; Jev HTTP client; mock oracle; a replay cache keyed by content, so every Jev answer an experiment uses is paid for once and is reproducible |
+| `stretto-compile` | Flow mining, dataflow provenance, policy-guard checking, flow IR → fugue `Model` |
+| `stretto-proxy` | MCP proxy serving the real tools plus `plan_*`/`commit_*` macro-tools; runtime handler with arbitration and propensity logging |
+| `stretto-report` | Phase 0 and experiment reports |
+| `bench/tau2` (Python) | τ²-bench tools exposed as an MCP server bound to each task's environment; an agent that is an MCP client |
 
-The spike surfaced six changes to `fugue-ppl`, all additive:
+The spike surfaced six changes to `fugue-ppl`. All are additive, and they will go to this repo as their own PRs:
 
 1. **Async interpretation.**
    - Today `run` is a synchronous trampoline, but tool calls and Jev calls are network I/O.
@@ -274,28 +327,84 @@ The spike surfaced six changes to `fugue-ppl`, all additive:
 
 | Phase | Build | Gate to start |
 |---|---|---|
-| 0. Measure | Recorder; shadow-mode Jev at every LLM tool choice; Dirichlet world model; per-context report | None |
-| 1. Audit | Conformance, surprise, drift, process map (no behavior change) | Useful on its own |
-| 2. Compile and run | Flow IR, arbitration runtime, canary promotion | Phase 0 shows ≥ X% of LLM decisions compilable at ≤ Y pp success loss on a real workload |
-| 3. Learn | Predicate refinement, per-site counterfactual evaluation, macro-tools, flow search with fugue-evo | Phase 2 is live on one workload |
+| 0. Measure | Offline, on τ²-bench trajectories: the world model, plus Jev asked retrospectively at every recorded LLM decision ("replayed shadow mode") | None |
+| 1. Audit and proxy | Recording proxy; conformance, surprise and drift; guard compilation and checking against traces | Phase 0 numbers are in |
+| 2. Compile and run | Flow IR, plan/commit macro-tools, arbitration runtime, the experiment arms in §3.11 | Phase 0 shows ≥ X% of LLM decisions compilable at ≤ Y pp success loss |
+| 3. Learn | Predicate refinement, per-site counterfactual evaluation, flow search with fugue-evo, big-to-small transfer | Phase 2 results on airline and retail |
 
-The Phase 0 report gives, for each decision context:
+Replayed shadow mode is equivalent to live shadow mode, because Jev's answer depends only on the state we send it. It lets Phase 0 run on recorded trajectories before the proxy exists.
+
+For each decision context, the Phase 0 report gives:
 
 - the number of visits;
+- next-tool entropy;
 - the habit's top-option posterior, with a credible interval;
-- Jev's agreement with the LLM, and its calibration;
+- Jev's agreement with the LLM for each of the four roles in §3.5, and its calibration;
 - downstream success;
-- the share of LLM calls avoidable at a target error rate;
-- projected cost and latency.
+- argument provenance: closed-set, bound from input, copied from an earlier output, or generated;
+- the share of LLM turns avoidable at a target error rate.
+
+### 3.11 First experiment: τ²-bench
+
+These decisions were made during the 2026-09-23 design iteration.
+
+| Question | Decision |
+|---|---|
+| What v1 is for | Compile and run flows, measured first |
+| Workload | τ²-bench [26]: airline and retail first; telecom's dual-control domain later |
+| Where the harness plugs in | A Rust MCP proxy; flows served as macro-tools |
+| Jev | API access available. Jev owns the four mid-flow roles in §3.5 |
+| Writes | Plan/commit pairs; the agent obtains the user's explicit "yes" between them |
+| Rule guards | Compiled from the policy by an LLM, tested against traces, reviewed by a person |
+| Flow discovery | Traces first; the policy only names flows and checks guards |
+| Models | Staged. First the same model on both sides, for clean attribution. Then transfer: flows compiled from a frontier model's traces, run by a small model |
+| Checking raw writes | A separate experimental arm, so the gains from flows and from checking alone stay separable |
+| Win conditions | All four: fewer LLM calls, tokens and dollars; higher pass^k; Jev agreeing with the frontier model at branches, and well calibrated; fewer policy violations |
+| Code | New repo, stretto; fugue changes go upstream as their own PRs |
+
+**Experimental arms.** Each arm runs on held-out tasks, with k trials per task:
+
+| Arm | Agent sees | Branches resolved by |
+|---|---|---|
+| A | Raw tools | The LLM (baseline) |
+| B | Raw tools, with guard checks on writes | The LLM |
+| C | Raw tools + macro-tools | The LLM, via hand-back at every branch (TraceCompiler-like) |
+| D | Raw tools + macro-tools | Habit → Jev → LLM, by arbitration (ours) |
+| E | As D, plus guard checks on raw writes | As D |
+| A-small, D-small | The same arms, run by a small model with flows compiled from the frontier model's traces | |
+
+**Metrics**
+
+- LLM calls, tokens and dollars per task.
+- pass^1 … pass^k.
+- For each Jev role: agreement with the frontier model on held-out tasks, and calibration (ECE).
+- Policy violations:
+  - writes without a preceding confirmation;
+  - writes that fail the policy's guards;
+  - calls outside a flow's tool set.
+- Macro-tool adoption rate: agents given extra tools may not use them (see §4).
+- End-to-end latency.
 
 ---
 
 ## 4. Drawbacks
 
-- **Little to compile in open-ended work.** Coding agents on novel tasks may be mostly long tail. Phase 0 exists to find this out cheaply.
-- **Arguments are the hard part.** Most tool arguments are free text. When bindings cannot be recovered from earlier outputs, the region stays with the LLM.
-- **Vendor risk.** Jev is proprietary and in early access. It offers no fine-tuning, and there are no public accuracy benchmarks against human labels. Hence the `Oracle` trait.
-- **Evaluation is hard (§3.7).** Simulation is optimistic, counterfactual estimates are high-variance, and canaries cost traffic.
+- **Predictability has a ceiling.**
+  - For general agents, top-1 next-tool accuracy is 27.8% [14] and at most 55% [15]. Even with joint RL it reaches only 61–66%.
+  - Low entropy appears only after traces are mapped to small, harness-level alphabets [8].
+  - Coding agents on novel tasks may be mostly long tail. Phase 0 exists to measure all this cheaply.
+- **Arguments are the hard part.**
+  - They vary much more than tool choice [17].
+  - A region whose free-text arguments cannot be bound from macro-tool inputs or earlier outputs stays with the LLM.
+- **The harness changes its own data.**
+  - Once flows execute, the traces are produced by agent and harness together, so statistics learned from ungated traces need not describe the gated system [Ray 2026].
+  - Logged propensities and a little exploration mitigate this; they do not remove it.
+- **Macro-tools might go unused.** Agents given a world model as a tool used it less than 1% of the time [Qian 2026]. Adoption is a measured outcome, not an assumption. If it is low, we add a reference agent loop for the experiments.
+- **Vendor risk.** Jev is proprietary and in early access. It offers no fine-tuning, and there are no public accuracy benchmarks against human labels. Hence the `Oracle` trait and the replay cache.
+- **Evaluation is hard (§3.7).**
+  - Simulation is optimistic and counterfactual estimates are high-variance.
+  - Guarantees in the style of ProbGuard's PAC bounds call for 530 to 10⁵ traces [3].
+  - Canaries cost traffic.
 - **Drift.** A new LLM version, prompt or tool changes behavior. Compiled flows must be re-validated, not trusted forever.
 - **Scope.** This is a new product surface beside a PPL that is still pre-1.0 and has a single maintainer.
 
@@ -306,14 +415,14 @@ The Phase 0 report gives, for each decision context:
 - **Use Jev only as middleware** (LangChain's `ModelRouterMiddleware` and `AutoModeMiddleware`).
   - It is cheap, useful and orthogonal: it routes calls and gates risk.
   - But it learns nothing and compiles nothing.
-- **Distill the agent into a small policy model.** This is a strong baseline for cost, but:
-  - it gives no typed decision points and no per-decision probabilities to audit;
-  - it has no structure to verify;
-  - it needs retraining on every drift.
-- **LLM-based workflow induction.**
-  - It extracts routines as text or code for the LLM to reuse.
-  - Decisions stay with the LLM, and there is no calibrated fallback.
-- **Process mining plus hand-written flows.** This is descriptive: a person still writes the program, and there is no uncertainty.
+- **Skip single steps the way AutoTool does** [13].
+  - It is proven to cut LLM calls by up to 30%.
+  - But it works one step at a time on an uncalibrated score, with no outcome model and no way to verify anything. We use it as a comparison point, not as a design.
+- **Compile deterministic workflows the way TraceCompiler does** [24]. This is arm C. It shows how much of the gain comes from structure alone, before any calibrated branch resolution.
+- **Distill the agent into a small policy model, or use R2V-style escalation** [23].
+  - These are strong baselines for cost.
+  - But they give no typed decision points and no per-decision probabilities to audit.
+  - They have no structure to verify, and they need retraining on every drift.
 - **Plain counting instead of a PPL.**
   - Counting is fine for Phase 0, and we should use closed forms wherever they exist.
   - It stops being enough once we need any of these:
@@ -326,15 +435,12 @@ The Phase 0 report gives, for each decision context:
 
 ## 6. Unresolved questions
 
-1. **Which workload for Phase 0?** It needs repetition, real stakes and accessible traces.
-2. **Where should the harness sit first?** The options:
-   - Claude Code hooks: easy capture, limited control.
-   - An MCP proxy: framework-agnostic, full control.
-   - LangChain or Vercel middleware: where Jev already integrates.
-3. **How are compiled flows reviewed?** Probably as code, with the flow IR diffed in pull requests.
-4. **Where does the code live?** Should `fugue-flow` be in this repo, or in its own like fugue-evo?
-5. **Privacy.** Traces contain user data. The store should keep hashes and state slices, with retention limits.
-6. **What are X and Y** in the Phase 2 gate?
+1. **Phase 0 data.** Fresh τ²-bench runs (API spend), or published trajectories where they exist and are usable?
+2. **Models and budget.** Which frontier and small models, and how much can we spend?
+3. **The repo.** Visibility and license for stretto.
+4. **What are X and Y** in the Phase 2 gate?
+5. **How are compiled flows reviewed?** Probably as code, with the flow IR diffed in pull requests.
+6. **Privacy for non-benchmark workloads.** Traces contain user data. The store should keep hashes and state slices, with retention limits.
 
 ---
 
@@ -399,4 +505,69 @@ cargo run --release --manifest-path docs/decisions/rfc/001-habit-compiler/spike/
 
 ## Appendix B: references
 
-<!-- REFERENCES -->
+Papers marked "preprint" had no listed venue on the date of the scan (2026-09-23).
+
+**Learned models of agents, for assurance**
+
+1. R. Koohestani. *AgentGuard: Runtime Verification of AI Agents.* ASE 2025 AgenticSE workshop. <https://arxiv.org/abs/2509.23864>
+2. R. Koohestani et al. *TriCEGAR: A Trace-Driven Abstraction Mechanism for Agentic AI.* Preprint, 2026. <https://arxiv.org/abs/2601.22997>
+3. H. Wang, C. M. Poskitt, J. Wei, J. Sun. *ProbGuard: Proactive Runtime Monitoring for LLM Agent Safety via Probabilistic Prediction* (v1 title: *Pro2Guard*). ASE 2026. <https://arxiv.org/abs/2508.00500>
+4. P. T. Tran-Truong, X.-B. Le. *Measuring the Unmeasurable: Markov Chain Reliability for LLM Agents.* Preprint, 2026. <https://arxiv.org/abs/2604.24579>
+5. Z. Chen, M. Kang, B. Li. *ShieldAgent: Shielding Agents via Verifiable Safety Policy Reasoning.* ICML 2025. <https://arxiv.org/abs/2503.22738>
+   Also: H. Wang et al. *AgentSpec.* ICSE 2026. <https://arxiv.org/abs/2503.18666>
+6. F. Fournier, L. Limonad, Y. David. *Agentic AI Process Observability: Discovering Behavioral Variability.* PMAI 2025. <https://arxiv.org/abs/2505.20127>
+7. L. Lin et al. *Mining Workflow Graphs for Black-Box Boundary Testing of Conversational LLM Agents.* Preprint, 2026. <https://arxiv.org/abs/2607.06873>
+8. S. Cho et al. *Automata from Agent Traces: Failure and Next-Step Prediction.* Preprint, 2026. <https://arxiv.org/abs/2608.23670>
+9. I. D. Lopez-Miguel et al. *ATLAS: Discovering Agent Strategies through LLM-Guided Abstraction and Automata Learning.* MODELS 2026. <https://arxiv.org/abs/2608.14352>
+10. X. Huang et al. *PrefixGuard: From LLM-Agent Traces to Online Failure-Warning Monitors.* Preprint, 2026. <https://arxiv.org/abs/2605.06455>
+11. M. Tappler et al. *Automata Learning meets Shielding.* ISoLA 2022. <https://arxiv.org/abs/2212.01838>
+
+**Tool-sequence models, speculation and compilation**
+
+12. X. Liu et al. *ToolNet: Connecting Large Language Models with Massive Tools via Tool Graph.* Preprint, 2024. <https://arxiv.org/abs/2403.00839>
+13. J. Jia, Q. Li. *AutoTool: Efficient Tool Selection for Large Language Model Agents.* AAAI 2026. <https://arxiv.org/abs/2511.14650>
+14. Y. Sui et al. *Act While Thinking* (now *Parallelizing Tool Execution and LLM Generation for Low-Latency Agent Serving*). Preprint, 2026. <https://arxiv.org/abs/2603.18897>
+15. N. Ye et al. *Speculative Actions: A Lossless Framework for Faster AI Agents.* ICLR 2026. <https://arxiv.org/abs/2510.04371>
+16. Z. Liu, S. Kundu, P. A. Beerel. *Speculative Macro Commit for Faster Tool-Using Agents.* MLSP 2026. <https://arxiv.org/abs/2609.03236>
+17. A. Yagubyan. *How Consistent Are LLM Agents? Measuring Behavioral Reproducibility in Multi-Step Tool-Calling Pipelines.* Preprint, 2026. <https://arxiv.org/abs/2605.28840>
+
+**World models of tool environments**
+
+18. Y. Ruan et al. *Identifying the Risks of LM Agents with an LM-Emulated Sandbox* (ToolEmu). ICLR 2024. <https://arxiv.org/abs/2309.15817>
+19. Z. Guo et al. *StableToolBench* (<https://arxiv.org/abs/2403.07714>) and *MirrorAPI* (<https://arxiv.org/abs/2503.20527>); Z. Ren et al. *GTM* (<https://arxiv.org/abs/2512.04535>).
+20. H. Chae et al. *Web Agents with World Models.* ICLR 2025. <https://arxiv.org/abs/2410.13232>
+    Y. Gu et al. *Is Your LLM Secretly a World Model of the Internet?* <https://arxiv.org/abs/2411.06559>
+21. G. Ganapavarapu, D. Patel. *MCP-Cosmos: World Model-Augmented Agents for Complex Task Execution in MCP Environments.* Preprint, 2026. <https://arxiv.org/abs/2605.09131>
+22. Y. Zuo et al. *Qwen-AgentWorld.* Preprint, 2026. <https://arxiv.org/abs/2606.24597>
+    Z. Wang et al. *Agent World Model.* ICML 2026. <https://arxiv.org/abs/2602.10090>
+
+**Escalation and flow reuse**
+
+23. R. V. Hemadri et al. *R2V Agent: Teaching SLMs When to Ask for Help.* Preprint, 2026. <https://arxiv.org/abs/2605.16604>
+    D. Piatrashyn et al. *ReDAct.* Preprint, 2026. <https://arxiv.org/abs/2604.07036>
+24. S. El Yadouni, G. Li. *TraceCompiler: Skill-Guided Mining and Compilation of LLM Agent Traces into Mostly Deterministic Workflows.* Preprint, 2026. <https://arxiv.org/abs/2608.02680>
+25. Z. Z. Wang et al. *Agent Workflow Memory.* ICML 2025 (<https://arxiv.org/abs/2409.07429>). Q. Zhang et al. *Agentic Plan Caching.* NeurIPS 2025 (<https://arxiv.org/abs/2506.14852>). E. Feng et al. *AgentRR* (<https://arxiv.org/abs/2505.17716>).
+
+**Benchmark**
+
+26. V. Barrès, H. Dong, S. Ray, X. Si, K. Narasimhan. *τ²-Bench: Evaluating Conversational Agents in a Dual-Control Environment.* 2025. <https://arxiv.org/abs/2506.07982>; code at <https://github.com/sierra-research/tau2-bench>
+
+**Pitfalls cited in §3.8 and §4**
+
+- S. Ray. *What Can Be Enforced? A Theory of Certified Runtime Safety for Tool-Using Agents.* Preprint, 2026. <https://arxiv.org/abs/2607.22868>
+- C. Qian et al. *Current Agents Fail to Leverage World Model as Tool for Foresight.* Preprint, 2026. <https://arxiv.org/abs/2601.03905>
+
+**Foundations**
+
+- N. D. Daw, Y. Niv, P. Dayan. *Uncertainty-based competition between prefrontal and dorsolateral striatal systems for behavioral control.* Nature Neuroscience, 2005.
+- E. Clarke et al. *Counterexample-Guided Abstraction Refinement.* CAV 2000.
+- A. P. Dawid, A. M. Skene. *Maximum Likelihood Estimation of Observer Error-Rates Using the EM Algorithm.* JRSS C, 1979.
+- R. S. Sutton, D. Precup, S. Singh. *Between MDPs and semi-MDPs: A framework for temporal abstraction in reinforcement learning.* Artificial Intelligence, 1999.
+- R. P. Adams, D. J. C. MacKay. *Bayesian Online Changepoint Detection.* 2007.
+- M. Dudík, J. Langford, L. Li. *Doubly Robust Policy Evaluation and Learning.* ICML 2011.
+
+**TypeSafe and MCP**
+
+- TypeSafe AI. *Introducing System One Models & Jev* (<https://typesafe.ai/blog/introducing-system-one-models-and-jev>). Docs, including the API reference, confidence, jev-1.13 jaggedness and cookbooks: <https://docs.typesafe.ai/llms.txt>
+- LangChain. *Building a harness with Jev.* <https://www.langchain.com/blog/building-a-harness-with-jev>
+- Model Context Protocol blog. *Tool Annotations as Risk Vocabulary: What Hints Can and Can't Do.* 2026-03-16. <https://blog.modelcontextprotocol.io/posts/2026-03-16-tool-annotations/>
