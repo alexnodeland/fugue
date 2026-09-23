@@ -329,7 +329,7 @@ The spike surfaced six changes to `fugue-ppl`. All are additive, and they will g
 |---|---|---|
 | 0. Measure | Offline, on τ²-bench trajectories: the world model, plus Jev asked retrospectively at every recorded LLM decision ("replayed shadow mode") | None |
 | 1. Audit and proxy | Recording proxy; conformance, surprise and drift; guard compilation and checking against traces | Phase 0 numbers are in |
-| 2. Compile and run | Flow IR, plan/commit macro-tools, arbitration runtime, the experiment arms in §3.11 | Phase 0 shows ≥ X% of LLM decisions compilable at ≤ Y pp success loss |
+| 2. Compile and run | Flow IR, plan/commit macro-tools, arbitration runtime, the experiment arms in §3.11 | Held-out projections show ≥ 20% fewer LLM turns at ≤ 1 point of pass^1 lost |
 | 3. Learn | Predicate refinement, per-site counterfactual evaluation, flow search with fugue-evo, big-to-small transfer | Phase 2 results on airline and retail |
 
 Replayed shadow mode is equivalent to live shadow mode, because Jev's answer depends only on the state we send it. It lets Phase 0 run on recorded trajectories before the proxy exists.
@@ -354,6 +354,11 @@ These decisions were made during the 2026-09-23 design iteration.
 - **Argument binding.** Identifiers, items, payment methods and flights in write calls are almost always copied from earlier outputs or user messages. What agents generate is mostly closed-set choices and arithmetic.
 - **Where a content-blind habit fails.** A habit that sees only the action sequence can act on just 6–8% of the decisions made right after a tool returns (at τ = 0.8). Continuing a run depends on what the tool returned, which is where a System-One model is needed.
 - **Transfer.** A habit learned from one model predicts another within 3–7 points of top-1.
+- **Code features and a named intent.**
+  - Code features were read from tool outputs and selected by cross-validation grouped by task. The grouping is needed because task-identifying fields fool in-sample evidence.
+  - Adding them, plus the intent a macro-tool call names, raises the share of retail decisions the habit could take at τ = 0.8 from 15% to 24%. Airline stays near 12%.
+  - About three quarters of decisions still need content-aware judgment. That residual is what Jev is measured on in Phase 0b.
+- **Results page:** [Stretto Phase 0](https://claude.ai/artifact/FWzzt74xNUWoaeq5seua6t). It is private by default; the owner shares it from the page.
 
 | Question | Decision |
 |---|---|
@@ -370,6 +375,8 @@ These decisions were made during the 2026-09-23 design iteration.
 | Checking raw writes | A separate experimental arm, so the gains from flows and from checking alone stay separable |
 | Win conditions | All four: fewer LLM calls, tokens and dollars; higher pass^k; Jev agreeing with the frontier model at branches, and well calibrated; fewer policy violations |
 | Code | New public repo, [stretto](https://github.com/alexnodeland/stretto) (MIT); fugue changes go upstream as their own PRs |
+| Phase 2 gate | ≥ 20% fewer LLM turns at ≤ 1 point of pass^1 lost, on held-out tasks |
+| Keys | TypeSafe, GLM and MiniMax keys are added later; until then stretto runs offline with mock and replay oracles |
 
 **Experimental arms.** Each arm runs on held-out tasks, with k trials per task:
 
@@ -447,9 +454,8 @@ These decisions were made during the 2026-09-23 design iteration.
 1. **Phase 0 data.** Fresh τ²-bench runs (API spend), or published trajectories where they exist and are usable?
 2. **Models and budget.** Which frontier and small models, and how much can we spend?
 3. **The repo.** Visibility and license for stretto.
-4. **What are X and Y** in the Phase 2 gate?
-5. **How are compiled flows reviewed?** Probably as code, with the flow IR diffed in pull requests.
-6. **Privacy for non-benchmark workloads.** Traces contain user data. The store should keep hashes and state slices, with retention limits.
+4. **How are compiled flows reviewed?** Probably as code, with the flow IR diffed in pull requests.
+5. **Privacy for non-benchmark workloads.** Traces contain user data. The store should keep hashes and state slices, with retention limits.
 
 ---
 
