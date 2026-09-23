@@ -6,7 +6,7 @@
 - **Updated:** 2026-09-23
 - **Supersedes / Related:**
   - runnable spike in [`001-habit-compiler/spike/`](001-habit-compiler/spike/);
-  - implementation planned in a new repo, **stretto**;
+  - implementation in a new repo, [**stretto**](https://github.com/alexnodeland/stretto), with first results in [`docs/results/phase0-2026-09-23.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/phase0-2026-09-23.md);
   - TypeSafe AI's Jev (released 2026-09-15).
 
 ---
@@ -348,6 +348,13 @@ For each decision context, the Phase 0 report gives:
 
 These decisions were made during the 2026-09-23 design iteration.
 
+**Phase 0a results.** stretto measured τ²-bench's published airline and retail trajectories: four models, 4 trials per task, habit trained on the official train split and tested on the held-out split. No API keys were needed.
+
+- **Macro-tool headroom.** 24–25% of LLM turns sit inside runs of tool calls that a macro-tool could perform in one call.
+- **Argument binding.** Identifiers, items, payment methods and flights in write calls are almost always copied from earlier outputs or user messages. What agents generate is mostly closed-set choices and arithmetic.
+- **Where a content-blind habit fails.** A habit that sees only the action sequence can act on just 6–8% of the decisions made right after a tool returns (at τ = 0.8). Continuing a run depends on what the tool returned, which is where a System-One model is needed.
+- **Transfer.** A habit learned from one model predicts another within 3–7 points of top-1.
+
 | Question | Decision |
 |---|---|
 | What v1 is for | Compile and run flows, measured first |
@@ -355,12 +362,14 @@ These decisions were made during the 2026-09-23 design iteration.
 | Where the harness plugs in | A Rust MCP proxy; flows served as macro-tools |
 | Jev | API access available. Jev owns the four mid-flow roles in §3.5 |
 | Writes | Plan/commit pairs; the agent obtains the user's explicit "yes" between them |
+| Branches nothing in the flow can settle | Resumable: the flow pauses and returns a token; `resume_<flow>(token, choice)` continues it. Plan/commit is the same mechanism, paused at the confirmation site |
 | Rule guards | Compiled from the policy by an LLM, tested against traces, reviewed by a person |
 | Flow discovery | Traces first; the policy only names flows and checks guards |
-| Models | Staged. First the same model on both sides, for clean attribution. Then transfer: flows compiled from a frontier model's traces, run by a small model |
+| Models | Transfer first. Flows are compiled from published frontier-model trajectories (free to us) and run by GLM (Z.ai) and MiniMax on their subscription keys. American frontier models come later. Cost is kept to a minimum |
+| Phase 0 data | τ²-bench's published trajectories |
 | Checking raw writes | A separate experimental arm, so the gains from flows and from checking alone stay separable |
 | Win conditions | All four: fewer LLM calls, tokens and dollars; higher pass^k; Jev agreeing with the frontier model at branches, and well calibrated; fewer policy violations |
-| Code | New repo, stretto; fugue changes go upstream as their own PRs |
+| Code | New public repo, [stretto](https://github.com/alexnodeland/stretto) (MIT); fugue changes go upstream as their own PRs |
 
 **Experimental arms.** Each arm runs on held-out tasks, with k trials per task:
 
