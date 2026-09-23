@@ -449,11 +449,13 @@ Phase 0 finished on τ²-bench's published trajectories: the four 2025 baselines
   - at p ≥ 0.9 it covers a third of decisions, at 92–93% agreement.
 - **Closed-set arguments:**
   - 98.5% agreement in retail, where the values are things like a cancellation reason;
-  - 58% in airline, where they are counts that need arithmetic. §3.5 already assigns those to code.
+  - 58% in airline. Two things drive that:
+    - baggage counts (33–45%), which need arithmetic, and §3.5 already assigns to code;
+    - composite arguments such as `flights`, which the v1 question builder wrongly offered as closed sets of other episodes' values. That is fixed.
 - **Projected with the validated habit:**
   - Trusting Jev at p ≥ 0.9, flows save 3.9% of LLM turns in retail and 4.7% in airline, with a risky call in 6.2% and 13.1% of episodes.
   - Lower thresholds save more (15% and 12% at p ≥ 0.5), but put a risky call in half to two thirds of episodes.
-  - A two-key rule is being replayed from the cached answers. Under it, Jev's pick counts only when it is also the habit's top option. Its numbers will be in the stretto summary.
+  - A two-key rule, where Jev's pick counts only when it is also the habit's top option, cuts risk only a little. At p ≥ 0.9 it saves 3.0% with 4.4% risky in retail, and 2.9% with 8.4% in airline.
   - No agent model passes the gate.
 - **The v1 questions were deliberately naive.** Every tool was an option, and the state was the whole recent transcript.
   - §3.5 specifies narrower questions: options limited to the successors seen at the site, a state slice, and instructions drawn from the traces.

@@ -260,12 +260,38 @@ fn random_allowed(allowed: &[bool; K], rng: &mut dyn RngCore) -> Tool {
     opts[rng.gen_range(0..opts.len())]
 }
 
+/// The mock LLM: with probability `skill` it takes the competent next step,
+/// otherwise a random exposed tool. It never calls a tool the manifest does
+/// not expose; when the competent step is unexposed it picks at random.
 fn llm_choice(env: &Env, allowed: &[bool; K], skill: f64, rng: &mut dyn RngCore) -> Tool {
     if rng.gen_bool(skill) {
-        env.best_next()
+        let best = env.best_next();
+        if allowed[idx(best)] {
+            best
+        } else {
+            random_allowed(allowed, rng)
+        }
     } else {
         random_allowed(allowed, rng)
     }
+}
+
+/// The probability that [`llm_choice`] returns `tool`: the behavior-policy
+/// propensity logged for an escalated decision.
+fn llm_prob(env: &Env, allowed: &[bool; K], skill: f64, tool: Tool) -> f64 {
+    if !allowed[idx(tool)] {
+        return 0.0;
+    }
+    let n = allowed.iter().filter(|&&a| a).count() as f64;
+    let best = env.best_next();
+    let skilled = if !allowed[idx(best)] {
+        1.0 / n
+    } else if tool == best {
+        1.0
+    } else {
+        0.0
+    };
+    skill * skilled + (1.0 - skill) / n
 }
 
 fn llm_episode(
@@ -379,17 +405,14 @@ impl Handler for HarnessHandler<'_> {
         };
         let conf = probs.iter().cloned().fold(0.0, f64::max);
         let (a, logp) = if conf < self.escalate_below {
-            // The LLM's propensity is unknown; log 0.0 and count it.
+            // Escalate. The mock LLM's policy is known, so log its actual
+            // probability of the choice; a real LLM's propensity would have to
+            // be estimated, or the decision excluded from off-policy
+            // evaluation.
             self.stats.escalations += 1;
-            (
-                idx(llm_choice(
-                    self.env,
-                    &self.allowed,
-                    self.llm_skill,
-                    self.rng,
-                )),
-                0.0,
-            )
+            let tool = llm_choice(self.env, &self.allowed, self.llm_skill, self.rng);
+            let p = llm_prob(self.env, &self.allowed, self.llm_skill, tool);
+            (idx(tool), p.ln())
         } else if self.greedy {
             let a = argmax(&probs);
             (a, 0.0) // deterministic: propensity 1
@@ -798,5 +821,42 @@ fn main() {
             truth[ti],
             w_sum * w_sum / w2_sum
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// With the competent step unexposed (reading logs, at the start), the
+    /// mock LLM still only calls exposed tools, and its logged propensities
+    /// are a distribution over exactly those tools.
+    #[test]
+    fn escalation_respects_the_manifest_and_logs_true_propensities() {
+        let env = Env::default();
+        assert_eq!(env.best_next(), Tool::ReadLogs);
+        let mut allowed = [true; K];
+        allowed[idx(Tool::ReadLogs)] = false;
+        let mut rng = StdRng::seed_from_u64(1);
+        for _ in 0..2000 {
+            let t = llm_choice(&env, &allowed, LLM_SKILL, &mut rng);
+            assert!(allowed[idx(t)], "called unexposed {t:?}");
+        }
+        let total: f64 = TOOLS
+            .iter()
+            .map(|&t| llm_prob(&env, &allowed, LLM_SKILL, t))
+            .sum();
+        assert!((total - 1.0).abs() < 1e-12, "{total}");
+        assert_eq!(llm_prob(&env, &allowed, LLM_SKILL, Tool::ReadLogs), 0.0);
+    }
+
+    /// With every tool exposed, the competent step gets the skill plus its
+    /// share of the random choice.
+    #[test]
+    fn the_competent_step_carries_the_skill() {
+        let env = Env::default();
+        let allowed = [true; K];
+        let p = llm_prob(&env, &allowed, LLM_SKILL, Tool::ReadLogs);
+        assert!((p - (LLM_SKILL + (1.0 - LLM_SKILL) / K as f64)).abs() < 1e-12);
     }
 }
