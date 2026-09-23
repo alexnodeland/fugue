@@ -1,12 +1,12 @@
 # RFC-001: Habit compiler — compiling agent behavior into System-One flows
 
-- **Status:** Accepted (2026-09-23, [#51](https://github.com/alexnodeland/fugue/pull/51)). The design was iterated with @alexnodeland on 2026-09-23; the decisions are in §3.11.
+- **Status:** Accepted (2026-09-23, [#51](https://github.com/alexnodeland/fugue/pull/51)); amended the same day with what Phase 0 found (§3.12). The design was iterated with @alexnodeland on 2026-09-23; the decisions are in §3.11.
 - **Authors:** @alexnodeland (drafted with Claude Code)
 - **Created:** 2026-09-23
 - **Updated:** 2026-09-23
 - **Supersedes / Related:**
   - runnable spike in [`001-habit-compiler/spike/`](001-habit-compiler/spike/);
-  - implementation in a new repo, [**stretto**](https://github.com/alexnodeland/stretto), with first results in [`docs/results/phase0-2026-09-23.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/phase0-2026-09-23.md);
+  - implementation in a new repo, [**stretto**](https://github.com/alexnodeland/stretto), with results in [`docs/results/phase0-2026-09-23.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/phase0-2026-09-23.md) (Phase 0a) and [`docs/results/phase0b-2026-09-23-summary.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/phase0b-2026-09-23-summary.md) (Phase 0b, Jev);
   - TypeSafe AI's Jev (released 2026-09-15).
 
 ---
@@ -370,14 +370,14 @@ These decisions were made during the 2026-09-23 design iteration.
 | Branches nothing in the flow can settle | Resumable: the flow pauses and returns a token; `resume_<flow>(token, choice)` continues it. Plan/commit is the same mechanism, paused at the confirmation site |
 | Rule guards | Compiled from the policy by an LLM, tested against traces, reviewed by a person |
 | Flow discovery | Traces first; the policy only names flows and checks guards |
-| Models | Transfer first. Flows are compiled from published frontier-model trajectories (free to us) and run by GLM (Z.ai) and MiniMax on their subscription keys. American frontier models come later. Cost is kept to a minimum |
+| Models | Transfer first. Flows are compiled from published frontier-model trajectories (free to us) and run by GLM (Z.ai) and MiniMax on their subscription keys. American frontier models come later. Cost is kept to a minimum. *Amended:* compile from the 2026 frontier runs on Sierra's leaderboard, which transfer to GLM-5 better than the 2025 baselines (§3.12) |
 | Phase 0 data | τ²-bench's published trajectories |
 | Checking raw writes | A separate experimental arm, so the gains from flows and from checking alone stay separable |
 | Win conditions | All four: fewer LLM calls, tokens and dollars; higher pass^k; Jev agreeing with the frontier model at branches, and well calibrated; fewer policy violations |
 | Code | New public repo, [stretto](https://github.com/alexnodeland/stretto) (MIT); fugue changes go upstream as their own PRs |
-| Phase 2 gate | ≥ 20% fewer LLM turns at ≤ 1 point of pass^1 lost, on held-out tasks. Tokens and dollars are projected alongside turns, because a flow also keeps intermediate tool outputs out of the LLM's context |
-| Arbitration | The habit acts only in contexts where its held-out agreement is at least 99%, validated per context rather than by one global threshold. Jev decides everywhere else |
-| Keys | TypeSafe, GLM and MiniMax keys are added later; until then stretto runs offline with mock and replay oracles |
+| Phase 2 gate | ≥ 20% fewer LLM turns at ≤ 1 point of pass^1 lost, on held-out tasks, *judged per agent model and domain* (amended: the savings depend on how the agent calls tools, §3.12). Tokens and dollars are projected alongside turns, because a flow also keeps intermediate tool outputs out of the LLM's context |
+| Arbitration | The habit acts only in contexts where its held-out agreement is at least 99%, validated per context rather than by one global threshold. Jev decides everywhere else. *Amended:* validation needs at least 20 decisions from at least 10 distinct tasks; what survives is hand-backs only, so the rule is revisited with the Phase 0b data (§3.12) |
+| Keys | The TypeSafe key is in the environment (Phase 0b ran on 2026-09-23); GLM and MiniMax keys come with Phase 2. Offline work uses mock and replay oracles |
 
 **Experimental arms.** Each arm runs on held-out tasks, with k trials per task:
 
@@ -401,6 +401,70 @@ These decisions were made during the 2026-09-23 design iteration.
   - calls outside a flow's tool set.
 - Macro-tool adoption rate: agents given extra tools may not use them (see §4).
 - End-to-end latency.
+
+### 3.12 Amendment 1: what Phase 0 found (2026-09-23)
+
+Phase 0 finished on τ²-bench's published trajectories: the four 2025 baselines, plus nine current models from Sierra's leaderboard used only as transfer targets. Phase 0b then asked Jev at every held-out decision a flow would hand it. Four findings changed the plan; §3.11's decisions table is updated to match.
+
+**1. The gate depends on how the agent calls tools, so it is judged per model and domain.**
+
+- Held-out episodes were replayed through `plan_*` flows, with the habit acting only where validated and a System-One model that always agrees with the agent deciding the rest.
+  - Pooled over the 2025 baselines, flows save 22.3% of LLM turns in retail and 20.6% in airline.
+  - They save 27–28% of input tokens, because a collapsed run also stops carrying its intermediate tool outputs.
+- Per model the spread is wide:
+
+  | Agent model | Parallel tool turns (retail / airline) | Turns saved, retail | Turns saved, airline (ceiling) |
+  |---|---|---|---|
+  | Qwen3.5-397B | 0% / 0% | 43.5% | 44.1% (53.1%) |
+  | Claude Sonnet 4.5 | 11% / 4% | 32.1% | 33.2% (42.5%) |
+  | GPT-5.2, reasoning high | 19% / 37% | 28.6% | 20.8% (26.9%) |
+  | GLM-5 | 27% / 45% | 29.1% | 15.4% (18.9%) |
+  | Claude Opus 4.5 | 28% / 41% | 28.6% | 13.4% (18.2%) |
+
+- Agents that call tools one at a time leave long runs to collapse. Agents that batch independent calls have already done part of that work.
+- For GLM-5 and Claude Opus 4.5 in airline, even collapsing every run falls short of 20%.
+- So the gate is judged for each (agent model, domain) pair, and GLM's and MiniMax's parallel-call rates are the first thing Phase 2 measures.
+
+**2. Validation must count tasks, and what it validates is a stopping rule.**
+
+- Every task repeats across trials and agent models, so its decisions are near-copies.
+  - Trained on the 2026 frontier runs, one airline context validated at 100% of 28 decisions drawn from a few tasks.
+  - On held-out tasks it held 43%, and put a risky call in 10% of episodes.
+- Validation now also requires 10 distinct tasks.
+- With that rule, each domain keeps one validated context, and both are hand-backs to the LLM:
+  - The habit adds safety but no automation.
+  - Every in-flow decision falls to the System-One model: about 7.5 per episode.
+
+**3. Compile from current frontier runs.** Here is how well habits learned from other models predict GLM-5's held-out actions (top-1):
+
+- **Retail:** Claude Sonnet 4.5 67%, Claude Opus 4.5 66%, Gemini 3 Flash 66%. GLM-5's own habit gets 67%, and the 2025 baselines 56–63%.
+- **Airline:** Claude Opus 4.5 62%, Gemini 3 Pro 62%, Gemini 3 Flash 62%. GLM-5's own habit gets only 57%, and the 2025 baselines 48–57%.
+
+**4. Zero-shot Jev is well calibrated, but not accurate enough to carry a flow.** jev-1.13.0 answered all 8,946 questions (28M input tokens, $1.19).
+
+- **Next step** (which tool comes next, or hand back):
+  - it agrees with the agent 72% of the time in both domains;
+  - it is right about stopping versus going on 76% of the time;
+  - its expected calibration error is 0.06;
+  - at p ≥ 0.9 it covers a third of decisions, at 92–93% agreement.
+- **Closed-set arguments:**
+  - 98.5% agreement in retail, where the values are things like a cancellation reason;
+  - 58% in airline, where they are counts that need arithmetic. §3.5 already assigns those to code.
+- **Projected with the validated habit:**
+  - Trusting Jev at p ≥ 0.9, flows save 3.9% of LLM turns in retail and 4.7% in airline, with a risky call in 6.2% and 13.1% of episodes.
+  - Lower thresholds save more (15% and 12% at p ≥ 0.5), but put a risky call in half to two thirds of episodes.
+  - A two-key rule is being replayed from the cached answers. Under it, Jev's pick counts only when it is also the habit's top option. Its numbers will be in the stretto summary.
+  - No agent model passes the gate.
+- **The v1 questions were deliberately naive.** Every tool was an option, and the state was the whole recent transcript.
+  - §3.5 specifies narrower questions: options limited to the successors seen at the site, a state slice, and instructions drawn from the traces.
+  - §3.6 combines Jev with the habit through a per-site confusion matrix, instead of taking Jev at its word.
+  - Those are the next Phase 0b iterations. They are measured offline in the same way, for about $1 per full pass.
+- Agreement with the agent is a conservative proxy. A different but equally valid next step counts as a disagreement, so the live runs in Phase 2 remain the real test.
+
+**Also done.** Phase 1's recording proxy ([`stretto-proxy`](https://github.com/alexnodeland/stretto/tree/main/crates/stretto-proxy)):
+
+- It forwards every MCP line unchanged and records sessions, which `stretto-trace` reads into episodes.
+- Serving flows as macro-tools and checking writes against compiled guards come next.
 
 ---
 
@@ -452,11 +516,18 @@ These decisions were made during the 2026-09-23 design iteration.
 
 ## 6. Unresolved questions
 
-1. **Phase 0 data.** Fresh τ²-bench runs (API spend), or published trajectories where they exist and are usable?
-2. **Models and budget.** Which frontier and small models, and how much can we spend?
-3. **The repo.** Visibility and license for stretto.
+1. ~~**Phase 0 data.**~~ Resolved: published trajectories, including Sierra's leaderboard runs.
+2. ~~**Models and budget.**~~ Resolved: transfer first, run by GLM and MiniMax, at minimum cost (§3.11).
+3. ~~**The repo.**~~ Resolved: [stretto](https://github.com/alexnodeland/stretto), public, MIT.
 4. **How are compiled flows reviewed?** Probably as code, with the flow IR diffed in pull requests.
 5. **Privacy for non-benchmark workloads.** Traces contain user data. The store should keep hashes and state slices, with retention limits.
+6. **What should a System-One decision be scored against?**
+   - Agreement with the agent undercounts valid alternatives, such as looking up two orders in either order.
+   - Replayed outcomes can't settle this, so only live pass^1 can.
+7. **Can System-One questions reach roughly 99% agreement on the decisions flows need?**
+   - This is the crux after Phase 0b.
+   - Candidates are narrower questions (§3.5), a Bayesian combination with the habit (§3.6), and a stop question asked on its own.
+   - Failing that, flows could be restricted to the sites where Jev is reliable, at lower savings.
 
 ---
 
@@ -472,6 +543,11 @@ These decisions were made during the 2026-09-23 design iteration.
     - a System-One model that always agrees with the agent would save 20.5–22%.
 
     So the next step, Phase 0b, measures Jev's actual agreement and calibration inside flows, and projects tokens and dollars alongside turns.
+  - Amended the same day (§3.12), after Phase 0b:
+    - the gate is judged per agent model and domain;
+    - context validation counts distinct tasks;
+    - flows are compiled from the 2026 frontier runs;
+    - zero-shot Jev, as asked in v1, saves only 4–5% of turns at acceptable risk. The next iterations target the question design and arbitration that §3.5–3.6 specify.
 
 ---
 
