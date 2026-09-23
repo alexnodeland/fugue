@@ -1,6 +1,6 @@
 # RFC-001: Habit compiler — compiling agent behavior into System-One flows
 
-- **Status:** Draft. The design was iterated with @alexnodeland on 2026-09-23; the decisions are in §3.11.
+- **Status:** Accepted (2026-09-23, [#51](https://github.com/alexnodeland/fugue/pull/51)). The design was iterated with @alexnodeland on 2026-09-23; the decisions are in §3.11.
 - **Authors:** @alexnodeland (drafted with Claude Code)
 - **Created:** 2026-09-23
 - **Updated:** 2026-09-23
@@ -375,7 +375,8 @@ These decisions were made during the 2026-09-23 design iteration.
 | Checking raw writes | A separate experimental arm, so the gains from flows and from checking alone stay separable |
 | Win conditions | All four: fewer LLM calls, tokens and dollars; higher pass^k; Jev agreeing with the frontier model at branches, and well calibrated; fewer policy violations |
 | Code | New public repo, [stretto](https://github.com/alexnodeland/stretto) (MIT); fugue changes go upstream as their own PRs |
-| Phase 2 gate | ≥ 20% fewer LLM turns at ≤ 1 point of pass^1 lost, on held-out tasks |
+| Phase 2 gate | ≥ 20% fewer LLM turns at ≤ 1 point of pass^1 lost, on held-out tasks. Tokens and dollars are projected alongside turns, because a flow also keeps intermediate tool outputs out of the LLM's context |
+| Arbitration | The habit acts only in contexts where its held-out agreement is at least 99%, validated per context rather than by one global threshold. Jev decides everywhere else |
 | Keys | TypeSafe, GLM and MiniMax keys are added later; until then stretto runs offline with mock and replay oracles |
 
 **Experimental arms.** Each arm runs on held-out tasks, with k trials per task:
@@ -461,10 +462,16 @@ These decisions were made during the 2026-09-23 design iteration.
 
 ## 7. Decision
 
-(To be filled in once reviewed)
+- **Outcome:** Accepted on 2026-09-23 by @alexnodeland (merged in [#51](https://github.com/alexnodeland/fugue/pull/51)).
+- **Notes:**
+  - Implementation proceeds in [stretto](https://github.com/alexnodeland/stretto).
+  - The fugue changes in §3.9 land as their own PRs.
+  - Phase 0 results so far:
+    - macro-tool headroom is 23–25% of LLM turns;
+    - the habit alone saves 0–2%;
+    - a System-One model that always agrees with the agent would save 20.5–22%.
 
-- Outcome: Accepted | Rejected | Deferred
-- Notes from discussion.
+    So the next step, Phase 0b, measures Jev's actual agreement and calibration inside flows, and projects tokens and dollars alongside turns.
 
 ---
 
