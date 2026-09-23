@@ -1,0 +1,14 @@
+# Throwaway spike for RFC-001. Standalone on purpose: its own [workspace]
+# keeps it out of the fugue workspace and out of CI. Run it with
+#   cargo run --release --manifest-path docs/decisions/rfc/001-habit-compiler/spike/Cargo.toml
+[package]
+name = "rfc-001-spike"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+fugue = { package = "fugue-ppl", path = "../../../../.." }
+rand = "0.8"
