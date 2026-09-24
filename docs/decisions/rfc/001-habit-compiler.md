@@ -1,15 +1,17 @@
 # RFC-001: Habit compiler — compiling agent behavior into System-One flows
 
-- **Status:** Accepted (2026-09-23, [#51](https://github.com/alexnodeland/fugue/pull/51)). Amended the same day with what Phase 0 found (§3.12, [#52](https://github.com/alexnodeland/fugue/pull/52)) and with Phase 0b v2's read-only flows and arbitration (§3.13). The design was iterated with @alexnodeland on 2026-09-23; the decisions are in §3.11.
+- **Status:** Accepted (2026-09-23, [#51](https://github.com/alexnodeland/fugue/pull/51)). Amended the same day with what Phase 0 found (§3.12, [#52](https://github.com/alexnodeland/fugue/pull/52)) and with Phase 0b v2's read-only flows and arbitration (§3.13, [#53](https://github.com/alexnodeland/fugue/pull/53)), and on 2026-09-24 with the first live form and pilot (§3.14). The design was iterated with @alexnodeland on 2026-09-23; the decisions are in §3.11.
 - **Authors:** @alexnodeland (drafted with Claude Code)
 - **Created:** 2026-09-23
-- **Updated:** 2026-09-23
+- **Updated:** 2026-09-24
 - **Supersedes / Related:**
   - runnable spike in [`001-habit-compiler/spike/`](001-habit-compiler/spike/);
   - implementation in a new repo, [**stretto**](https://github.com/alexnodeland/stretto), with results in:
     - [`docs/results/phase0-2026-09-23.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/phase0-2026-09-23.md) (Phase 0a);
     - [`docs/results/phase0b-2026-09-23-summary.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/phase0b-2026-09-23-summary.md) (Phase 0b, Jev);
     - [`docs/results/phase0b-v2-2026-09-23-summary.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/phase0b-v2-2026-09-23-summary.md) (Phase 0b v2);
+    - [`docs/results/phase0b-v2-goal-free-2026-09-24-summary.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/phase0b-v2-goal-free-2026-09-24-summary.md) (v2 without a goal);
+    - [`pilot/README.md`](https://github.com/alexnodeland/stretto/blob/main/pilot/README.md#results-so-far) (the live pilot);
   - TypeSafe AI's Jev (released 2026-09-15).
 
 ---
@@ -28,7 +30,7 @@ At each branch point a flow asks the cheapest resolver the posterior says is goo
 
 Fugue supplies the representation. A flow is a `Model`, its branch points are addressed sites, and the harness is a `Handler`. So one flow can be simulated, executed, audited against recorded traces and evaluated counterfactually, just by swapping the interpreter. A spike ([Appendix A](#appendix-a-the-spike)) does all four on fugue 0.2.3 with no changes to the library, using mocks for the tools, the LLM and Jev.
 
-The first implementation, **stretto**, is a Rust MCP proxy. It serves compiled flows to the agent as `plan_*`/`commit_*` macro-tools, and its first evaluation is on τ²-bench (§3.11).
+The first implementation, **stretto**, is a Rust MCP proxy. It serves compiled flows to the agent as `plan_*`/`commit_*` macro-tools, and its first evaluation is on τ²-bench (§3.11). *Amended (§3.14):* its first live form adds no tools. A read-only flow runs behind the agent's own calls and returns its lookups with each result.
 
 ---
 
@@ -202,7 +204,7 @@ The loop:
   - the options, which are the successor abstract actions;
   - instructions derived from the LLM's own rationales in the traces;
   - a *state slice*: the minimal fields that predicted the branch. Jev's accuracy drops with irrelevant state, so the slice matters.
-- **"The LLM names it, Jev finds it."** When the agent calls a macro-tool it has already read the conversation, so intent, descriptions and the user's stated reasons cost nothing to pass as arguments. Jev handles the decisions that arise *mid-flow*, over data the LLM has not seen:
+- **"The LLM names it, Jev finds it."** When the agent calls a macro-tool it has already read the conversation, so intent, descriptions and the user's stated reasons cost nothing to pass as arguments. *Amended (§3.14):* a read-only flow needs no name; measured without the goal, it agrees and saves as much. Jev handles the decisions that arise *mid-flow*, over data the LLM has not seen:
   - matching descriptions to fetched records ("the Boston trip next week" → one of N reservations);
   - classifying stated reasons against the policy's categories;
   - judging tool outputs (error, retry, alternative path, or hand back);
@@ -252,7 +254,7 @@ The runtime also:
 
 - **Records every resolved decision** with its propensity (`Choice::logp`), its resolver, its question and a hash of its state slice.
 - **Watches surprise.** It tracks surprise per step. When surprise exceeds the site's threshold it ends the flow with a hand-back.
-- **Speculates safely.** It pre-executes the most likely next call only if that call is read-only and idempotent.
+- **Speculates safely.** It pre-executes the most likely next call only if that call is read-only and idempotent. *Amended (§3.14):* the first live form is this, run as a flow, with the results returned to the agent.
 
 ### 3.7 Evaluation and assurance
 
@@ -368,7 +370,7 @@ These decisions were made during the 2026-09-23 design iteration.
 |---|---|
 | What v1 is for | Compile and run flows, measured first |
 | Workload | τ²-bench [26]: airline and retail first; telecom's dual-control domain later |
-| Where the harness plugs in | A Rust MCP proxy; flows served as macro-tools |
+| Where the harness plugs in | A Rust MCP proxy; flows served as macro-tools. *Amended:* the first live form runs behind the agent's own tool calls, with no new tools (arm D0, §3.14) |
 | Jev | API access available. Jev owns the four mid-flow roles in §3.5 |
 | Writes | Plan/commit pairs; the agent obtains the user's explicit "yes" between them. *Amended:* between LLM turns flows only read; every write goes back to the LLM, so a wrong pick is a detour rather than a risk (§3.13) |
 | Branches nothing in the flow can settle | Resumable: the flow pauses and returns a token; `resume_<flow>(token, choice)` continues it. Plan/commit is the same mechanism, paused at the confirmation site |
@@ -392,6 +394,7 @@ These decisions were made during the 2026-09-23 design iteration.
 | C | Raw tools + macro-tools | The LLM, via hand-back at every branch (TraceCompiler-like) |
 | D | Raw tools + macro-tools | Habit → Jev → LLM, by arbitration (ours) |
 | E | As D, plus guard checks on raw writes | As D |
+| D0 | Raw tools; each result may carry a read-only flow's lookups (§3.14) | Habit and Jev by arbitration, for lookups only; the LLM for everything else |
 | A-small, D-small | The same arms, run by a small model with flows compiled from the frontier model's traces | |
 
 **Metrics**
@@ -558,6 +561,67 @@ What this changes:
 - **The offline gate is now turns saved.** Detours are counted and charged in tokens. The live pilot must show that they do not cost pass^1 before anything is deployed.
 - **The pilot model is chosen by the projection.** Offline, Qwen3.5 is the strongest candidate. GLM-5, whose key is at hand, clears the gate only in retail, and only with the predicates.
 
+### 3.14 Amendment 3: the first live form (2026-09-24)
+
+stretto ran flows live for the first time, in τ²-bench retail:
+
+- **Agent:** GLM-5.3, in Claude Code on Z.ai's GLM Coding Plan (§6, question 8). GLM-5.3 also plays the customer, from τ²-bench's user-simulator prompt. The reward is τ²-bench's database check; its natural-language assertions need an LLM judge and were left out.
+- **Tools:** τ²-bench's, served over MCP behind stretto's recording proxy.
+- **Flow:** compiled from the 2025 baselines without a goal, and served by `stretto flow-serve`. It asks Jev live, through the replay cache.
+- **Details:** stretto's [pilot results](https://github.com/alexnodeland/stretto/blob/main/pilot/README.md#results-so-far) and [goal-free summary](https://github.com/alexnodeland/stretto/blob/main/docs/results/phase0b-v2-goal-free-2026-09-24-summary.md).
+
+Five findings; §3.11, §4 and §6 are updated to match.
+
+**1. The goal adds nothing to read-only flows.** Every v2 run gave flows the episode's goal (the writes it goes on to make), as a macro-tool call would name it (§3.5). Asked again without it, 8,092 questions for $0.93, pooled over the 2025 baselines:
+
+| | Retail, with goal | Retail, without | Airline, with goal | Airline, without |
+|---|---|---|---|---|
+| Next step, combined answer | 80.5% | 80.5% | 78.9% | 78.4% |
+| Turns saved, lookup first, p ≥ 0.3 | 17.4% | 17.3% | 12.8% | 12.6% |
+| Episodes with a detour | 67.3% | 62.3% | 57.2% | 60.0% |
+
+- GLM-5 still clears the gate in retail: 20.3% without the goal, 20.5% with it.
+- This fits what read-only flows do. They hand every write back. What they decide, which record to look up next and whether there is enough, is in the lookups already made and in what the customer said.
+
+**2. So the first live form needs no macro-tool.** In arm D0, after each of the agent's own tool calls, the flow asks its questions, makes the lookups it is sure enough of, and returns them in the same tool response, until it hands back.
+
+- It is §3.6's safe speculation, run as a flow, with the results given to the agent.
+- It adds no tools and changes no prompt, which sidesteps the adoption risk in §4.
+- Flows that end in writes are still named by the LLM, as `plan_*` and `commit_*` (§3.5).
+
+**3. Arguments: act on the probability of the whole call.** Offline, an argument counted as bindable when its value appeared earlier in the episode (§3.12). Live, the flow has to pick one.
+
+- For each lookup argument, it learns from training where the values came from: a tool and a path in its result, such as `get_user_details` at `$.orders[*]`.
+- It takes the first value there that has not been looked up yet, preferring one the customer mentioned.
+- It acts when the tool's probability times the binding's agreement is at least 0.3. The agreement is how often that choice matched the agent's own arguments in training: 92% for orders and 60% for products the customer did not mention (95% and 76% when mentioned).
+- On one trial of GLM-5's recorded test episodes (40 episodes; see finding 4), the rule cut detours from 42 to 18 without losing a saved turn. 89% of the flow's lookups were then the agent's own, up from 78%.
+
+**4. The live flow reproduces the projection.** GLM-5's recorded retail test episodes were replayed through the live flow, with real Jev answers and no LLM; a recorded call the flow had already made was skipped.
+
+- Over all four trials, 160 episodes and 1,384 LLM turns, it saved 294 turns (21.2%). The offline projection for the same episodes saves 281 (20.3%).
+- Detours came up in 27 episodes, against 45 projected, and 91% of the flow's lookups were the agent's own.
+- Where the flow follows the agent's path, it asks byte-identical questions to the offline run, so they are served from the replay cache.
+
+**5. Live, the agent uses the flow's lookups.** Ten retail test tasks, drawn at random, ran once in each arm:
+
+| | Without the flow | With the flow |
+|---|---|---|
+| LLM turns | 110 | 84 (24% fewer) |
+| Agent input tokens | 723,926 | 571,528 (21% fewer) |
+| Passed the database check | 8 of 10 | 8 of 10 |
+
+- Per episode the flow saved 2.6 LLM turns (95% interval 1.0 to 4.2), with fewer turns in 9 of the 10 pairs.
+- The flow acted on 9 of the 10 tasks, with 26 lookups, and the agent repeated 3 of them. On those tasks, turns fell by 26%. The one task where it never acted took a turn more, from the simulated customer.
+- The two failures were the same agent error in both arms: a return processed before the exchange it blocked, and a wrong variant.
+- Ten pairs cannot bound a one-point loss of pass^1. They show that the mechanism works live and give a first effect size.
+- The pilot cost 236 Z.ai credits at the off-peak rate, and the arm with the flow used 16% fewer. That is about 12 per episode, where Z.ai's Lite plan allows 2,000 per 5 hours.
+
+What this changes:
+
+- **Arm D0** joins §3.11's arms: raw tools, with a read-only flow behind them.
+- **The pilot model** is GLM-5.3, the model the Z.ai key serves (§6, question 8).
+- **Next:** a paired run large enough to bound pass^1 and the cost of detours; airline; and the sequential callers the projection favors, once a key for them is at hand.
+
 ---
 
 ## 4. Drawbacks
@@ -572,7 +636,7 @@ What this changes:
 - **The harness changes its own data.**
   - Once flows execute, the traces are produced by agent and harness together, so statistics learned from ungated traces need not describe the gated system [Ray 2026].
   - Logged propensities and a little exploration mitigate this; they do not remove it.
-- **Macro-tools might go unused.** Agents given a world model as a tool used it less than 1% of the time [Qian 2026]. Adoption is a measured outcome, not an assumption. If it is low, we add a reference agent loop for the experiments.
+- **Macro-tools might go unused.** Agents given a world model as a tool used it less than 1% of the time [Qian 2026]. Adoption is a measured outcome, not an assumption. If it is low, we add a reference agent loop for the experiments. *Amended (§3.14):* the first live form adds no tools. What must be measured instead is whether the agent repeats the flow's lookups.
 - **Vendor risk.** Jev is proprietary and in early access. It offers no fine-tuning, and there are no public accuracy benchmarks against human labels. Hence the `Oracle` trait and the replay cache.
 - **Evaluation is hard (§3.7).**
   - Simulation is optimistic and counterfactual estimates are high-variance.
@@ -617,12 +681,13 @@ What this changes:
    - Agreement with the agent undercounts valid alternatives, such as looking up two orders in either order.
    - Replayed outcomes can't settle this, so only live pass^1 can.
    - With read-only flows the question narrows: does a detour (an extra lookup before handing back) ever cost pass^1? (§3.13)
+   - First live evidence (§3.14): 8 of 10 episodes passed the database check without the flow and 8 of 10 with it. That is too few to bound a one-point loss.
 7. ~~**Can System-One questions reach roughly 99% agreement on the decisions flows need?**~~ Answered for now (§3.13):
    - No. The best combination reaches 79–81%, and at least 0.99 sure only on 11–25% of decisions.
    - Read-only flows don't need it: acting on weaker picks costs detours, not risk.
-8. **Which agent model runs the first live pilot?**
-   - Offline, Qwen3.5 clears the gate in both domains. Qwen3-Max does too, but in airline only with lookup first.
-   - GLM-5, whose key is at hand, clears it only in retail, and only with the state predicates.
+8. ~~**Which agent model runs the first live pilot?**~~ Resolved (§3.14): GLM-5.3, the model the Z.ai coding-plan key serves.
+   - Offline, Qwen3.5 clears the gate in both domains, and Qwen3-Max does too (airline with lookup first). They are next once a key for them is at hand.
+   - GLM-5 clears it in retail only, with the state predicates, with or without the goal.
 
 ---
 
@@ -647,6 +712,11 @@ What this changes:
     - flows only read between LLM turns, so offline the gate is turns saved, and detours are for the live pilot to clear;
     - Jev's answers are combined with the habit, its per-site record and state predicates;
     - offline, Qwen3.5 clears the gate in both domains (Qwen3-Max too, with lookup first in airline); GLM-5 only in retail.
+  - Amended on 2026-09-24 (§3.14), after the first live runs:
+    - the goal adds nothing to read-only flows, so the first live form runs behind the agent's own calls, with no new tools (arm D0);
+    - live lookups act on the tool's probability times the binding's agreement in training;
+    - replayed through the live flow, GLM-5's recorded test episodes save 21.2% of LLM turns (20.3% projected);
+    - live, on ten paired retail tasks, GLM-5.3 took 24% fewer LLM turns with the flow (8 and 8 of 10 passed the database check).
 
 ---
 
