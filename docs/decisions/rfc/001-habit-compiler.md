@@ -1,6 +1,6 @@
 # RFC-001: Habit compiler — compiling agent behavior into System-One flows
 
-- **Status:** Accepted (2026-09-23, [#51](https://github.com/alexnodeland/fugue/pull/51)). Amended the same day with what Phase 0 found (§3.12, [#52](https://github.com/alexnodeland/fugue/pull/52)) and with Phase 0b v2's read-only flows and arbitration (§3.13, [#53](https://github.com/alexnodeland/fugue/pull/53)), and on 2026-09-24 with the first live form and pilot (§3.14, [#54](https://github.com/alexnodeland/fugue/pull/54)), with the built implementation, the airline pilot, policy guards and the flow audit (§3.15, [#55](https://github.com/alexnodeland/fugue/pull/55)), with the arms measured before building macro-tools (§3.16, [#56](https://github.com/alexnodeland/fugue/pull/56)), and with the habit alone live, fewer traces and Jev as a confirmation judge (§3.17, [#58](https://github.com/alexnodeland/fugue/pull/58)). The design was iterated with @alexnodeland on 2026-09-23; the decisions are in §3.11.
+- **Status:** Accepted (2026-09-23, [#51](https://github.com/alexnodeland/fugue/pull/51)). Amended the same day with what Phase 0 found (§3.12, [#52](https://github.com/alexnodeland/fugue/pull/52)) and with Phase 0b v2's read-only flows and arbitration (§3.13, [#53](https://github.com/alexnodeland/fugue/pull/53)), and on 2026-09-24 with the first live form and pilot (§3.14, [#54](https://github.com/alexnodeland/fugue/pull/54)), with the built implementation, the airline pilot, policy guards and the flow audit (§3.15, [#55](https://github.com/alexnodeland/fugue/pull/55)), with the arms measured before building macro-tools (§3.16, [#56](https://github.com/alexnodeland/fugue/pull/56)), with the habit alone live, fewer traces and Jev as a confirmation judge (§3.17, [#58](https://github.com/alexnodeland/fugue/pull/58)), and with a cold start from an agent's own sessions, options from the manifest, a second confirmation question and matching descriptions to records (§3.18, [#59](https://github.com/alexnodeland/fugue/pull/59)). The design was iterated with @alexnodeland on 2026-09-23; the decisions are in §3.11.
 - **Authors:** @alexnodeland (drafted with Claude Code)
 - **Created:** 2026-09-23
 - **Updated:** 2026-09-24
@@ -20,6 +20,10 @@
     - [`docs/results/pilot-habit-2026-09-24.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/pilot-habit-2026-09-24.md) (the habit alone, live);
     - [`docs/results/sweep-2026-09-24.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/sweep-2026-09-24.md) (fewer traces);
     - [`docs/results/confirm-2026-09-24.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/confirm-2026-09-24.md) (Jev as a confirmation judge);
+    - [`docs/results/cold-start-2026-09-24.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/cold-start-2026-09-24.md) (a cold start from an agent's own sessions);
+    - [`docs/results/manifest-options-2026-09-24.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/manifest-options-2026-09-24.md) (options from the tool manifest);
+    - [`docs/results/confirm-second-2026-09-24.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/confirm-second-2026-09-24.md) (a second confirmation question);
+    - [`docs/results/matching-2026-09-24.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/matching-2026-09-24.md) (matching descriptions to records);
     - the working paper, [alexnodeland.github.io/stretto](https://alexnodeland.github.io/stretto/);
   - TypeSafe AI's Jev (released 2026-09-15).
 
@@ -270,6 +274,8 @@ The runtime also:
 
 *Amended (§3.17):* only once there are enough traces. With the habit trained on three retail tasks, the arbitration above saves 20.4% of turns and the habit alone 1.8%. A deployment starts on the arbiter, and the habit takes over the savings as its traces accumulate.
 
+*Amended (§3.18):* not for a deployment's own first sessions. §3.17's samples were clustered, and its arbiter was fitted on thousands of other agents' decisions. From a random handful of an agent's own sessions, the habit alone saved more than an arbiter fitted on those sessions until about twenty of them. A deployment starts on the habit alone, can carry an arbiter fitted elsewhere as insurance against a narrow start, and fits its own once it has enough sessions.
+
 ### 3.7 Evaluation and assurance
 
 - **Shadow, then canary, then promote.** A site is automated only after:
@@ -396,7 +402,7 @@ These decisions were made during the 2026-09-23 design iteration.
 | Win conditions | All four: fewer LLM calls, tokens and dollars; higher pass^k; Jev agreeing with the frontier model at branches, and well calibrated; fewer policy violations |
 | Code | New public repo, [stretto](https://github.com/alexnodeland/stretto) (MIT); fugue changes go upstream as their own PRs |
 | Phase 2 gate | ≥ 20% fewer LLM turns at ≤ 1 point of pass^1 lost, on held-out tasks, *judged per agent model and domain* (amended: the savings depend on how the agent calls tools, §3.12; *and harness*, §3.15). Tokens and dollars are projected alongside turns, because a flow also keeps intermediate tool outputs out of the LLM's context. *Amended again:* read-only flows take no risky decisions, so offline the gate is turns saved. Detours are counted and charged in tokens, and the live pilot must show they cost no pass^1 (§3.13) |
-| Arbitration | The habit acts only in contexts where its held-out agreement is at least 99%, validated per context rather than by one global threshold. Jev decides everywhere else. *Amended:* validation needs at least 20 decisions from at least 10 distinct tasks; what survives is hand-backs only, so the rule is revisited with the Phase 0b data (§3.12). *Amended again:* Jev's answers are no longer taken at their word. A conditional logit combines them with the habit's prior, Jev's record at the site and state predicates, fitted by cross-validation over tasks (§3.13). *And again:* for read-only flows, optional. The habit alone saves as many turns, and the arbiter makes fewer detours (§3.16). *And again:* optional only with enough traces. With few, the arbiter carries the savings (§3.17) |
+| Arbitration | The habit acts only in contexts where its held-out agreement is at least 99%, validated per context rather than by one global threshold. Jev decides everywhere else. *Amended:* validation needs at least 20 decisions from at least 10 distinct tasks; what survives is hand-backs only, so the rule is revisited with the Phase 0b data (§3.12). *Amended again:* Jev's answers are no longer taken at their word. A conditional logit combines them with the habit's prior, Jev's record at the site and state predicates, fitted by cross-validation over tasks (§3.13). *And again:* for read-only flows, optional. The habit alone saves as many turns, and the arbiter makes fewer detours (§3.16). *And again:* optional only with enough traces. With few, the arbiter carries the savings (§3.17). *And again:* not with a deployment's own few sessions, where the habit alone did better until about twenty (§3.18) |
 | Keys | The TypeSafe key is in the environment (Phase 0b ran on 2026-09-23); GLM and MiniMax keys come with Phase 2. Offline work uses mock and replay oracles |
 
 **Experimental arms.** Each arm runs on held-out tasks, with k trials per task:
@@ -833,6 +839,63 @@ What this changes:
 
 ---
 
+### 3.18 Amendment 7: a cold start from an agent's own sessions, options from the manifest, and two content roles (2026-09-24)
+
+Four follow-ups to §3.17, each on §6's question 9: where does a System-One model earn its place? A flow was learned from an agent's own first sessions, offline and live. Flows were offered every read-only tool in the manifest. The confirmation judge got a second question. And Jev was asked to match descriptions to records. The live runs cost 182 Z.ai credits of the 200 approved. Jev's 25,981 new answers cost $2.33: $0.62 for the cold start, $1.17 for options from the manifest, $0.25 for the confirmation's second question and $0.29 for matching. They are published, so every result here replays without a key.
+
+- **Details:** stretto's [cold start](https://github.com/alexnodeland/stretto/blob/main/docs/results/cold-start-2026-09-24.md), [options from the manifest](https://github.com/alexnodeland/stretto/blob/main/docs/results/manifest-options-2026-09-24.md), [second confirmation question](https://github.com/alexnodeland/stretto/blob/main/docs/results/confirm-second-2026-09-24.md), [matching](https://github.com/alexnodeland/stretto/blob/main/docs/results/matching-2026-09-24.md) and [answer bundle](https://github.com/alexnodeland/stretto/blob/main/docs/results/answers-2026-09-24-cold-manifest-match.md), and the [working paper](https://alexnodeland.github.io/stretto/)'s §5.10–5.14.
+
+Five findings, one of them a correction; §3.6, §3.11, §4, §6 and §7 are updated to match.
+
+**1. A cold start needs no arbiter of its own.** `stretto learn` holds out 30% of a deployment's sessions, by task, and fits one arbiter on Jev's answers there. Offline, flows learned from GLM-5's own published sessions (trial 0 of each training task drawn) replayed its test episodes as in §3.17:
+
+| Domain | Sessions | The arbiter flow: turns saved (detours) | The habit alone: turns saved (detours) |
+|---|---|---|---|
+| Retail | 5, four random draws | 6.5–16.5% | 11.8–18.9% |
+| Retail | 5, clustered by task id | 7.9% (16) | 2.7% (16) |
+| Retail | 10 | 11.6% (25) | 20.9% (51) |
+| Retail | 20 | 22.6% (31) | 20.4% (34) |
+| Retail | 40 | 23.9% (160) | 22.4% (58) |
+| Retail | 74, all | 22.3% (47) | 22.4% (51) |
+| Airline | 5, 10 and 20 | 4.3–6.3% | 8.7% |
+| Airline | 30, all | 6.2% (39) | 8.7% (85) |
+
+- The arbiter flow trails the habit alone until about twenty sessions, and in airline at every size tried. The split takes 30% of the sessions from the habit, the sites and the bindings, and eight weights fitted on 3–11 decisions land anywhere: across the five-session draws, the weight on the habit ran from −0.32 to 0.30.
+- Which sessions a flow starts from matters more than how it decides. From five retail sessions the habit alone saved 11.8–18.9% on the four random draws, and 2.7% on one clustered by task id, like §3.17's samples.
+- Two repairs were tried. Refitting the habit on every session once the arbiter is fitted (`--refit-habit`) was no remedy: its arbiter met sites it never saw fitted, and on one draw made 355 detours. Taking the arbiter of the all-task flow, fitted on four other agents' 4,513 decisions (`--arbiter-from`), lifted the clustered draw from 2.7% to 11.1%, and changed the random ones by −1.9 to +0.1 points.
+- Live, GLM-5.3 in Claude Code recorded five retail training sessions through the proxy, and `stretto learn --sessions` learned a flow from them. Replayed on GLM-5's 40 trial-0 test episodes, it saved 19.0% of turns, against D0's 22.2%. On three of the pilot's tasks it took 12 LLM turns where the agent alone took 19, 14 where it took 16, and 26 where it took 14: on that task the agent failed as before, and the simulated customer kept talking after a transfer. The harness now ends an episode at a transfer, as τ²-bench's customer is told to. Three tasks show that such a flow runs live, not what it saves.
+
+**2. Correction to §3.17: its samples were clustered.** `--train-fraction` ranked tasks by an FNV-1a hash that barely mixes an id's last characters, so neighbouring ids sorted together. The three retail tasks were 104, 105 and 109, and the seven were 103–107, 109 and 113. Neighbouring τ²-bench tasks often share a customer and a kind of request, so those samples are narrower than random ones. §3.17's numbers hold for the tasks drawn, but its crossover rests on one clustered draw. The sampler now mixes its order first, and `--train-tasks` names a sample exactly, so each of the sweep's flows can be rebuilt.
+
+**3. Options from the manifest add nothing; bindings are the limit.** `--manifest-options` offers every read-only tool at every site, so Jev can choose a lookup no trace showed. The flow binds such a lookup by argument name. On the sweep's one- and three-task samples:
+
+- In retail it saves what it saved before (10.0% and 20.3% of turns), with up to twice the detours. The arbiter keeps to the lookups the habit knows.
+- In airline the fitted arbiter gives the habit almost no weight, so Jev's picks bring in flight searches no trace showed. Bound by name, a search takes its origin, destination and date from the flights just returned or from the reservation, not from the trip the customer wants. Nearly every one is a detour: 83 and 91, against 0 and 1 without. With one task the flow saves 1.1% of turns where it saved nothing; with three, 3.7% against 5.6%.
+- Only traces teach a flow how to fill a lookup's arguments. The option stays off by default.
+
+**4. A second confirmation question catches the costly lapses, and half its flags are false.** Asked on its own about the same three fields, a second yes/no question fails a write unless both answers are yes.
+
+- The first wording, "did the agent's message describe this exact change?", was too literal. It failed 18% of the accepted writes in successful retail episodes, and 3 of 30 random writes it newly failed were lapses.
+- The second, "had the agent proposed this change?", fails 113 more accepted writes: 6.6% in successful retail episodes, 13.4% in failed ones. Of 30 labelled blind, 16 were lapses (53%, 95% interval 36–70%).
+- Seven of those are calls that differ from what the customer agreed to, such as a whole order cancelled where three items were to go, or a refund to a gift card instead of the Mastercard the customer named.
+- It is logged, not enforced. The labels come from one annotator, the model that ran the analysis, and a write labelled confirmed in §3.17 was labelled a lapse this time, so both readings are reported.
+
+**5. Matching a description to a record is not a check.** `stretto match` asks Jev which item, variant, payment method or reservation the customer means, from the customer's words and the candidates alone. Over 3,978 such choices, Jev picked the record the task expects 81.6% of the time, against 89.9% for the agents. Where the two differed, the agent was wrong only 19% of the time, and Jev's confident disagreements catch 25 of the agents' 402 wrong picks. The customer's words alone are often ambiguous, and showing Jev the agent's messages would let it copy the agent's pick.
+
+What this changes:
+
+- **A System-One model's place is not a deployment's own cold start (§3.6).** §3.17's reading held for clustered samples scored by an arbiter fitted on thousands of other agents' decisions. A deployment starts on the habit alone, can carry an arbiter fitted elsewhere as insurance against a narrow start, and fits its own once it has some twenty sessions.
+- **Its clearest role so far is judging what the habit cannot see.** The confirmation judge, with the second question logged, is the one to take live. Matching a description to a record is not a check the agents need.
+- **Options stay with the traces.** A lookup no trace showed needs bindings, and only traces teach those.
+- **Question 9 (§6) is answered for now,** except for enforcement: what refusing an unconfirmed write costs is for a live run.
+- **Next:**
+  - a paired run large enough to bound pass^1;
+  - the cold start live on more tasks, with an arbiter fitted on public traces shipped with the compiler;
+  - the confirmation judge enforced;
+  - counterfactual evaluation from the propensities the proxy logs.
+
+---
+
 ## 4. Drawbacks
 
 - **Predictability has a ceiling.**
@@ -846,7 +909,7 @@ What this changes:
   - Once flows execute, the traces are produced by agent and harness together, so statistics learned from ungated traces need not describe the gated system [Ray 2026].
   - Logged propensities and a little exploration mitigate this; they do not remove it. *Amended (§3.15):* the proxy logs every live decision's probabilities.
 - **Macro-tools might go unused.** Agents given a world model as a tool used it less than 1% of the time [Qian 2026]. Adoption is a measured outcome, not an assumption. If it is low, we add a reference agent loop for the experiments. *Amended (§3.14):* the first live form adds no tools. What must be measured instead is whether the agent repeats the flow's lookups. *Amended (§3.16):* named macro-tools are not built, so the risk does not arise.
-- **Vendor risk.** Jev is proprietary and in early access. It offers no fine-tuning, and there are no public accuracy benchmarks against human labels. Hence the `Oracle` trait and the replay cache. *Amended (§3.16):* reduced. Read-only flows save as many turns without a System-One model. *Amended (§3.17):* once there are enough traces. A cold start still needs one.
+- **Vendor risk.** Jev is proprietary and in early access. It offers no fine-tuning, and there are no public accuracy benchmarks against human labels. Hence the `Oracle` trait and the replay cache. *Amended (§3.16):* reduced. Read-only flows save as many turns without a System-One model. *Amended (§3.17):* once there are enough traces. A cold start still needs one. *Amended (§3.18):* a deployment's own cold start does not either; an arbiter fitted elsewhere is insurance against a narrow one.
 - **Evaluation is hard (§3.7).**
   - Simulation is optimistic and counterfactual estimates are high-variance.
   - Guarantees in the style of ProbGuard's PAC bounds call for 530 to 10⁵ traces [3].
@@ -898,11 +961,11 @@ What this changes:
 8. ~~**Which agent model runs the first live pilot?**~~ Resolved (§3.14): GLM-5.3, the model the Z.ai coding-plan key serves.
    - Offline, Qwen3.5 clears the gate in both domains, and Qwen3-Max does too (airline with lookup first). They are next once a key for them is at hand.
    - GLM-5 clears it in retail only, with the state predicates, with or without the goal.
-9. **Where does a System-One model earn its place?** (§3.16, §3.17)
+9. **Where does a System-One model earn its place?** (§3.16, §3.17, §3.18)
    - For read-only flows with enough traces, the habit alone saves as many turns, live too. Jev's weighed answers buy precision: half to two-thirds fewer detours in airline.
-   - With few traces, they carry the savings. Trained on three retail tasks, the habit alone saves 1.8% of turns and the flow with Jev 20.4%. Still open: the same cold start live, with the arbiter fitted on a deployment's own few sessions.
-   - Judging a confirmation before a write: where Jev and the word list disagree, hand labels side with Jev on 30 of 40. Enforcing it is untested.
-   - Matching a description to a record is untested.
+   - With few traces, on §3.17's clustered samples and an arbiter fitted on thousands of other agents' decisions, they carried the savings. From a deployment's own first sessions they did not: the habit alone saved more than an arbiter fitted on those sessions until about twenty (§3.18). An arbiter fitted elsewhere lifted a narrow start.
+   - Judging a confirmation before a write: where Jev and the word list disagree, hand labels side with Jev on 30 of 40. A second question catches calls that differ from what the customer agreed to, and half its flags are false (§3.18). Enforcing it is untested.
+   - Matching a description to a record: no. Jev picked the expected record less often than the agents did (§3.18).
 
 ---
 
@@ -946,6 +1009,11 @@ What this changes:
     - live, on the retail pilot's ten tasks, the habit-only flow took 79 LLM turns, against D0's 84 and 110 with no flow, and passed 9 of 10;
     - with few traces, Jev's answers carry the savings: trained on three retail tasks, the flow saves 20.4% of turns with the arbiter and 1.8% on the habit alone, and from seven tasks on the habit alone saves as many;
     - Jev judges a customer's confirmation better than the guards' word list, 30 of 40 on hand-labelled disagreements; it is logged, not enforced.
+  - Amended again on 2026-09-24 (§3.18), from a deployment's own first sessions and in two content roles:
+    - from five of an agent's own sessions, the habit alone saved more than an arbiter fitted on them, which pays from about twenty sessions; so a deployment starts on the habit alone, and §3.17's cold-start finding holds only for its clustered samples;
+    - a flow learned from five sessions GLM-5.3 recorded through the proxy ran live on three pilot tasks;
+    - options from the tool manifest add nothing, because a lookup no trace showed cannot be bound;
+    - a second confirmation question catches the costliest lapses with half its flags false, and matching descriptions to records is no check; both stay logged.
 
 ---
 
