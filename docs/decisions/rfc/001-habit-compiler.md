@@ -14,6 +14,7 @@
     - [`pilot/README.md`](https://github.com/alexnodeland/stretto/blob/main/pilot/README.md#results-so-far) (the live pilot);
     - [`docs/results/pilot-airline-2026-09-24.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/pilot-airline-2026-09-24.md) (the airline pilot);
     - [`docs/results/guards-2026-09-24.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/guards-2026-09-24.md) (policy guards against published trajectories);
+    - [`docs/results/pilot-guards-2026-09-24.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/pilot-guards-2026-09-24.md) (the guards, live);
     - [`docs/results/audit-2026-09-24.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/audit-2026-09-24.md) (a flow audited as a fugue program);
     - the working paper, [alexnodeland.github.io/stretto](https://alexnodeland.github.io/stretto/);
   - TypeSafe AI's Jev (released 2026-09-15).
@@ -394,7 +395,7 @@ These decisions were made during the 2026-09-23 design iteration.
 | Arm | Agent sees | Branches resolved by |
 |---|---|---|
 | A | Raw tools | The LLM (baseline) |
-| B | Raw tools, with guard checks on writes (built, §3.15) | The LLM |
+| B | Raw tools, with guard checks on writes (built and run live, §3.15) | The LLM |
 | C | Raw tools + macro-tools | The LLM, via hand-back at every branch (TraceCompiler-like) |
 | D | Raw tools + macro-tools | Habit → Jev → LLM, by arbitration (ours) |
 | E | As D, plus guard checks on raw writes | As D |
@@ -673,6 +674,11 @@ Five findings; §3.11, §4, §6 and §7 are updated to match.
 - **Confirmation.** The confirmation rule, a word list, misses as often in successful episodes as in failed ones, so it is logged, not enforced. Judging a "yes" is a System-One question.
 - **Three-valued.** A rule without the facts to decide (a record never looked up) does not refuse.
 - **A correction, in time.** After the pilot, the basic-economy rule was changed to refuse finding 2's upgrade path. τ²-bench's own task 32 expects that very path (upgrade a basic-economy reservation, then change its flights), so the change was reverted before the guards ran live.
+- **Live, GLM-5.3 gave them nothing to refuse** ([details](https://github.com/alexnodeland/stretto/blob/main/docs/results/pilot-guards-2026-09-24.md)). Arm B ran on the four airline test tasks where the 2025 agents' refused writes concentrate (a guard would have refused a write in 35 of their 50 failed episodes), plus four harm checks:
+  - GLM-5.3 passed all four in both arms. On the two forbidden cancellations it declined on its own.
+  - With the guards on, 7 of 8 episodes passed. The failure repeated finding 2's cost error, with nothing refused.
+  - The proxy checked 9 writes live and passed them all, among them task 32's upgrade-then-change.
+  - So guards are insurance whose value depends on the agent, at no cost when they do not fire. 223 Z.ai credits.
 
 **5. A flow is audited as a fugue program.**
 
@@ -693,7 +699,7 @@ Five findings; §3.11, §4, §6 and §7 are updated to match.
 What this changes:
 
 - **The Phase 2 gate is judged per agent model, harness and domain** (§3.11). A projection made in another harness can be wrong in either direction.
-- **Arms B and E can run.** The guards exist and are audited. Arm D0 runs through the proxy for any MCP server.
+- **Arms B and E can run, and B has.** The guards exist, are audited, and ran live; they matter for agents that make the writes they refuse, such as the cheaper models §3.11 plans to run on flows compiled from frontier traces. Arm D0 runs through the proxy for any MCP server.
 - **Drift has a check (§4):** audit new sessions before trusting a flow compiled from older ones.
 - **Next:**
   - a paired run large enough to bound pass^1;
@@ -800,7 +806,7 @@ What this changes:
     - the first design is built: a flow IR; the proxy serving flows, guards and a commit tool for any MCP server; learning from recorded sessions; and an audit that runs a flow as a fugue program;
     - live, on ten paired airline tasks, GLM-5.3 took 17% fewer LLM turns with the flow (8 and 9 of 10 passed);
     - the savings depend on the agent's harness as well as its model, so the gate is judged per model, harness and domain;
-    - guards refuse a policy-breaking write in 38% of failed airline episodes and 1% of successful ones, each of those five a violation τ²-bench's own notes name.
+    - guards refuse a policy-breaking write in 38% of failed airline episodes and 1% of successful ones, each of those five a violation τ²-bench's own notes name; live, GLM-5.3 gave them nothing to refuse, and they did no harm.
 
 ---
 
