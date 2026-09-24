@@ -1,6 +1,6 @@
 # RFC-001: Habit compiler — compiling agent behavior into System-One flows
 
-- **Status:** Accepted (2026-09-23, [#51](https://github.com/alexnodeland/fugue/pull/51)). Amended the same day with what Phase 0 found (§3.12, [#52](https://github.com/alexnodeland/fugue/pull/52)) and with Phase 0b v2's read-only flows and arbitration (§3.13, [#53](https://github.com/alexnodeland/fugue/pull/53)), and on 2026-09-24 with the first live form and pilot (§3.14, [#54](https://github.com/alexnodeland/fugue/pull/54)), with the built implementation, the airline pilot, policy guards and the flow audit (§3.15, [#55](https://github.com/alexnodeland/fugue/pull/55)), with the arms measured before building macro-tools (§3.16, [#56](https://github.com/alexnodeland/fugue/pull/56)), with the habit alone live, fewer traces and Jev as a confirmation judge (§3.17, [#58](https://github.com/alexnodeland/fugue/pull/58)), and with a cold start from an agent's own sessions, options from the manifest, a second confirmation question and matching descriptions to records (§3.18, [#59](https://github.com/alexnodeland/fugue/pull/59)). The design was iterated with @alexnodeland on 2026-09-23; the decisions are in §3.11.
+- **Status:** Accepted (2026-09-23, [#51](https://github.com/alexnodeland/fugue/pull/51)). Amended the same day with what Phase 0 found (§3.12, [#52](https://github.com/alexnodeland/fugue/pull/52)) and with Phase 0b v2's read-only flows and arbitration (§3.13, [#53](https://github.com/alexnodeland/fugue/pull/53)), and on 2026-09-24 with the first live form and pilot (§3.14, [#54](https://github.com/alexnodeland/fugue/pull/54)), with the built implementation, the airline pilot, policy guards and the flow audit (§3.15, [#55](https://github.com/alexnodeland/fugue/pull/55)), with the arms measured before building macro-tools (§3.16, [#56](https://github.com/alexnodeland/fugue/pull/56)), with the habit alone live, fewer traces and Jev as a confirmation judge (§3.17, [#58](https://github.com/alexnodeland/fugue/pull/58)), with a cold start from an agent's own sessions, options from the manifest, a second confirmation question and matching descriptions to records (§3.18, [#59](https://github.com/alexnodeland/fugue/pull/59)), and with an arbiter shipped with the compiler (§3.19, [#60](https://github.com/alexnodeland/fugue/pull/60)). The design was iterated with @alexnodeland on 2026-09-23; the decisions are in §3.11.
 - **Authors:** @alexnodeland (drafted with Claude Code)
 - **Created:** 2026-09-23
 - **Updated:** 2026-09-24
@@ -24,6 +24,7 @@
     - [`docs/results/manifest-options-2026-09-24.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/manifest-options-2026-09-24.md) (options from the tool manifest);
     - [`docs/results/confirm-second-2026-09-24.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/confirm-second-2026-09-24.md) (a second confirmation question);
     - [`docs/results/matching-2026-09-24.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/matching-2026-09-24.md) (matching descriptions to records);
+    - [`docs/results/arbiter-transfer-2026-09-24.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/arbiter-transfer-2026-09-24.md) (shipped arbiters across domains);
     - the working paper, [alexnodeland.github.io/stretto](https://alexnodeland.github.io/stretto/);
   - TypeSafe AI's Jev (released 2026-09-15).
 
@@ -275,6 +276,8 @@ The runtime also:
 *Amended (§3.17):* only once there are enough traces. With the habit trained on three retail tasks, the arbitration above saves 20.4% of turns and the habit alone 1.8%. A deployment starts on the arbiter, and the habit takes over the savings as its traces accumulate.
 
 *Amended (§3.18):* not for a deployment's own first sessions. §3.17's samples were clustered, and its arbiter was fitted on thousands of other agents' decisions. From a random handful of an agent's own sessions, the habit alone saved more than an arbiter fitted on those sessions until about twenty of them. A deployment starts on the habit alone, can carry an arbiter fitted elsewhere as insurance against a narrow start, and fits its own once it has enough sessions.
+
+*Amended (§3.19):* the arbiter fitted elsewhere need not come from the same domain. One fitted on retail decisions served airline habits, and one fitted on airline decisions served retail habits, as well as each domain's own did. Two ship with stretto.
 
 ### 3.7 Evaluation and assurance
 
@@ -896,6 +899,38 @@ What this changes:
 
 ---
 
+### 3.19 Amendment 8: an arbiter shipped with the compiler (2026-09-24)
+
+A follow-up to §3.18. A deployment's first sessions are too few to fit an arbiter on, and an arbiter fitted on other agents' decisions in the same domain was insurance against a narrow start. This amendment ships two such arbiters with stretto, and tests each in the domain it was not fitted on. No LLM ran. Jev's 718 new answers cost $0.08 and are published, so the results replay without a key.
+
+- **Details:** stretto's [shipped arbiters across domains](https://github.com/alexnodeland/stretto/blob/main/docs/results/arbiter-transfer-2026-09-24.md), the arbiters themselves in [`data/arbiters/`](https://github.com/alexnodeland/stretto/tree/main/data/arbiters), and the [working paper](https://alexnodeland.github.io/stretto/)'s §5.12.
+
+**What ships.** `stretto compile --pooled-arbiter` fits one arbiter on every held-out decision, where a compiled flow otherwise gets five cross-fitted ones. `stretto export-arbiter` writes it to its own file: the eight weights, Jev's agreement with the agents at each tool, the three predicates it weighs, and the model it asks. `learn --arbiter-from` serves it with a habit learned from new sessions, and asks nothing while learning. `data/arbiters/` holds a retail and an airline arbiter, fitted on four 2025 agents' published decisions (4,513 and 2,042).
+
+**The arbiter carries across domains.** The habits are §3.18's, learned from GLM-5's own sessions, and each was replayed on GLM-5's test episodes as in §3.17:
+
+| Habit learned from | Habit alone | With its own domain's arbiter | With the other domain's shipped arbiter |
+|---|---|---|---|
+| Retail, 5 sessions, four random draws | 11.8–18.9% | 9.9–19.0% | 10.1–19.1% |
+| Retail, 5 sessions, clustered | 2.7% | 11.1% | 10.6% |
+| Retail, 10 sessions | 20.9% | 19.5% | 19.7% |
+| Airline, 5 to 30 sessions | 8.7% (85 detours) | 6.3–7.0% (16–64) | 5.6–7.9% (14–60) |
+
+- In retail, the airline arbiter saved what retail's own did, within half a point on all six habits. In airline, the retail arbiter came within about a point of airline's own.
+- So a shipped arbiter does in a new domain what that domain's own would. In retail it insures against a narrow start. In airline it trades 1 to 3 points of savings for 29% to 84% fewer detours, as §3.16 found for the arbiter on every task.
+- What carries over is the weights. Tool names differ, so across domains the arbiter weighs Jev's answers by their overall agreement with the agents, and the habit's weight is nearly the same in both (0.27 and 0.25).
+
+What this changes:
+
+- **A deployment's first flow (§3.6)** is the habit from its first sessions, with a shipped arbiter where a narrow start or wasted lookups matter more than a point or two of savings. It fits its own arbiter once it has some twenty sessions.
+- **Question 9 (§6)** gains a line: an arbiter fitted once, on public traces, serves domains it never saw.
+- **Next:**
+  - the cold start live, the habit alone against the habit with a shipped arbiter;
+  - an arbiter fitted on both domains, tested on a third (τ²-bench's telecom);
+  - the other items of §3.18's list.
+
+---
+
 ## 4. Drawbacks
 
 - **Predictability has a ceiling.**
@@ -961,11 +996,12 @@ What this changes:
 8. ~~**Which agent model runs the first live pilot?**~~ Resolved (§3.14): GLM-5.3, the model the Z.ai coding-plan key serves.
    - Offline, Qwen3.5 clears the gate in both domains, and Qwen3-Max does too (airline with lookup first). They are next once a key for them is at hand.
    - GLM-5 clears it in retail only, with the state predicates, with or without the goal.
-9. **Where does a System-One model earn its place?** (§3.16, §3.17, §3.18)
+9. **Where does a System-One model earn its place?** (§3.16, §3.17, §3.18, §3.19)
    - For read-only flows with enough traces, the habit alone saves as many turns, live too. Jev's weighed answers buy precision: half to two-thirds fewer detours in airline.
    - With few traces, on §3.17's clustered samples and an arbiter fitted on thousands of other agents' decisions, they carried the savings. From a deployment's own first sessions they did not: the habit alone saved more than an arbiter fitted on those sessions until about twenty (§3.18). An arbiter fitted elsewhere lifted a narrow start.
    - Judging a confirmation before a write: where Jev and the word list disagree, hand labels side with Jev on 30 of 40. A second question catches calls that differ from what the customer agreed to, and half its flags are false (§3.18). Enforcing it is untested.
    - Matching a description to a record: no. Jev picked the expected record less often than the agents did (§3.18).
+   - An arbiter fitted once, on public traces, serves a domain it never saw as well as that domain's own arbiter does (§3.19).
 
 ---
 
@@ -1014,6 +1050,9 @@ What this changes:
     - a flow learned from five sessions GLM-5.3 recorded through the proxy ran live on three pilot tasks;
     - options from the tool manifest add nothing, because a lookup no trace showed cannot be bound;
     - a second confirmation question catches the costliest lapses with half its flags false, and matching descriptions to records is no check; both stay logged.
+  - Amended again on 2026-09-24 (§3.19), shipping an arbiter with the compiler:
+    - `data/arbiters/` holds a retail and an airline arbiter fitted on four agents' published decisions, and `learn --arbiter-from` serves one with a deployment's own habit;
+    - each did in the other domain what that domain's own arbiter did, within about a point of turns saved.
 
 ---
 
