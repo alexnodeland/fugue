@@ -1,6 +1,6 @@
 # RFC-001: Habit compiler — compiling agent behavior into System-One flows
 
-- **Status:** Accepted (2026-09-23, [#51](https://github.com/alexnodeland/fugue/pull/51)). Amended the same day with what Phase 0 found (§3.12, [#52](https://github.com/alexnodeland/fugue/pull/52)) and with Phase 0b v2's read-only flows and arbitration (§3.13, [#53](https://github.com/alexnodeland/fugue/pull/53)), and on 2026-09-24 with the first live form and pilot (§3.14). The design was iterated with @alexnodeland on 2026-09-23; the decisions are in §3.11.
+- **Status:** Accepted (2026-09-23, [#51](https://github.com/alexnodeland/fugue/pull/51)). Amended the same day with what Phase 0 found (§3.12, [#52](https://github.com/alexnodeland/fugue/pull/52)) and with Phase 0b v2's read-only flows and arbitration (§3.13, [#53](https://github.com/alexnodeland/fugue/pull/53)), and on 2026-09-24 with the first live form and pilot (§3.14, [#54](https://github.com/alexnodeland/fugue/pull/54)) and with the built implementation, the airline pilot, policy guards and the flow audit (§3.15). The design was iterated with @alexnodeland on 2026-09-23; the decisions are in §3.11.
 - **Authors:** @alexnodeland (drafted with Claude Code)
 - **Created:** 2026-09-23
 - **Updated:** 2026-09-24
@@ -12,6 +12,11 @@
     - [`docs/results/phase0b-v2-2026-09-23-summary.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/phase0b-v2-2026-09-23-summary.md) (Phase 0b v2);
     - [`docs/results/phase0b-v2-goal-free-2026-09-24-summary.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/phase0b-v2-goal-free-2026-09-24-summary.md) (v2 without a goal);
     - [`pilot/README.md`](https://github.com/alexnodeland/stretto/blob/main/pilot/README.md#results-so-far) (the live pilot);
+    - [`docs/results/pilot-airline-2026-09-24.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/pilot-airline-2026-09-24.md) (the airline pilot);
+    - [`docs/results/guards-2026-09-24.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/guards-2026-09-24.md) (policy guards against published trajectories);
+    - [`docs/results/pilot-guards-2026-09-24.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/pilot-guards-2026-09-24.md) (the guards, live);
+    - [`docs/results/audit-2026-09-24.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/audit-2026-09-24.md) (a flow audited as a fugue program);
+    - the working paper, [alexnodeland.github.io/stretto](https://alexnodeland.github.io/stretto/);
   - TypeSafe AI's Jev (released 2026-09-15).
 
 ---
@@ -30,7 +35,7 @@ At each branch point a flow asks the cheapest resolver the posterior says is goo
 
 Fugue supplies the representation. A flow is a `Model`, its branch points are addressed sites, and the harness is a `Handler`. So one flow can be simulated, executed, audited against recorded traces and evaluated counterfactually, just by swapping the interpreter. A spike ([Appendix A](#appendix-a-the-spike)) does all four on fugue 0.2.3 with no changes to the library, using mocks for the tools, the LLM and Jev.
 
-The first implementation, **stretto**, is a Rust MCP proxy. It serves compiled flows to the agent as `plan_*`/`commit_*` macro-tools, and its first evaluation is on τ²-bench (§3.11). *Amended (§3.14):* its first live form adds no tools. A read-only flow runs behind the agent's own calls and returns its lookups with each result.
+The first implementation, **stretto**, is a Rust MCP proxy. It serves compiled flows to the agent as `plan_*`/`commit_*` macro-tools, and its first evaluation is on τ²-bench (§3.11). *Amended (§3.14):* its first live form adds no tools. A read-only flow runs behind the agent's own calls and returns its lookups with each result. *Amended (§3.15):* the proxy serves flows, policy guards and a commit tool for any MCP server, and a flow is audited against new sessions as a fugue program.
 
 ---
 
@@ -374,14 +379,14 @@ These decisions were made during the 2026-09-23 design iteration.
 | Jev | API access available. Jev owns the four mid-flow roles in §3.5 |
 | Writes | Plan/commit pairs; the agent obtains the user's explicit "yes" between them. *Amended:* between LLM turns flows only read; every write goes back to the LLM, so a wrong pick is a detour rather than a risk (§3.13) |
 | Branches nothing in the flow can settle | Resumable: the flow pauses and returns a token; `resume_<flow>(token, choice)` continues it. Plan/commit is the same mechanism, paused at the confirmation site |
-| Rule guards | Compiled from the policy by an LLM, tested against traces, reviewed by a person |
+| Rule guards | Compiled from the policy by an LLM, tested against traces, reviewed by a person. *Amended:* built, 12 retail and 10 airline rules; the audit against published trajectories decides which are enforced (§3.15) |
 | Flow discovery | Traces first; the policy only names flows and checks guards |
 | Models | Transfer first. Flows are compiled from published frontier-model trajectories (free to us) and run by GLM (Z.ai) and MiniMax on their subscription keys. American frontier models come later. Cost is kept to a minimum. *Amended:* compile from the 2026 frontier runs on Sierra's leaderboard, which transfer to GLM-5 better than the 2025 baselines (§3.12) |
 | Phase 0 data | τ²-bench's published trajectories |
 | Checking raw writes | A separate experimental arm, so the gains from flows and from checking alone stay separable |
 | Win conditions | All four: fewer LLM calls, tokens and dollars; higher pass^k; Jev agreeing with the frontier model at branches, and well calibrated; fewer policy violations |
 | Code | New public repo, [stretto](https://github.com/alexnodeland/stretto) (MIT); fugue changes go upstream as their own PRs |
-| Phase 2 gate | ≥ 20% fewer LLM turns at ≤ 1 point of pass^1 lost, on held-out tasks, *judged per agent model and domain* (amended: the savings depend on how the agent calls tools, §3.12). Tokens and dollars are projected alongside turns, because a flow also keeps intermediate tool outputs out of the LLM's context. *Amended again:* read-only flows take no risky decisions, so offline the gate is turns saved. Detours are counted and charged in tokens, and the live pilot must show they cost no pass^1 (§3.13) |
+| Phase 2 gate | ≥ 20% fewer LLM turns at ≤ 1 point of pass^1 lost, on held-out tasks, *judged per agent model and domain* (amended: the savings depend on how the agent calls tools, §3.12; *and harness*, §3.15). Tokens and dollars are projected alongside turns, because a flow also keeps intermediate tool outputs out of the LLM's context. *Amended again:* read-only flows take no risky decisions, so offline the gate is turns saved. Detours are counted and charged in tokens, and the live pilot must show they cost no pass^1 (§3.13) |
 | Arbitration | The habit acts only in contexts where its held-out agreement is at least 99%, validated per context rather than by one global threshold. Jev decides everywhere else. *Amended:* validation needs at least 20 decisions from at least 10 distinct tasks; what survives is hand-backs only, so the rule is revisited with the Phase 0b data (§3.12). *Amended again:* Jev's answers are no longer taken at their word. A conditional logit combines them with the habit's prior, Jev's record at the site and state predicates, fitted by cross-validation over tasks (§3.13) |
 | Keys | The TypeSafe key is in the environment (Phase 0b ran on 2026-09-23); GLM and MiniMax keys come with Phase 2. Offline work uses mock and replay oracles |
 
@@ -390,11 +395,11 @@ These decisions were made during the 2026-09-23 design iteration.
 | Arm | Agent sees | Branches resolved by |
 |---|---|---|
 | A | Raw tools | The LLM (baseline) |
-| B | Raw tools, with guard checks on writes | The LLM |
+| B | Raw tools, with guard checks on writes (built and run live, §3.15) | The LLM |
 | C | Raw tools + macro-tools | The LLM, via hand-back at every branch (TraceCompiler-like) |
 | D | Raw tools + macro-tools | Habit → Jev → LLM, by arbitration (ours) |
 | E | As D, plus guard checks on raw writes | As D |
-| D0 | Raw tools; each result may carry a read-only flow's lookups (§3.14) | Habit and Jev by arbitration, for lookups only; the LLM for everything else |
+| D0 | Raw tools; each result may carry a read-only flow's lookups (§3.14), served by `stretto-proxy` for any MCP server (§3.15) | Habit and Jev by arbitration, for lookups only; the LLM for everything else |
 | A-small, D-small | The same arms, run by a small model with flows compiled from the frontier model's traces | |
 
 **Metrics**
@@ -622,6 +627,85 @@ What this changes:
 - **The pilot model** is GLM-5.3, the model the Z.ai key serves (§6, question 8).
 - **Next:** a paired run large enough to bound pass^1 and the cost of detours; airline; and the sequential callers the projection favors, once a key for them is at hand.
 
+### 3.15 Amendment 4: the first design, built; airline, guards and the audit (2026-09-24)
+
+stretto now implements the first design end to end. It measured three more things: the live form in airline, policy guards against published trajectories, and a flow audited as a fugue program.
+
+- **Details:** stretto's [implementation status](https://github.com/alexnodeland/stretto/blob/main/docs/design.md#implementation-status-2026-09-24), [airline pilot](https://github.com/alexnodeland/stretto/blob/main/docs/results/pilot-airline-2026-09-24.md), [guard audit](https://github.com/alexnodeland/stretto/blob/main/docs/results/guards-2026-09-24.md) and [flow audit](https://github.com/alexnodeland/stretto/blob/main/docs/results/audit-2026-09-24.md), and the [working paper](https://alexnodeland.github.io/stretto/), which collects every result so far.
+
+Five findings; §3.11, §4, §6 and §7 are updated to match.
+
+**1. The first design is built.**
+
+- **The flow IR.** A flow compiles to versioned JSON: the habit, the sites, the fitted arbiter folds, the argument bindings and its provenance. `stretto compile` builds it from τ²-bench results, and `stretto learn` from sessions the proxy recorded. It reloads exactly.
+- **The proxy.** `stretto-proxy` serves the flow for any stdio MCP server. After each of the agent's calls it makes the flow's lookups and appends them to the result (arm D0). It also:
+  - checks the agent's calls against policy guards (arms B and E);
+  - adds `stretto_commit`, which makes the writes the user confirmed in one call (§3.5's commit), each guarded;
+  - logs the conversation a host hands it, which MCP never carries.
+- **The loop.** A test records forty sessions through the proxy, learns a flow from their logs, and serves it to a new session.
+- **Not built yet:**
+  - `plan_*` / `resume_*` macro-tools that the LLM names (arms C and D);
+  - counterfactual evaluation from logged propensities;
+  - predicate refinement (§3.4).
+
+**2. Airline, live: 17% fewer LLM turns.** Ten airline test tasks, set up as the retail pilot (§3.14):
+
+| | Without the flow | With the flow |
+|---|---|---|
+| LLM turns | 127 | 105 (17.3% fewer) |
+| Agent input tokens | 996,580 | 849,367 (14.8% fewer) |
+| Passed the database check | 8 of 10 | 9 of 10 |
+
+- The flow saved 2.2 turns per episode (95% interval 0.5 to 3.9), with fewer turns in 7 of 10 pairs.
+- It acted on every task, with 24 lookups the agent never repeated.
+- None of the three failures came from a flow decision. In the one in the flows arm, the customer would pay under $100 for a change. The agent upgraded the basic-economy reservation (a $301 charge), changed its flights (a $220 refund), and quoted the net, $81. The task counts the upgrade's cost and expects no change.
+- The pilot cost 334 Z.ai credits, 11% less in the flows arm.
+
+**3. The savings follow the harness as well as the model.**
+
+- Offline, flows save GLM-5 under 5% of its airline turns (§3.13). GLM-5 in τ²-bench's own harness makes parallel calls in 45% of its airline tool turns.
+- GLM-5.3 in Claude Code made them in 3.8% (3.0% in retail), like the sequential callers the projection favors, and saved 17%.
+- The live agent differs from the leaderboard run in model version as well as harness. Either way, the calling style that decides the savings belongs to the agent in its harness, as [8] found for trace structure in general, and it can be measured from a few recorded sessions.
+
+**4. Guards pay off where the API does not check the policy.** Every write in τ²-bench's published trajectories was checked against what came before it, as the proxy checks it, and sorted by whether the tool accepted it:
+
+- **Airline.** The enforced rules refuse an accepted write in 141 of 369 failed episodes (38%) and in 5 of 431 successful ones. τ²-bench's own task notes forbid each of the five. The cancellation-eligibility rule alone fires in 116 failed episodes. The airline API does not check eligibility, and its policy says so.
+- **Retail.** 1 of 500 failed and 28 of 1,324 successful episodes. Each is a break of the written policy that passed the database check. Retail's tools already enforce most of their own policy.
+- **Confirmation.** The confirmation rule, a word list, misses as often in successful episodes as in failed ones, so it is logged, not enforced. Judging a "yes" is a System-One question.
+- **Three-valued.** A rule without the facts to decide (a record never looked up) does not refuse.
+- **A correction, in time.** After the pilot, the basic-economy rule was changed to refuse finding 2's upgrade path. τ²-bench's own task 32 expects that very path (upgrade a basic-economy reservation, then change its flights), so the change was reverted before the guards ran live.
+- **Live, GLM-5.3 gave them nothing to refuse** ([details](https://github.com/alexnodeland/stretto/blob/main/docs/results/pilot-guards-2026-09-24.md)). Arm B ran on the four airline test tasks where the 2025 agents' refused writes concentrate (a guard would have refused a write in 35 of their 50 failed episodes), plus four harm checks:
+  - GLM-5.3 passed all four in both arms. On the two forbidden cancellations it declined on its own.
+  - With the guards on, 7 of 8 episodes passed. The failure repeated finding 2's cost error, with nothing refused.
+  - The proxy checked 9 writes live and passed them all, among them task 32's upgrade-then-change.
+  - So guards are insurance whose value depends on the agent, at no cost when they do not fire. 223 Z.ai credits.
+
+**5. A flow is audited as a fugue program.**
+
+- **The program.** A flow's decisions over an episode are a categorical choice per decision site. `stretto audit` builds them as one fugue `Model` and runs it under two handlers:
+  - `ScoreGivenTrace` scores the agent's own steps: the log-probability of its path under the flow;
+  - `PriorHandler` runs the flow as a stochastic policy.
+- **Results.** On GLM-5's published test episodes, answered from the replay cache at no cost:
+
+| | Retail | Airline |
+|---|---|---|
+| Decisions scored | 724 | 228 |
+| The flow's likeliest option was the agent's step | 85.9% | 64.5% |
+| Surprise, nats per decision | 0.42 | 1.02 |
+| Calibration | underconfident: a top option at 0.8–0.9 is right 96% of the time | overconfident: 74% |
+
+- **Reading them.** The retail figure matches the offline agreement (85.7%, §3.13). The airline one flags finding 3's parallel reads: after a reservation read, the flow agrees 42% of the time. This is the re-validation that §4 asks for when behavior drifts.
+
+What this changes:
+
+- **The Phase 2 gate is judged per agent model, harness and domain** (§3.11). A projection made in another harness can be wrong in either direction.
+- **Arms B and E can run, and B has.** The guards exist, are audited, and ran live; they matter for agents that make the writes they refuse, such as the cheaper models §3.11 plans to run on flows compiled from frontier traces. Arm D0 runs through the proxy for any MCP server.
+- **Drift has a check (§4):** audit new sessions before trusting a flow compiled from older ones.
+- **Next:**
+  - a paired run large enough to bound pass^1;
+  - `plan_*` macro-tools;
+  - counterfactual evaluation from the propensities the proxy logs.
+
 ---
 
 ## 4. Drawbacks
@@ -635,14 +719,14 @@ What this changes:
   - A region whose free-text arguments cannot be bound from macro-tool inputs or earlier outputs stays with the LLM.
 - **The harness changes its own data.**
   - Once flows execute, the traces are produced by agent and harness together, so statistics learned from ungated traces need not describe the gated system [Ray 2026].
-  - Logged propensities and a little exploration mitigate this; they do not remove it.
+  - Logged propensities and a little exploration mitigate this; they do not remove it. *Amended (§3.15):* the proxy logs every live decision's probabilities.
 - **Macro-tools might go unused.** Agents given a world model as a tool used it less than 1% of the time [Qian 2026]. Adoption is a measured outcome, not an assumption. If it is low, we add a reference agent loop for the experiments. *Amended (§3.14):* the first live form adds no tools. What must be measured instead is whether the agent repeats the flow's lookups.
 - **Vendor risk.** Jev is proprietary and in early access. It offers no fine-tuning, and there are no public accuracy benchmarks against human labels. Hence the `Oracle` trait and the replay cache.
 - **Evaluation is hard (§3.7).**
   - Simulation is optimistic and counterfactual estimates are high-variance.
   - Guarantees in the style of ProbGuard's PAC bounds call for 530 to 10⁵ traces [3].
   - Canaries cost traffic.
-- **Drift.** A new LLM version, prompt or tool changes behavior. Compiled flows must be re-validated, not trusted forever.
+- **Drift.** A new LLM version, prompt or tool changes behavior. Compiled flows must be re-validated, not trusted forever. *Amended (§3.15):* `stretto audit` scores new sessions under a flow, per site and per episode. So does a new harness: the same model family called tools very differently in Claude Code and in τ²-bench's harness.
 - **Scope.** This is a new product surface beside a PPL that is still pre-1.0 and has a single maintainer.
 
 ---
@@ -675,13 +759,14 @@ What this changes:
 1. ~~**Phase 0 data.**~~ Resolved: published trajectories, including Sierra's leaderboard runs.
 2. ~~**Models and budget.**~~ Resolved: transfer first, run by GLM and MiniMax, at minimum cost (§3.11).
 3. ~~**The repo.**~~ Resolved: [stretto](https://github.com/alexnodeland/stretto), public, MIT.
-4. **How are compiled flows reviewed?** Probably as code, with the flow IR diffed in pull requests.
+4. **How are compiled flows reviewed?** Probably as code, with the flow IR diffed in pull requests. Partly answered (§3.15): the IR is versioned JSON that records its provenance, and `stretto audit` scores a flow on new sessions before it is trusted.
 5. **Privacy for non-benchmark workloads.** Traces contain user data. The store should keep hashes and state slices, with retention limits.
 6. **What should a System-One decision be scored against?**
    - Agreement with the agent undercounts valid alternatives, such as looking up two orders in either order.
    - Replayed outcomes can't settle this, so only live pass^1 can.
    - With read-only flows the question narrows: does a detour (an extra lookup before handing back) ever cost pass^1? (§3.13)
    - First live evidence (§3.14): 8 of 10 episodes passed the database check without the flow and 8 of 10 with it. That is too few to bound a one-point loss.
+   - Airline (§3.15): 8 of 10 without the flow and 9 of 10 with it, and no failure came from a flow decision. Twenty pairs are still too few.
 7. ~~**Can System-One questions reach roughly 99% agreement on the decisions flows need?**~~ Answered for now (§3.13):
    - No. The best combination reaches 79–81%, and at least 0.99 sure only on 11–25% of decisions.
    - Read-only flows don't need it: acting on weaker picks costs detours, not risk.
@@ -717,6 +802,11 @@ What this changes:
     - live lookups act on the tool's probability times the binding's agreement in training;
     - replayed through the live flow, GLM-5's recorded test episodes save 21.2% of LLM turns (20.3% projected);
     - live, on ten paired retail tasks, GLM-5.3 took 24% fewer LLM turns with the flow (8 and 8 of 10 passed the database check).
+  - Amended later on 2026-09-24 (§3.15):
+    - the first design is built: a flow IR; the proxy serving flows, guards and a commit tool for any MCP server; learning from recorded sessions; and an audit that runs a flow as a fugue program;
+    - live, on ten paired airline tasks, GLM-5.3 took 17% fewer LLM turns with the flow (8 and 9 of 10 passed);
+    - the savings depend on the agent's harness as well as its model, so the gate is judged per model, harness and domain;
+    - guards refuse a policy-breaking write in 38% of failed airline episodes and 1% of successful ones, each of those five a violation τ²-bench's own notes name; live, GLM-5.3 gave them nothing to refuse, and they did no harm.
 
 ---
 
