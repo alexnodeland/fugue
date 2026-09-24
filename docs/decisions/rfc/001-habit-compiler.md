@@ -1,6 +1,6 @@
 # RFC-001: Habit compiler — compiling agent behavior into System-One flows
 
-- **Status:** Accepted (2026-09-23, [#51](https://github.com/alexnodeland/fugue/pull/51)). Amended the same day with what Phase 0 found (§3.12, [#52](https://github.com/alexnodeland/fugue/pull/52)) and with Phase 0b v2's read-only flows and arbitration (§3.13, [#53](https://github.com/alexnodeland/fugue/pull/53)), and on 2026-09-24 with the first live form and pilot (§3.14, [#54](https://github.com/alexnodeland/fugue/pull/54)) and with the built implementation, the airline pilot, policy guards and the flow audit (§3.15). The design was iterated with @alexnodeland on 2026-09-23; the decisions are in §3.11.
+- **Status:** Accepted (2026-09-23, [#51](https://github.com/alexnodeland/fugue/pull/51)). Amended the same day with what Phase 0 found (§3.12, [#52](https://github.com/alexnodeland/fugue/pull/52)) and with Phase 0b v2's read-only flows and arbitration (§3.13, [#53](https://github.com/alexnodeland/fugue/pull/53)), and on 2026-09-24 with the first live form and pilot (§3.14, [#54](https://github.com/alexnodeland/fugue/pull/54)) with the built implementation, the airline pilot, policy guards and the flow audit (§3.15, [#55](https://github.com/alexnodeland/fugue/pull/55)), and with the arms measured before building macro-tools (§3.16). The design was iterated with @alexnodeland on 2026-09-23; the decisions are in §3.11.
 - **Authors:** @alexnodeland (drafted with Claude Code)
 - **Created:** 2026-09-23
 - **Updated:** 2026-09-24
@@ -16,6 +16,7 @@
     - [`docs/results/guards-2026-09-24.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/guards-2026-09-24.md) (policy guards against published trajectories);
     - [`docs/results/pilot-guards-2026-09-24.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/pilot-guards-2026-09-24.md) (the guards, live);
     - [`docs/results/audit-2026-09-24.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/audit-2026-09-24.md) (a flow audited as a fugue program);
+    - [`docs/results/arms-2026-09-24.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/arms-2026-09-24.md) (arm C, the habit alone, and what naming a flow would add);
     - the working paper, [alexnodeland.github.io/stretto](https://alexnodeland.github.io/stretto/);
   - TypeSafe AI's Jev (released 2026-09-15).
 
@@ -232,6 +233,7 @@ The loop:
   - the initiation set is the applicability predicate;
   - the intra-option policy is the flow;
   - termination is completion, or a hand-back that names the unresolved site.
+  - *Amended (§3.16):* not built. A name would add only the lookups that need a value from the conversation: at most 1.9% of LLM turns in retail and 7.9% in airline.
 
 ### 3.6 Execution: arbitration, not pooling
 
@@ -260,6 +262,8 @@ The runtime also:
 - **Records every resolved decision** with its propensity (`Choice::logp`), its resolver, its question and a hash of its state slice.
 - **Watches surprise.** It tracks surprise per step. When surprise exceeds the site's threshold it ends the flow with a hand-back.
 - **Speculates safely.** It pre-executes the most likely next call only if that call is read-only and idempotent. *Amended (§3.14):* the first live form is this, run as a flow, with the results returned to the agent.
+
+*Amended (§3.16):* for read-only flows, the habit alone saves as many turns as the arbitration above. Replayed on GLM-5's and Claude 3.7 Sonnet's test episodes, weighing Jev's answers cut the detours in airline by half to two-thirds, and in retail by up to a quarter. So arbitration is a precision setting, and a flow can run without a System-One model.
 
 ### 3.7 Evaluation and assurance
 
@@ -375,7 +379,7 @@ These decisions were made during the 2026-09-23 design iteration.
 |---|---|
 | What v1 is for | Compile and run flows, measured first |
 | Workload | τ²-bench [26]: airline and retail first; telecom's dual-control domain later |
-| Where the harness plugs in | A Rust MCP proxy; flows served as macro-tools. *Amended:* the first live form runs behind the agent's own tool calls, with no new tools (arm D0, §3.14) |
+| Where the harness plugs in | A Rust MCP proxy; flows served as macro-tools. *Amended:* the first live form runs behind the agent's own tool calls, with no new tools (arm D0, §3.14). *Amended again:* that is the form; named macro-tools are not built (§3.16) |
 | Jev | API access available. Jev owns the four mid-flow roles in §3.5 |
 | Writes | Plan/commit pairs; the agent obtains the user's explicit "yes" between them. *Amended:* between LLM turns flows only read; every write goes back to the LLM, so a wrong pick is a detour rather than a risk (§3.13) |
 | Branches nothing in the flow can settle | Resumable: the flow pauses and returns a token; `resume_<flow>(token, choice)` continues it. Plan/commit is the same mechanism, paused at the confirmation site |
@@ -387,7 +391,7 @@ These decisions were made during the 2026-09-23 design iteration.
 | Win conditions | All four: fewer LLM calls, tokens and dollars; higher pass^k; Jev agreeing with the frontier model at branches, and well calibrated; fewer policy violations |
 | Code | New public repo, [stretto](https://github.com/alexnodeland/stretto) (MIT); fugue changes go upstream as their own PRs |
 | Phase 2 gate | ≥ 20% fewer LLM turns at ≤ 1 point of pass^1 lost, on held-out tasks, *judged per agent model and domain* (amended: the savings depend on how the agent calls tools, §3.12; *and harness*, §3.15). Tokens and dollars are projected alongside turns, because a flow also keeps intermediate tool outputs out of the LLM's context. *Amended again:* read-only flows take no risky decisions, so offline the gate is turns saved. Detours are counted and charged in tokens, and the live pilot must show they cost no pass^1 (§3.13) |
-| Arbitration | The habit acts only in contexts where its held-out agreement is at least 99%, validated per context rather than by one global threshold. Jev decides everywhere else. *Amended:* validation needs at least 20 decisions from at least 10 distinct tasks; what survives is hand-backs only, so the rule is revisited with the Phase 0b data (§3.12). *Amended again:* Jev's answers are no longer taken at their word. A conditional logit combines them with the habit's prior, Jev's record at the site and state predicates, fitted by cross-validation over tasks (§3.13) |
+| Arbitration | The habit acts only in contexts where its held-out agreement is at least 99%, validated per context rather than by one global threshold. Jev decides everywhere else. *Amended:* validation needs at least 20 decisions from at least 10 distinct tasks; what survives is hand-backs only, so the rule is revisited with the Phase 0b data (§3.12). *Amended again:* Jev's answers are no longer taken at their word. A conditional logit combines them with the habit's prior, Jev's record at the site and state predicates, fitted by cross-validation over tasks (§3.13). *And again:* for read-only flows, optional. The habit alone saves as many turns, and the arbiter makes fewer detours (§3.16) |
 | Keys | The TypeSafe key is in the environment (Phase 0b ran on 2026-09-23); GLM and MiniMax keys come with Phase 2. Offline work uses mock and replay oracles |
 
 **Experimental arms.** Each arm runs on held-out tasks, with k trials per task:
@@ -396,10 +400,10 @@ These decisions were made during the 2026-09-23 design iteration.
 |---|---|---|
 | A | Raw tools | The LLM (baseline) |
 | B | Raw tools, with guard checks on writes (built and run live, §3.15) | The LLM |
-| C | Raw tools + macro-tools | The LLM, via hand-back at every branch (TraceCompiler-like) |
-| D | Raw tools + macro-tools | Habit → Jev → LLM, by arbitration (ours) |
+| C | Raw tools + macro-tools | The LLM, via hand-back at every branch (TraceCompiler-like). Replayed as a flow behind the tools: 0–1.7% of turns saved (§3.16) |
+| D | Raw tools + macro-tools | Habit → Jev → LLM, by arbitration (ours). Not built: naming adds at most 1.9% of turns in retail and 7.9% in airline over D0 (§3.16) |
 | E | As D, plus guard checks on raw writes | As D |
-| D0 | Raw tools; each result may carry a read-only flow's lookups (§3.14), served by `stretto-proxy` for any MCP server (§3.15) | Habit and Jev by arbitration, for lookups only; the LLM for everything else |
+| D0 | Raw tools; each result may carry a read-only flow's lookups (§3.14), served by `stretto-proxy` for any MCP server (§3.15) | Habit and Jev by arbitration, or the habit alone (§3.16), for lookups only; the LLM for everything else |
 | A-small, D-small | The same arms, run by a small model with flows compiled from the frontier model's traces | |
 
 **Metrics**
@@ -706,6 +710,64 @@ What this changes:
   - `plan_*` macro-tools;
   - counterfactual evaluation from the propensities the proxy logs.
 
+
+### 3.16 Amendment 5: arm C, the habit alone, and what naming would add (2026-09-24)
+
+Before building `plan_*` (arms C and D), stretto measured what naming a flow could add. It also replayed arm C and a habit-only flow against D0. No LLM ran. The only new spend was $0.078 of Jev questions for the replays, plus $1.11 to re-ask the v1 questions for publication.
+
+- **Details:** stretto's [arms results](https://github.com/alexnodeland/stretto/blob/main/docs/results/arms-2026-09-24.md) and the [working paper](https://alexnodeland.github.io/stretto/)'s §5.9.
+
+Four findings; §3.5, §3.6, §3.11, §4, §5, §6 and §7 are updated to match.
+
+**1. Naming adds little, so `plan_*` is not built.**
+
+- A flow behind the tools binds every lookup argument that came from an earlier output. A named macro-tool could also make a lookup that needs a value from the conversation, such as a city the customer named or a date the agent works out, if the LLM passed that value.
+- Phase 0 now splits the lookups inside runs by where their arguments came from. Across the thirteen agent models:
+  - lookups that need the conversation are 0.0–1.9% of LLM turns in retail and 0.9–7.9% in airline (GLM-5: 1.6% and 2.9%);
+  - lookups a flow can bind are 6–38%.
+- These are upper bounds. They assume the agent adopts the tool (§4) and passes the right values before it has seen the first results.
+- The top of the airline range is flight searches, by agents that search many dates: Gemini 3 Flash (7.9%) and Qwen3.5 (7.3%).
+
+**2. Arm C saves almost nothing.**
+
+- GLM-5's published test episodes were replayed through τ²-bench's tools with a flow behind them: all four trials, 160 in retail and 80 in airline.
+- One flow goes on only where the habit is at least 0.9 sure of the lookup and its arguments. It saves 1.7% of turns in retail and none in airline. At 0.99 it saves none in either.
+- Branches are everywhere. The gain comes from acting on probabilities, which read-only flows make safe (§3.13).
+
+**3. The habit alone saves as many turns as the arbiter.** Same replay and same rule (lookup first at 0.3), but the flow decides by the habit's prediction alone and never asks Jev:
+
+| | Retail | Airline |
+|---|---|---|
+| D0, the arbiter: turns saved | 21.2% | 6.5% |
+| The habit alone: turns saved | 22.5% | 8.7% |
+| Difference, with a 95% interval bootstrapped over tasks | +1.2 (−0.5 to +3.0) | +2.2 (+0.6 to +4.2) |
+| Detours: arbiter / habit alone | 58 / 58 | 26 / 50 |
+
+- Weighing Jev's answers buys precision, not savings. On GLM-5's episodes it halves the detours in airline and changes nothing in retail.
+- Claude 3.7 Sonnet's test episodes, one of the four source agents, show the same pattern:
+  - the habit alone saves 1.2 points more in retail (−0.6 to +2.9) and 2.6 more in airline (+1.1 to +4.5);
+  - it makes 101 detours against 73 in retail, and 95 against 29 in airline.
+- §7's early note that "the habit alone saves 0–2%" held for a habit that acts only where its held-out agreement is 99%. On read-only lookups at 0.3, the habit carries the savings.
+- `stretto-proxy --flow-decider habit` serves a flow with no System-One model: no key, and no cost or latency per question.
+- D0's retail replay reproduces the one the live pilot was built on (294 turns, 21.2%). Airline saves less than live (17.3%), because GLM-5 in τ²-bench's harness makes several calls per turn (§3.15, finding 3).
+
+**4. The v1 answers are published, re-asked.**
+
+- The first Phase 0b run's answers were not kept. Its 8,946 questions were asked again of jev-1.13.0 and published.
+- The bundle reproduces a re-run of the v1 report. Every headline figure moves by at most 0.3 points, and the gate verdicts are the same.
+- Jev does not answer identically every time.
+
+What this changes:
+
+- **The form is D0.** §3.5's named macro-tools are not built. `commit_*` remains, as `stretto_commit`.
+- **Arbitration is a precision setting (§3.6).** Read-only flows save turns on the habit alone, and the arbiter trades some of those savings for fewer detours.
+- **Jev's place narrows** to what the habit cannot see: content decisions, and deployments with few traces (§6, question 9).
+- **Next:**
+  - a paired run large enough to bound pass^1;
+  - the habit alone, live;
+  - where a System-One model earns its place;
+  - counterfactual evaluation from the propensities the proxy logs.
+
 ---
 
 ## 4. Drawbacks
@@ -720,8 +782,8 @@ What this changes:
 - **The harness changes its own data.**
   - Once flows execute, the traces are produced by agent and harness together, so statistics learned from ungated traces need not describe the gated system [Ray 2026].
   - Logged propensities and a little exploration mitigate this; they do not remove it. *Amended (§3.15):* the proxy logs every live decision's probabilities.
-- **Macro-tools might go unused.** Agents given a world model as a tool used it less than 1% of the time [Qian 2026]. Adoption is a measured outcome, not an assumption. If it is low, we add a reference agent loop for the experiments. *Amended (§3.14):* the first live form adds no tools. What must be measured instead is whether the agent repeats the flow's lookups.
-- **Vendor risk.** Jev is proprietary and in early access. It offers no fine-tuning, and there are no public accuracy benchmarks against human labels. Hence the `Oracle` trait and the replay cache.
+- **Macro-tools might go unused.** Agents given a world model as a tool used it less than 1% of the time [Qian 2026]. Adoption is a measured outcome, not an assumption. If it is low, we add a reference agent loop for the experiments. *Amended (§3.14):* the first live form adds no tools. What must be measured instead is whether the agent repeats the flow's lookups. *Amended (§3.16):* named macro-tools are not built, so the risk does not arise.
+- **Vendor risk.** Jev is proprietary and in early access. It offers no fine-tuning, and there are no public accuracy benchmarks against human labels. Hence the `Oracle` trait and the replay cache. *Amended (§3.16):* reduced. Read-only flows save as many turns without a System-One model.
 - **Evaluation is hard (§3.7).**
   - Simulation is optimistic and counterfactual estimates are high-variance.
   - Guarantees in the style of ProbGuard's PAC bounds call for 530 to 10⁵ traces [3].
@@ -739,7 +801,7 @@ What this changes:
 - **Skip single steps the way AutoTool does** [13].
   - It is proven to cut LLM calls by up to 30%.
   - But it works one step at a time on an uncalibrated score, with no outcome model and no way to verify anything. We use it as a comparison point, not as a design.
-- **Compile deterministic workflows the way TraceCompiler does** [24]. This is arm C. It shows how much of the gain comes from structure alone, before any calibrated branch resolution.
+- **Compile deterministic workflows the way TraceCompiler does** [24]. This is arm C. It shows how much of the gain comes from structure alone, before any calibrated branch resolution. *Measured (§3.16):* replayed as a flow that hands every branch back, it saves 0–1.7% of turns, where acting on probabilities saves 21–22% in retail.
 - **Distill the agent into a small policy model, or use R2V-style escalation** [23].
   - These are strong baselines for cost.
   - But they give no typed decision points and no per-decision probabilities to audit.
@@ -773,6 +835,10 @@ What this changes:
 8. ~~**Which agent model runs the first live pilot?**~~ Resolved (§3.14): GLM-5.3, the model the Z.ai coding-plan key serves.
    - Offline, Qwen3.5 clears the gate in both domains, and Qwen3-Max does too (airline with lookup first). They are next once a key for them is at hand.
    - GLM-5 clears it in retail only, with the state predicates, with or without the goal.
+9. **Where does a System-One model earn its place?** (§3.16)
+   - For read-only flows, the habit alone saves as many turns. Jev's weighed answers buy precision: half to two-thirds fewer detours in airline.
+   - The habit here learned from four agents on 74 training tasks. With fewer traces it is weaker, and a zero-shot decider may carry savings too. That is measurable by training the habit on less.
+   - The roles that turn on content are untested: matching a description to a record, and judging a confirmation before a write.
 
 ---
 
@@ -807,6 +873,11 @@ What this changes:
     - live, on ten paired airline tasks, GLM-5.3 took 17% fewer LLM turns with the flow (8 and 9 of 10 passed);
     - the savings depend on the agent's harness as well as its model, so the gate is judged per model, harness and domain;
     - guards refuse a policy-breaking write in 38% of failed airline episodes and 1% of successful ones, each of those five a violation τ²-bench's own notes name; live, GLM-5.3 gave them nothing to refuse, and they did no harm.
+  - Amended again on 2026-09-24 (§3.16), before building macro-tools:
+    - naming a flow could add at most 1.9% of LLM turns in retail and 7.9% in airline over D0, so `plan_*` is not built;
+    - arm C, a flow that hands every branch back, saves 0–1.7% of turns;
+    - the habit alone saves as many turns as the arbiter, and the arbiter cuts detours in airline by half to two-thirds, so arbitration is a precision setting and a flow can run without Jev;
+    - the v1 answers are published, re-asked, and reproduce a re-run within 0.3 points.
 
 ---
 
