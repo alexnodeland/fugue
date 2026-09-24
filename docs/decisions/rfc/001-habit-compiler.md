@@ -657,7 +657,7 @@ Five findings; §3.11, §4, §6 and §7 are updated to match.
 
 - The flow saved 2.2 turns per episode (95% interval 0.5 to 3.9), with fewer turns in 7 of 10 pairs.
 - It acted on every task, with 24 lookups the agent never repeated.
-- None of the three failures came from a flow decision. The one in the flows arm: pushed by the simulated customer, the agent upgraded a basic-economy ticket so that it could then change its flights, which the task forbids (finding 4).
+- None of the three failures came from a flow decision. In the one in the flows arm, the customer would pay under $100 for a change. The agent upgraded the basic-economy reservation (a $301 charge), changed its flights (a $220 refund), and quoted the net, $81. The task counts the upgrade's cost and expects no change.
 - The pilot cost 334 Z.ai credits, 11% less in the flows arm.
 
 **3. The savings follow the harness as well as the model.**
@@ -672,7 +672,7 @@ Five findings; §3.11, §4, §6 and §7 are updated to match.
 - **Retail.** 1 of 500 failed and 28 of 1,324 successful episodes. Each is a break of the written policy that passed the database check. Retail's tools already enforce most of their own policy.
 - **Confirmation.** The confirmation rule, a word list, misses as often in successful episodes as in failed ones, so it is logged, not enforced. Judging a "yes" is a System-One question.
 - **Three-valued.** A rule without the facts to decide (a record never looked up) does not refuse.
-- **Sharpened live.** The basic-economy rule now reads the cabin a reservation was booked in, which closes finding 2's upgrade path. On the published trajectories it fires exactly where the old rule did.
+- **A correction, in time.** After the pilot, the basic-economy rule was changed to refuse finding 2's upgrade path. τ²-bench's own task 32 expects that very path (upgrade a basic-economy reservation, then change its flights), so the change was reverted before the guards ran live.
 
 **5. A flow is audited as a fugue program.**
 
