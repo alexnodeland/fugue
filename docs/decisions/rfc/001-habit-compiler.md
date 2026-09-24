@@ -143,7 +143,7 @@ MCP servers (real tools)
 | Simulate a flow | `PriorHandler` | The world model "dreaming" |
 | Conformance and surprise | `ScoreGivenTrace`, `score_given_trace_reconciled` | `fresh`/`vanished` addresses are structural deviations |
 | Counterfactual evaluation | Re-score a logged trace under a target flow | Log-ratio at decision sites is the importance weight |
-| `commit_*` after `plan_*` | Replay the planned trace (`ReplayHandler`) up to the confirmation site, then continue into the write sites | Every decision resolves exactly as it did at plan time |
+| `commit_*` after `plan_*` | Replay the planned trace (`ReplayHandler`) up to the confirmation site, then continue into the write sites | Every decision resolves exactly as it did at plan time. *Amended (§3.13):* the writes are the ones the LLM specified; the flow decides none |
 | Sub-flow extraction and splicing | `Trace::extract_prefix` / `graft_prefix` | From the F3 trace-surgery work |
 | Flow structure search | `block_regeneration_mh`, `PopulationKernel`, fugue-evo | From the EA-as-PPL work |
 | Online belief over latent task phase | SMC / particle filter | |
@@ -219,6 +219,7 @@ The loop:
   - `plan_<flow>` runs the lookups, the guards and the Jev decisions without writing anything. It returns the exact proposed write calls plus a token.
   - The agent shows the proposal to the user and obtains an explicit "yes", as τ²-bench's policies require.
   - `commit_<flow>(token)` then executes exactly what was planned, by replaying the planned trace up to the confirmation site and continuing into the write sites.
+  - *Amended (§3.13):* flows propose no writes. `plan_*` only reads. `commit_*` executes the write calls the LLM specified after the user's confirmation, and decides nothing itself.
 - **Output is a serializable flow IR** (sites, questions, bindings, guards). It is interpreted into a fugue `Model` at load time. fugue-wasm's `dsl.rs` already interprets a `prob!` subset into real `Model`s at runtime; the flow IR generalizes that.
 - **Macro-tools as options.** The proxy serves each flow as a pair of MCP tools. In options-framework terms:
   - the initiation set is the applicability predicate;
@@ -483,7 +484,11 @@ Five findings; §3.11's decisions table and §6 are updated to match.
 
 **1. Flows only read between LLM turns, so a wrong pick is a detour, not a risk.**
 
-- Under the plan/commit rule (§3.5) a flow never writes. Writes, and any tool not marked read-only, go back to the LLM. v1's projection had let flows execute writes mid-run.
+- A flow decides no writes. Writes, and any tool not marked read-only, go back to the LLM. v1's projection had let flows execute writes mid-run.
+- Plan/commit (§3.5) is amended to match:
+  - `plan_*` only reads, and proposes no writes of its own.
+  - `commit_*` executes, in one call, the write calls the LLM specified after the user's "yes". It decides nothing.
+  - The projection is conservative here: it hands every write back to the LLM, one turn each, instead of batching confirmed writes into one `commit_*` call.
 - A flow that picks the wrong next step makes an extra lookup and then hands back. That costs a pause, and the extra output rides along in later prompts (the projection charges it). Nothing in the environment changes, so offline no decision is risky.
 - The ceiling barely moves. With a perfect System-One model:
   - GLM-5 goes from 29.1% to 28.2% of LLM turns in retail, and from 15.4% to 14.9% in airline;
@@ -536,12 +541,12 @@ Five findings; §3.11's decisions table and §6 are updated to match.
 | Agent model | Retail | Airline | Offline gate |
 |---|---|---|---|
 | Qwen3.5 | 29.7% | 22.5% | Both domains |
-| Qwen3-Max | 24.2% | 19.9% (26.3% lookup first) | Both domains |
+| Qwen3-Max | 24.2% | 19.9% (26.3% lookup first) | Both domains (airline with lookup first) |
 | Gemini 3 Flash | 24.1% | 10.8% | Retail |
 | Gemini 3 Pro | 23.1% | 10.6% | Retail |
 | Claude Sonnet 4.5 | 21.1% | 15.2% | Retail |
-| GPT-5.2, reasoning off | 18.1% (22.8% lookup first) | 2.4% | Retail |
-| GLM-5 | 14.7% (20.5% with predicates, lookup first) | 2.7% | Retail, with predicates |
+| GPT-5.2, reasoning off | 18.1% (22.8% lookup first) | 2.4% | Retail (lookup first) |
+| GLM-5 | 14.7% (20.5% with predicates, lookup first) | 2.7% | Retail (predicates, lookup first) |
 | Claude Opus 4.5 | 14.7% | 2.8% | Neither |
 | GPT-5.2, reasoning high | 13.9% | 2.8% | Neither |
 
@@ -616,7 +621,7 @@ What this changes:
    - No. The best combination reaches 79–81%, and at least 0.99 sure only on 11–25% of decisions.
    - Read-only flows don't need it: acting on weaker picks costs detours, not risk.
 8. **Which agent model runs the first live pilot?**
-   - Offline, Qwen3.5 and Qwen3-Max clear the gate in both domains.
+   - Offline, Qwen3.5 clears the gate in both domains. Qwen3-Max does too, but in airline only with lookup first.
    - GLM-5, whose key is at hand, clears it only in retail, and only with the state predicates.
 
 ---
@@ -641,7 +646,7 @@ What this changes:
   - Amended again the same day (§3.13), after Phase 0b v2:
     - flows only read between LLM turns, so offline the gate is turns saved, and detours are for the live pilot to clear;
     - Jev's answers are combined with the habit, its per-site record and state predicates;
-    - offline, sequential callers (Qwen3.5, Qwen3-Max) clear the gate in both domains; GLM-5 only in retail.
+    - offline, Qwen3.5 clears the gate in both domains (Qwen3-Max too, with lookup first in airline); GLM-5 only in retail.
 
 ---
 
