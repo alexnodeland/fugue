@@ -1,6 +1,6 @@
 # RFC-001: Habit compiler — compiling agent behavior into System-One flows
 
-- **Status:** Accepted (2026-09-23, [#51](https://github.com/alexnodeland/fugue/pull/51)). Amended the same day with what Phase 0 found (§3.12, [#52](https://github.com/alexnodeland/fugue/pull/52)) and with Phase 0b v2's read-only flows and arbitration (§3.13, [#53](https://github.com/alexnodeland/fugue/pull/53)), and on 2026-09-24 with the first live form and pilot (§3.14, [#54](https://github.com/alexnodeland/fugue/pull/54)) with the built implementation, the airline pilot, policy guards and the flow audit (§3.15, [#55](https://github.com/alexnodeland/fugue/pull/55)), and with the arms measured before building macro-tools (§3.16). The design was iterated with @alexnodeland on 2026-09-23; the decisions are in §3.11.
+- **Status:** Accepted (2026-09-23, [#51](https://github.com/alexnodeland/fugue/pull/51)). Amended the same day with what Phase 0 found (§3.12, [#52](https://github.com/alexnodeland/fugue/pull/52)) and with Phase 0b v2's read-only flows and arbitration (§3.13, [#53](https://github.com/alexnodeland/fugue/pull/53)), and on 2026-09-24 with the first live form and pilot (§3.14, [#54](https://github.com/alexnodeland/fugue/pull/54)), with the built implementation, the airline pilot, policy guards and the flow audit (§3.15, [#55](https://github.com/alexnodeland/fugue/pull/55)), and with the arms measured before building macro-tools (§3.16, [#56](https://github.com/alexnodeland/fugue/pull/56)). The design was iterated with @alexnodeland on 2026-09-23; the decisions are in §3.11.
 - **Authors:** @alexnodeland (drafted with Claude Code)
 - **Created:** 2026-09-23
 - **Updated:** 2026-09-24
@@ -713,7 +713,7 @@ What this changes:
 
 ### 3.16 Amendment 5: arm C, the habit alone, and what naming would add (2026-09-24)
 
-Before building `plan_*` (arms C and D), stretto measured what naming a flow could add. It also replayed arm C and a habit-only flow against D0. No LLM ran. The only new spend was $0.078 of Jev questions for the replays, plus $1.11 to re-ask the v1 questions for publication.
+Before building `plan_*` (arms C and D), stretto measured what naming a flow could add. It also replayed arm C and a habit-only flow against D0. No LLM ran. The only new spend was $0.078 of Jev questions for the replays, plus $1.11 to ask the v1 questions a second time.
 
 - **Details:** stretto's [arms results](https://github.com/alexnodeland/stretto/blob/main/docs/results/arms-2026-09-24.md) and the [working paper](https://alexnodeland.github.io/stretto/)'s §5.9.
 
@@ -751,11 +751,11 @@ Four findings; §3.5, §3.6, §3.11, §4, §5, §6 and §7 are updated to match.
 - `stretto-proxy --flow-decider habit` serves a flow with no System-One model: no key, and no cost or latency per question.
 - D0's retail replay reproduces the one the live pilot was built on (294 turns, 21.2%). Airline saves less than live (17.3%), because GLM-5 in τ²-bench's harness makes several calls per turn (§3.15, finding 3).
 
-**4. The v1 answers are published, re-asked.**
+**4. The v1 answers are published.**
 
-- The first Phase 0b run's answers were not kept. Its 8,946 questions were asked again of jev-1.13.0 and published.
-- The bundle reproduces a re-run of the v1 report. Every headline figure moves by at most 0.3 points, and the gate verdicts are the same.
-- Jev does not answer identically every time.
+- The session that ran the first Phase 0b run published its answers, 8,946 of them. They reproduce the v1 report line for line.
+- The same questions, asked again of the same model version, got the same pick 97.0% of the time. The report's headline figures moved by at most 0.3 points, and every gate verdict stayed the same. Both sets are published.
+- Jev does not answer identically twice. A replay cache, not re-asking, is what makes a Phase 0b result reproducible.
 
 What this changes:
 
@@ -877,7 +877,7 @@ What this changes:
     - naming a flow could add at most 1.9% of LLM turns in retail and 7.9% in airline over D0, so `plan_*` is not built;
     - arm C, a flow that hands every branch back, saves 0–1.7% of turns;
     - the habit alone saves as many turns as the arbiter, and the arbiter cuts detours in airline by half to two-thirds, so arbitration is a precision setting and a flow can run without Jev;
-    - the v1 answers are published, re-asked, and reproduce a re-run within 0.3 points.
+    - the v1 answers are published and reproduce the v1 report exactly; asked a second time, Jev keeps the same pick 97% of the time.
 
 ---
 
