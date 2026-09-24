@@ -593,7 +593,7 @@ Five findings; §3.11, §4 and §6 are updated to match.
 
 - For each lookup argument, it learns from training where the values came from: a tool and a path in its result, such as `get_user_details` at `$.orders[*]`.
 - It takes the first value there that has not been looked up yet, preferring one the customer mentioned.
-- It acts when the tool's probability times the binding's agreement is at least 0.3. The agreement is how often that choice matched the agent's own arguments in training: 92% for orders and 60% for products the customer did not mention (95% and 76% when mentioned).
+- It acts when the tool's probability times the binding's agreement is at least 0.3. The agreement is measured per call: how often the arguments it would have bound, all of them at once, matched the agent's own call in training. That is 92% for orders and 60% for products the customer did not mention (95% and 76% when mentioned). A lookup with several arguments, such as airline's flight status (a flight number and a date), counts as agreeing only when every argument matches.
 - On one trial of GLM-5's recorded test episodes (40 episodes; see finding 4), the rule cut detours from 42 to 18 without losing a saved turn. 89% of the flow's lookups were then the agent's own, up from 78%.
 
 **4. The live flow reproduces the projection.** GLM-5's recorded retail test episodes were replayed through the live flow, with real Jev answers and no LLM; a recorded call the flow had already made was skipped.
