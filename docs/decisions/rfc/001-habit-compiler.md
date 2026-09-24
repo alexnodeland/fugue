@@ -1,12 +1,15 @@
 # RFC-001: Habit compiler — compiling agent behavior into System-One flows
 
-- **Status:** Accepted (2026-09-23, [#51](https://github.com/alexnodeland/fugue/pull/51)); amended the same day with what Phase 0 found (§3.12). The design was iterated with @alexnodeland on 2026-09-23; the decisions are in §3.11.
+- **Status:** Accepted (2026-09-23, [#51](https://github.com/alexnodeland/fugue/pull/51)). Amended the same day with what Phase 0 found (§3.12, [#52](https://github.com/alexnodeland/fugue/pull/52)) and with Phase 0b v2's read-only flows and arbitration (§3.13). The design was iterated with @alexnodeland on 2026-09-23; the decisions are in §3.11.
 - **Authors:** @alexnodeland (drafted with Claude Code)
 - **Created:** 2026-09-23
 - **Updated:** 2026-09-23
 - **Supersedes / Related:**
   - runnable spike in [`001-habit-compiler/spike/`](001-habit-compiler/spike/);
-  - implementation in a new repo, [**stretto**](https://github.com/alexnodeland/stretto), with results in [`docs/results/phase0-2026-09-23.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/phase0-2026-09-23.md) (Phase 0a) and [`docs/results/phase0b-2026-09-23-summary.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/phase0b-2026-09-23-summary.md) (Phase 0b, Jev);
+  - implementation in a new repo, [**stretto**](https://github.com/alexnodeland/stretto), with results in:
+    - [`docs/results/phase0-2026-09-23.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/phase0-2026-09-23.md) (Phase 0a);
+    - [`docs/results/phase0b-2026-09-23-summary.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/phase0b-2026-09-23-summary.md) (Phase 0b, Jev);
+    - [`docs/results/phase0b-v2-2026-09-23-summary.md`](https://github.com/alexnodeland/stretto/blob/main/docs/results/phase0b-v2-2026-09-23-summary.md) (Phase 0b v2);
   - TypeSafe AI's Jev (released 2026-09-15).
 
 ---
@@ -140,7 +143,7 @@ MCP servers (real tools)
 | Simulate a flow | `PriorHandler` | The world model "dreaming" |
 | Conformance and surprise | `ScoreGivenTrace`, `score_given_trace_reconciled` | `fresh`/`vanished` addresses are structural deviations |
 | Counterfactual evaluation | Re-score a logged trace under a target flow | Log-ratio at decision sites is the importance weight |
-| `commit_*` after `plan_*` | Replay the planned trace (`ReplayHandler`) up to the confirmation site, then continue into the write sites | Every decision resolves exactly as it did at plan time |
+| `commit_*` after `plan_*` | Replay the planned trace (`ReplayHandler`) up to the confirmation site, then continue into the write sites | Every decision resolves exactly as it did at plan time. *Amended (§3.13):* the writes are the ones the LLM specified; the flow decides none |
 | Sub-flow extraction and splicing | `Trace::extract_prefix` / `graft_prefix` | From the F3 trace-surgery work |
 | Flow structure search | `block_regeneration_mh`, `PopulationKernel`, fugue-evo | From the EA-as-PPL work |
 | Online belief over latent task phase | SMC / particle filter | |
@@ -216,6 +219,7 @@ The loop:
   - `plan_<flow>` runs the lookups, the guards and the Jev decisions without writing anything. It returns the exact proposed write calls plus a token.
   - The agent shows the proposal to the user and obtains an explicit "yes", as τ²-bench's policies require.
   - `commit_<flow>(token)` then executes exactly what was planned, by replaying the planned trace up to the confirmation site and continuing into the write sites.
+  - *Amended (§3.13):* flows propose no writes. `plan_*` only reads. `commit_*` executes the write calls the LLM specified after the user's confirmation, and decides nothing itself.
 - **Output is a serializable flow IR** (sites, questions, bindings, guards). It is interpreted into a fugue `Model` at load time. fugue-wasm's `dsl.rs` already interprets a `prob!` subset into real `Model`s at runtime; the flow IR generalizes that.
 - **Macro-tools as options.** The proxy serves each flow as a pair of MCP tools. In options-framework terms:
   - the initiation set is the applicability predicate;
@@ -366,7 +370,7 @@ These decisions were made during the 2026-09-23 design iteration.
 | Workload | τ²-bench [26]: airline and retail first; telecom's dual-control domain later |
 | Where the harness plugs in | A Rust MCP proxy; flows served as macro-tools |
 | Jev | API access available. Jev owns the four mid-flow roles in §3.5 |
-| Writes | Plan/commit pairs; the agent obtains the user's explicit "yes" between them |
+| Writes | Plan/commit pairs; the agent obtains the user's explicit "yes" between them. *Amended:* between LLM turns flows only read; every write goes back to the LLM, so a wrong pick is a detour rather than a risk (§3.13) |
 | Branches nothing in the flow can settle | Resumable: the flow pauses and returns a token; `resume_<flow>(token, choice)` continues it. Plan/commit is the same mechanism, paused at the confirmation site |
 | Rule guards | Compiled from the policy by an LLM, tested against traces, reviewed by a person |
 | Flow discovery | Traces first; the policy only names flows and checks guards |
@@ -375,8 +379,8 @@ These decisions were made during the 2026-09-23 design iteration.
 | Checking raw writes | A separate experimental arm, so the gains from flows and from checking alone stay separable |
 | Win conditions | All four: fewer LLM calls, tokens and dollars; higher pass^k; Jev agreeing with the frontier model at branches, and well calibrated; fewer policy violations |
 | Code | New public repo, [stretto](https://github.com/alexnodeland/stretto) (MIT); fugue changes go upstream as their own PRs |
-| Phase 2 gate | ≥ 20% fewer LLM turns at ≤ 1 point of pass^1 lost, on held-out tasks, *judged per agent model and domain* (amended: the savings depend on how the agent calls tools, §3.12). Tokens and dollars are projected alongside turns, because a flow also keeps intermediate tool outputs out of the LLM's context |
-| Arbitration | The habit acts only in contexts where its held-out agreement is at least 99%, validated per context rather than by one global threshold. Jev decides everywhere else. *Amended:* validation needs at least 20 decisions from at least 10 distinct tasks; what survives is hand-backs only, so the rule is revisited with the Phase 0b data (§3.12) |
+| Phase 2 gate | ≥ 20% fewer LLM turns at ≤ 1 point of pass^1 lost, on held-out tasks, *judged per agent model and domain* (amended: the savings depend on how the agent calls tools, §3.12). Tokens and dollars are projected alongside turns, because a flow also keeps intermediate tool outputs out of the LLM's context. *Amended again:* read-only flows take no risky decisions, so offline the gate is turns saved. Detours are counted and charged in tokens, and the live pilot must show they cost no pass^1 (§3.13) |
+| Arbitration | The habit acts only in contexts where its held-out agreement is at least 99%, validated per context rather than by one global threshold. Jev decides everywhere else. *Amended:* validation needs at least 20 decisions from at least 10 distinct tasks; what survives is hand-backs only, so the rule is revisited with the Phase 0b data (§3.12). *Amended again:* Jev's answers are no longer taken at their word. A conditional logit combines them with the habit's prior, Jev's record at the site and state predicates, fitted by cross-validation over tasks (§3.13) |
 | Keys | The TypeSafe key is in the environment (Phase 0b ran on 2026-09-23); GLM and MiniMax keys come with Phase 2. Offline work uses mock and replay oracles |
 
 **Experimental arms.** Each arm runs on held-out tasks, with k trials per task:
@@ -468,6 +472,92 @@ Phase 0 finished on τ²-bench's published trajectories: the four 2025 baselines
 - It forwards every MCP line unchanged and records sessions, which `stretto-trace` reads into episodes.
 - Serving flows as macro-tools and checking writes against compiled guards come next.
 
+### 3.13 Amendment 2: read-only flows and arbitration (2026-09-23)
+
+Phase 0b v2 built the question design of §3.5 and the arbitration of §3.6, and measured them the same way as v1:
+
+- **Answers:** jev-1.13.0 answered 32,116 questions, 80.7M input tokens, for $3.39.
+- **Agent models:** the four 2025 baselines as source models, and the nine leaderboard models as transfer targets.
+- **Details:** in stretto's [v2 summary](https://github.com/alexnodeland/stretto/blob/main/docs/results/phase0b-v2-2026-09-23-summary.md).
+
+Five findings; §3.11's decisions table and §6 are updated to match.
+
+**1. Flows only read between LLM turns, so a wrong pick is a detour, not a risk.**
+
+- A flow decides no writes. Writes, and any tool not marked read-only, go back to the LLM. v1's projection had let flows execute writes mid-run.
+- Plan/commit (§3.5) is amended to match:
+  - `plan_*` only reads, and proposes no writes of its own.
+  - `commit_*` executes, in one call, the write calls the LLM specified after the user's "yes". It decides nothing.
+  - The projection is conservative here: it hands every write back to the LLM, one turn each, instead of batching confirmed writes into one `commit_*` call.
+- A flow that picks the wrong next step makes an extra lookup and then hands back. That costs a pause, and the extra output rides along in later prompts (the projection charges it). Nothing in the environment changes, so offline no decision is risky.
+- The ceiling barely moves. With a perfect System-One model:
+  - GLM-5 goes from 29.1% to 28.2% of LLM turns in retail, and from 15.4% to 14.9% in airline;
+  - the 2025 baselines pooled go from 22.3% to 21.0% in retail, and from 20.6% to 17.7% in airline.
+
+**2. Narrower questions did not make Jev more accurate.** Scored the same way, on the same 300-per-domain sample of decisions:
+
+| Domain | v1 question | v2 question |
+|---|---|---|
+| Retail | 77.7% | 73.1% |
+| Airline | 73.4% | 73.4% |
+
+- The v2 question offers only the lookups seen at the site, over a state slice.
+- The stop question asked on its own does worse still.
+
+**3. Arbitration and state predicates help; describing the tools does not.**
+
+- **The arbiter.** A conditional logit, fitted by cross-validation over tasks on the source models only, weighs:
+  - the habit's prior;
+  - both question designs;
+  - Jev's record at the site on other tasks (a one-coin Dawid–Skene sensor);
+  - the answers to state predicates.
+- **The predicates.** Three domain-agnostic ones were proposed as §3.4 describes:
+  - records in a list still unchecked;
+  - options not yet looked up;
+  - something only the customer can give.
+- **Agreement with the agent's next step:**
+
+  | Configuration | Retail | Airline | GLM-5, retail | GLM-5, airline |
+  |---|---|---|---|---|
+  | One question (Jev alone) | 76.2% | 72.4% | 77.9% | 63.3% |
+  | Combined | 77.9% | 74.3% | 81.7% | 69.5% |
+  | Combined, with predicates | 80.5% | 78.9% | 85.7% | 75.8% |
+
+  - Where the combination is at least 0.99 sure, it agrees 99.2% of the time in retail (on 10.6% of decisions) and 97.0% in airline (on 25.2%).
+  - "Records still unchecked" carries the most weight.
+- **Dataflow hints** describe each lookup by the write arguments its results supplied in training. They fixed the sites they targeted, but did not raise agreement overall.
+
+**4. Because detours are harmless, flows can act on weaker picks.**
+
+- At p ≥ 0.9 read-only flows save 2.5–5.9% of LLM turns.
+- Acting at p ≥ 0.5 saves 15–16% in retail and 10–11% in airline, pooled over the 2025 baselines.
+- Taking the likeliest lookup whenever it is at least 0.3 likely (*lookup first*) saves 17% and 13%.
+  - Handing back costs a turn and a wrong lookup does not, so this is the cost-optimal rule for read-only flows.
+  - Detours then show up in 57–70% of episodes.
+  - Dollars fall faster than turns even after charging detours, because a typical lookup returns only 200–250 tokens.
+
+**5. Sequential callers clear the gate offline.** Read-only flows, combined answers trusted at p ≥ 0.5, on the transfer targets:
+
+| Agent model | Retail | Airline | Offline gate |
+|---|---|---|---|
+| Qwen3.5 | 29.7% | 22.5% | Both domains |
+| Qwen3-Max | 24.2% | 19.9% (26.3% lookup first) | Both domains (airline with lookup first) |
+| Gemini 3 Flash | 24.1% | 10.8% | Retail |
+| Gemini 3 Pro | 23.1% | 10.6% | Retail |
+| Claude Sonnet 4.5 | 21.1% | 15.2% | Retail |
+| GPT-5.2, reasoning off | 18.1% (22.8% lookup first) | 2.4% | Retail (lookup first) |
+| GLM-5 | 14.7% (20.5% with predicates, lookup first) | 2.7% | Retail (predicates, lookup first) |
+| Claude Opus 4.5 | 14.7% | 2.8% | Neither |
+| GPT-5.2, reasoning high | 13.9% | 2.8% | Neither |
+
+- In airline the heavy parallel callers can't pass even in principle: their read-only ceilings are 12–17% (§3.12).
+- The detour rate is the price of each pass: from 9% to 75% of episodes.
+
+What this changes:
+
+- **The offline gate is now turns saved.** Detours are counted and charged in tokens. The live pilot must show that they do not cost pass^1 before anything is deployed.
+- **The pilot model is chosen by the projection.** Offline, Qwen3.5 is the strongest candidate. GLM-5, whose key is at hand, clears the gate only in retail, and only with the predicates.
+
 ---
 
 ## 4. Drawbacks
@@ -526,10 +616,13 @@ Phase 0 finished on τ²-bench's published trajectories: the four 2025 baselines
 6. **What should a System-One decision be scored against?**
    - Agreement with the agent undercounts valid alternatives, such as looking up two orders in either order.
    - Replayed outcomes can't settle this, so only live pass^1 can.
-7. **Can System-One questions reach roughly 99% agreement on the decisions flows need?**
-   - This is the crux after Phase 0b.
-   - Candidates are narrower questions (§3.5), a Bayesian combination with the habit (§3.6), and a stop question asked on its own.
-   - Failing that, flows could be restricted to the sites where Jev is reliable, at lower savings.
+   - With read-only flows the question narrows: does a detour (an extra lookup before handing back) ever cost pass^1? (§3.13)
+7. ~~**Can System-One questions reach roughly 99% agreement on the decisions flows need?**~~ Answered for now (§3.13):
+   - No. The best combination reaches 79–81%, and at least 0.99 sure only on 11–25% of decisions.
+   - Read-only flows don't need it: acting on weaker picks costs detours, not risk.
+8. **Which agent model runs the first live pilot?**
+   - Offline, Qwen3.5 clears the gate in both domains. Qwen3-Max does too, but in airline only with lookup first.
+   - GLM-5, whose key is at hand, clears it only in retail, and only with the state predicates.
 
 ---
 
@@ -550,6 +643,10 @@ Phase 0 finished on τ²-bench's published trajectories: the four 2025 baselines
     - context validation counts distinct tasks;
     - flows are compiled from the 2026 frontier runs;
     - zero-shot Jev, as asked in v1, saves only 4–5% of turns at acceptable risk. The next iterations target the question design and arbitration that §3.5–3.6 specify.
+  - Amended again the same day (§3.13), after Phase 0b v2:
+    - flows only read between LLM turns, so offline the gate is turns saved, and detours are for the live pilot to clear;
+    - Jev's answers are combined with the habit, its per-site record and state predicates;
+    - offline, Qwen3.5 clears the gate in both domains (Qwen3-Max too, with lookup first in airline); GLM-5 only in retail.
 
 ---
 
