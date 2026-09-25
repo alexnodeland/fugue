@@ -159,6 +159,34 @@ let prob: f64 = coin.log_prob(&true);
 
 All distributions work with every Fugue handler (prior, replay, MCMC, etc.) without modification - the type safety is preserved throughout the inference pipeline.
 
+### Site Metadata for Handlers
+
+A handler sees only `(addr, dist)` at a site. There are two ways to give it more:
+
+- **Carry it with the distribution.** Every built-in distribution exposes itself through `Distribution::as_any`, so a handler can recognise it with `dist.downcast_ref::<Categorical>()` and read its `probs()` directly, rather than probing `log_prob` over the support. `WithMeta<D, M>` attaches metadata `M` to a distribution `D`, such as a question, the names of the options or a slice of state. It samples and scores exactly as `D` does, so only a handler that looks for it can tell the difference. Use this for metadata that belongs to the site, including metadata that depends on earlier draws.
+- **Keep it in the handler.** Metadata that is known outside the model can live in a `HashMap<Address, M>` that the handler holds and looks up by `addr`. The model doesn't change.
+
+```rust
+# use fugue::*;
+#[derive(Clone)]
+struct Question {
+    options: Vec<&'static str>,
+}
+
+let site = WithMeta::new(
+    Categorical::new(vec![0.7, 0.2, 0.1]).unwrap(),
+    Question { options: vec!["search", "edit", "test"] },
+);
+
+// What a handler's `on_sample_usize` receives, and how it reads the site. A
+// handler that gets `None` falls back to its usual behaviour.
+let dist: &dyn Distribution<usize> = &site;
+if let Some(q) = dist.downcast_ref::<WithMeta<Categorical, Question>>() {
+    assert_eq!(q.meta().options[0], "search");
+    assert_eq!(q.dist().probs()[0], 0.7);
+}
+```
+
 ## Evolution Strategy
 
 - **Stable API**: The `Distribution<T>` trait and core distributions are considered stable

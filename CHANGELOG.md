@@ -29,6 +29,28 @@ For the initial 0.1.0 release notes, see `.github/CHANGELOG.md`.
   lines, against 76); the logging decorator, which acts on every site, stays a
   plain `Handler`, since it would save nothing.
 
+- **Site metadata for handlers
+  ([#63](https://github.com/alexnodeland/fugue/issues/63))**. A handler sees only `(addr, dist)` at
+  a site, and can now recognise the distribution by type. `Distribution<T>`
+  gains a default method `as_any(&self) -> Option<&dyn Any>` that returns
+  `None`, so existing implementations and handlers are unaffected. Every
+  built-in distribution returns `Some(self)`, and `dyn Distribution<T>` gains
+  `downcast_ref::<D>()`: a handler at a `usize` site reads a `Categorical`'s
+  `probs()` directly instead of probing `log_prob` over the support.
+  `WithMeta<D, M>` (exported at the root) carries metadata `M`, such as a
+  question, option names or a state slice, with a distribution `D`. It
+  forwards `sample`, `log_prob` and `support`, so every existing handler and
+  inference routine records the same trace as with the bare `D`, draw for
+  draw, while a handler that knows the type reads `meta()` and `dist()`.
+  Metadata known outside the model can stay in a `HashMap<Address, M>` held by
+  the handler. `fugue-wasm`'s `DynDist` adapter forwards `as_any`.
+
+  Pinned by `tests/f_site_metadata.rs`: a handler that answers a
+  `WithMeta<Categorical, Question>` site by option name and falls back to the
+  prior elsewhere; bit-identical `PriorHandler`, `ScoreGivenTrace` and
+  adaptive-MH traces for wrapped and bare sites of every value type; a foreign
+  distribution that keeps the default; and `clone_box` keeping the metadata.
+
 ## [0.2.3] - 2026-09-05
 
 ### Fixed

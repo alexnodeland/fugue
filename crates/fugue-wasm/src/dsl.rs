@@ -1050,6 +1050,12 @@ impl<T: Clone + 'static> Distribution<T> for DynDist<T> {
         // (FG-N1) sees the real bounds, not the `Real` default.
         self.0.support()
     }
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        // Forward too (#63): like `clone_box`, the adapter stays invisible, so
+        // a handler that downcasts the site sees the built distribution (e.g.
+        // a `Categorical`), not `DynDist`.
+        self.0.as_any()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1330,5 +1336,18 @@ mod tests {
         assert!(t.get_usize(&addr!("z")).is_some());
         assert!(t.total_log_weight().is_finite());
         assert!(cm.take_warnings().is_empty());
+    }
+
+    #[test]
+    fn dyn_dist_is_transparent_to_downcasts() {
+        // #63: a handler downcasting a DSL-built site sees the distribution
+        // itself, as it would in compiled Rust.
+        let built: Box<dyn Distribution<usize>> =
+            Box::new(Categorical::new(vec![0.3, 0.7]).unwrap());
+        let site = DynDist(built);
+        let dist: &dyn Distribution<usize> = &site;
+        let cat = dist.downcast_ref::<Categorical>().expect("a Categorical");
+        assert_eq!(cat.probs(), &[0.3, 0.7]);
+        assert!(dist.downcast_ref::<DynDist<usize>>().is_none());
     }
 }
