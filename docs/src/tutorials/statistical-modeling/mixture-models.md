@@ -270,12 +270,14 @@ $$\text{WAIC} = -2(\text{lppd} - p_{\text{WAIC}})$$
 
 Components with different regression relationships:
 
-```admonish note title="No Dirichlet distribution"
-Fugue's 17 distributions (`src/core/distribution/`) do not include `Dirichlet`. For symmetric
-mixing weights over more than two components, sample a **stick-breaking** decomposition
-instead: `n_components - 1` independent `Beta(1, α)` draws, each carving its share off what's
-left of the stick. This is the same construction the Dirichlet Process section below uses for
-infinitely many components, truncated to a fixed `n_components`.
+```admonish note title="Dirichlet mixing weights"
+Sites are scalar, so Dirichlet mixing weights are built from scalar sites:
+`sample_dirichlet("w", &alpha)` draws `Gamma(αₖ, 1)` sites at `addr!("w", k)` and normalizes
+them, which gives exactly `Dirichlet(α)` weights (see `fugue::core::conjugate`). The example
+below uses a different prior, **stick-breaking**: `n_components - 1` independent `Beta(1, α)`
+draws, each carving its share off what's left of the stick. This is the construction the
+Dirichlet Process section below uses for infinitely many components, truncated to a fixed
+`n_components`; with more than two components it is not a symmetric Dirichlet.
 ```
 
 ```rust,ignore
@@ -311,7 +313,7 @@ fn mixture_regression_model(
     n_components: usize
 ) -> Model<(Vec<f64>, Vec<(f64, f64)>, Vec<f64>)> {
     prob! {
-        // Mixing weights via stick-breaking (alpha = 1.0: uniform over the simplex)
+        // Mixing weights via truncated stick-breaking (alpha = 1.0)
         let mixing_weights <- stick_breaking_weights(0, n_components, 1.0, 1.0, Vec::new());
 
         // Component-specific regression parameters — independent per component,
@@ -365,7 +367,7 @@ fn robust_mixture_model(
 ) -> Model<(Vec<f64>, Vec<(f64, f64, f64)>)> {
     prob! {
         // Mixing weights via stick-breaking (see `stick_breaking_weights` above;
-        // Fugue has no `Dirichlet`)
+        // `sample_dirichlet` gives Dirichlet weights instead)
         let mixing_weights <- stick_breaking_weights(0, n_components, 1.0, 1.0, Vec::new());
 
         // t-distribution components for robustness — independent per component

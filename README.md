@@ -27,7 +27,7 @@
 ## ✨ Features
 
 - **Monadic PPL**: Compose probabilistic programs using pure functional abstractions
-- **Type-Safe Distributions**: 17 built-in probability distributions with natural return types
+- **Type-Safe Distributions**: 17 built-in probability distributions with natural return types, plus Dirichlet/Multinomial conjugate helpers
 - **Multiple Inference Methods**: MCMC, HMC, SMC, Variational Inference, ABC
 - **Comprehensive Diagnostics**: R-hat convergence, effective sample size, validation
 - **Numerically Stable**: Log-space computations throughout for robust probability arithmetic
@@ -44,6 +44,8 @@
 ## 📦 Distributions
 
 Bernoulli, Beta, Binomial, Categorical, Cauchy, ChiSquared, DiscreteUniform, Exponential, Gamma, InverseGamma, Laplace, LogNormal, Normal, Poisson, StudentT, Uniform, Weibull — 17 in total, each with natural return types and validated parameters.
+
+Sites are scalar, so the vector-valued `Dirichlet` and `Multinomial` are standalone distributions (sampling and scoring outside a model). The `core::conjugate` module adds log-space conjugate helpers (Dirichlet–multinomial and Beta–binomial marginal likelihoods, posterior updates, predictives) and `sample_dirichlet`, which draws a Dirichlet vector inside a model from scalar Gamma sites.
 
 ## 🧪 Where Fugue stands today
 

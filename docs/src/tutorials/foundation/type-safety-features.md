@@ -83,10 +83,12 @@ This ensures that sampling operations return values in their natural mathematica
 | Normal($\mu, \sigma^2$), Beta, Gamma, ... | $\mathbb{R}$ (or a subset) | `f64` | Continuous values |
 
 ```admonish note title="17 distributions, 5 natural return types"
-Fugue ships 17 distributions total, every one returning its mathematically
+Fugue ships 17 site distributions, every one returning its mathematically
 natural type — `bool`, `u64`, `usize`, `i64`, or `f64`. `DiscreteUniform` is
 the one distribution in the crate with `i64` support, since it's the only
-distribution whose domain can go negative.
+distribution whose domain can go negative. The vector-valued `Dirichlet` and
+`Multinomial` (`Vec<f64>`, `Vec<u64>`) live in `fugue::core::conjugate`; they
+are standalone distributions, not site types.
 ```
 
 ### Type-Theoretic Properties
