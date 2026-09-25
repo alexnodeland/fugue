@@ -71,7 +71,22 @@ The spike surfaced six changes to `fugue-ppl`. All are additive, and they will g
    - This is a legitimate choice for a handler to make, and the spike does it.
    - It deserves a how-to page.
 
-*Status (2026-09-25):* all six are open, tracked in [#61](https://github.com/alexnodeland/fugue/issues/61). stretto uses fugue offline only: `stretto audit` runs a flow as a fugue program, simulating it with `PriorHandler` and scoring recorded episodes with `ScoreGivenTrace`, and the habit's back-off concentration is sampled with adaptive Metropolis–Hastings. Its live flows run as plain Rust. Items 1, 2 and 4 are what would let a live flow be a fugue program, as the full RFC's §3.5 intends.
+*Status (2026-09-25):* all six are built, each in its own PR, tracked in [#61](https://github.com/alexnodeland/fugue/issues/61):
+
+1. async interpretation, [#71](https://github.com/alexnodeland/fugue/pull/71);
+2. site metadata, [#70](https://github.com/alexnodeland/fugue/pull/70);
+3. the delegating adapter, [#69](https://github.com/alexnodeland/fugue/pull/69);
+4. the program format, [#74](https://github.com/alexnodeland/fugue/pull/74);
+5. the conjugate helpers, [#72](https://github.com/alexnodeland/fugue/pull/72);
+6. the how-to, [#73](https://github.com/alexnodeland/fugue/pull/73).
+
+A live flow is now a fugue program, as the full RFC's §3.5 intends ([stretto 449c6b3](https://github.com/alexnodeland/stretto/commit/449c6b3c33befdd533eedd52c263e1a86b5cf51d)):
+
+- **Stored.** A flow's file holds its run in the program format (item 4). stretto registers the flow's own distributions for it, and they carry their site as metadata (item 2).
+- **Executed.** `stretto-proxy` interprets the program with `run_async` (item 1).
+- **Audited.** The proxy logs each run's trace, which `ScoreGivenTrace` scores again under the same program.
+
+Offline, stretto uses fugue as before. `stretto audit` simulates a flow with `PriorHandler` and scores recorded episodes with `ScoreGivenTrace`. The habit's back-off concentration is sampled with adaptive Metropolis–Hastings.
 
 ---
 
@@ -80,7 +95,7 @@ The spike surfaced six changes to `fugue-ppl`. All are additive, and they will g
 - **Outcome:** Accepted on 2026-09-23 by @alexnodeland (merged in [#51](https://github.com/alexnodeland/fugue/pull/51)).
 - **Notes:**
   - Implementation proceeds in [stretto](https://github.com/alexnodeland/stretto).
-  - The fugue changes in §3.9 land as their own PRs, tracked in [#61](https://github.com/alexnodeland/fugue/issues/61).
+  - The fugue changes in §3.9 land as their own PRs, tracked in [#61](https://github.com/alexnodeland/fugue/issues/61). All six landed on 2026-09-25, in [#69](https://github.com/alexnodeland/fugue/pull/69)–[#74](https://github.com/alexnodeland/fugue/pull/74).
   - Amended eight times as stretto's results came in (§3.12–§3.19, [#52](https://github.com/alexnodeland/fugue/pull/52)–[#60](https://github.com/alexnodeland/fugue/pull/60)). The amendments' findings are summarized in [stretto's copy](https://github.com/alexnodeland/stretto/blob/main/docs/rfc/001-habit-compiler.md#7-decision).
   - Moved on 2026-09-25 ([#68](https://github.com/alexnodeland/fugue/pull/68)): the design and its amendments went to stretto, which is where the RFC is amended from now on. This page keeps fugue's side.
 
