@@ -24,6 +24,7 @@ pub use core::model::{
     factor, guard, observe, pure, sample, sample_bool, sample_f64, sample_i64, sample_u64,
     sample_usize, sequence_vec, traverse_vec, zip, Model, ModelExt, SampleType,
 };
+pub use runtime::delegate::{Delegate, Overrides};
 pub use runtime::handler::Handler;
 pub use runtime::interpreters::{
     score_given_trace_reconciled, PriorHandler, ReconcileReport, ReplayHandler, SafeReplayHandler,

@@ -10,6 +10,25 @@ For the initial 0.1.0 release notes, see `.github/CHANGELOG.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **A delegating handler adapter, `Delegate` and `Overrides`
+  ([#64](https://github.com/alexnodeland/fugue/issues/64))**, both exported at
+  the crate root. `Delegate::with(inner, overrides)` is a `Handler` that sends
+  each site to the hook of the same name on `overrides`, which takes the inner
+  handler as an extra argument; every hook defaults to forwarding to it, so a
+  handler that cares about one kind of site writes one hook instead of all
+  ten. `Delegate::new(inner)` overrides nothing. Delegates nest, the `i64`
+  hooks forward too (a delegate panics at an `i64` site only if its inner
+  handler does), and `Handler` itself is unchanged. Pinned by tests that
+  `Delegate::new` reproduces `PriorHandler`, `ReplayHandler` and
+  `ScoreGivenTrace` bit for bit (values, choices, `logp` and all three
+  accumulators) on a model with sample and observe sites of all five value
+  types and a factor. The Custom Handlers how-to and
+  `examples/custom_handlers.rs` now write the filtering decorator with it (54
+  lines, against 76); the logging decorator, which acts on every site, stays a
+  plain `Handler`, since it would save nothing.
+
 ## [0.2.3] - 2026-09-05
 
 ### Fixed
