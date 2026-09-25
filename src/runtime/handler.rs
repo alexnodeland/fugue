@@ -10,6 +10,10 @@ use crate::runtime::trace::Trace;
 /// Handlers define how to interpret the three fundamental effects in probabilistic programming:
 /// sampling, observation, and factoring. Different implementations enable different execution modes.
 ///
+/// To change what an existing handler does at some kinds of site and forward the rest to it,
+/// wrap it in a [`Delegate`](crate::runtime::delegate::Delegate) instead of implementing every
+/// method.
+///
 /// Example:
 /// ```rust
 /// # use fugue::*;

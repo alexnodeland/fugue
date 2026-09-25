@@ -196,6 +196,8 @@ impl<H: Handler> Handler for LoggingHandler<H> {
 # let (_result, _trace) = runtime::handler::run(logging_handler, model);
 ```
 
+A decorator that changes only some kinds of site need not forward the others by hand: [`Delegate`](crate::runtime::delegate::Delegate) wraps a handler and forwards every site its [`Overrides`](crate::runtime::delegate::Overrides) do not take over.
+
 ## Design & Evolution
 
 ### Status

@@ -63,7 +63,7 @@ where the **carrier type** varies by handler implementation.
 <div class="fugue-explorable fv-inline" data-viz="trace-ticker" data-caption="Every Handler call ends here: a trace is the recording of addr · value · log-weight this widget types out live."></div>
 
 ```admonish note title="i64 sample sites"
-The `Handler` trait also has `on_sample_i64`/`on_observe_i64` for signed discrete distributions (`DiscreteUniform`). Both have default implementations that panic with a precise message, so handlers written against the four types above keep compiling unchanged — override them only if your model actually samples an `i64`-valued distribution.
+The `Handler` trait also has `on_sample_i64`/`on_observe_i64` for signed discrete distributions (`DiscreteUniform`). Both have default implementations that panic with a precise message, so handlers written against the four types above keep compiling unchanged — override them only if your model actually samples an `i64`-valued distribution. A `Delegate` (below) forwards them to the handler it wraps, so it panics at an `i64` site only if that handler does.
 ```
 
 ## Decorator Pattern for Handler Composition
@@ -92,9 +92,13 @@ graph LR
 - **Identity**: $\text{id} \circ h = h \circ \text{id} = h$
 - **Effect Preservation**: Core semantics remain unchanged
 
+Fugue ships the forwarding half of a decorator as `fugue::Delegate`. A `Delegate` wraps an inner handler and an `Overrides` value: each site goes to the hook of the same name on the `Overrides`, which takes the inner handler as an extra argument, and every hook defaults to forwarding the site to it, so a decorator writes only the hooks it needs. `Delegate::with(inner, overrides)` builds one, `Delegate::new(inner)` forwards everything (the identity above), and a `Delegate` is itself a `Handler`, so decorators nest. A decorator that acts on every site, like this logger, is written against `Handler` directly:
+
 ```rust,ignore
 {{#include ../../../examples/custom_handlers.rs:logging_handler}}
 ```
+
+What `Delegate` saves is the forwarding a decorator does not want to write, so it pays off for a decorator that acts on a few kinds of site. The filtering handler below overrides 2 of the 12 hooks and takes 54 lines, against 76 written against `Handler`. This logger acts on every site, so it would save nothing: each hook would carry the extra `inner` argument, and it would take 126 lines instead of 82.
 
 **Decorator Benefits:**
 
@@ -120,7 +124,7 @@ Handlers can maintain state to accumulate statistics and monitor model behavior:
 
 ## Conditional and Filtering Handlers
 
-Implement business logic and constraints through conditional handling:
+Implement business logic and constraints through conditional handling. A filter that acts on a few kinds of site is where `Delegate` pays off: it overrides the hooks for those sites, and the default hooks forward the rest:
 
 ```rust,ignore
 {{#include ../../../examples/custom_handlers.rs:filtering_handler}}

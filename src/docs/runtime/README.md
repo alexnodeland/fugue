@@ -14,6 +14,7 @@ The runtime solves the fundamental challenge in probabilistic programming: **how
 This flexibility is achieved through a **clean effect handler architecture** with three integrated components:
 
 - **[Handler System](handler.md)**: The `Handler` trait and `run` function provide type-safe execution with algebraic effects
+  - **[Delegating Handlers](crate::runtime::delegate)**: `Delegate` wraps a handler and forwards every site to it, except those its `Overrides` take over
 - **[Built-in Interpreters](interpreters.md)**: Five foundational handlers (`PriorHandler`, `ReplayHandler`, `ScoreGivenTrace`, etc.)
 - **[Trace System](trace.md)**: The foundational data structures (`Trace`, `Choice`, `ChoiceValue`) that record execution history
 

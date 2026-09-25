@@ -339,18 +339,18 @@ impl<H: Handler> Handler for StatisticsHandler<H> {
 // ANCHOR_END: statistics_handler
 
 // ANCHOR: filtering_handler
-/// Handler that filters/modifies values based on conditions
-struct FilteringHandler<H: Handler> {
-    inner: H,
+/// Handler decorator that filters/modifies values based on conditions, written
+/// as the `Overrides` of a `Delegate`: it overrides the f64 and bool sample
+/// sites, and every other site keeps the default hook, which forwards it.
+struct Filtering {
     f64_clamp_range: Option<(f64, f64)>,
     bool_flip_probability: f64,
     rng: rand::rngs::ThreadRng,
 }
 
-impl<H: Handler> FilteringHandler<H> {
-    fn new(inner: H, f64_clamp_range: Option<(f64, f64)>, bool_flip_probability: f64) -> Self {
+impl Filtering {
+    fn new(f64_clamp_range: Option<(f64, f64)>, bool_flip_probability: f64) -> Self {
         Self {
-            inner,
             f64_clamp_range,
             bool_flip_probability,
             rng: thread_rng(),
@@ -358,9 +358,14 @@ impl<H: Handler> FilteringHandler<H> {
     }
 }
 
-impl<H: Handler> Handler for FilteringHandler<H> {
-    fn on_sample_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>) -> f64 {
-        let mut value = self.inner.on_sample_f64(addr, dist);
+impl<H: Handler> Overrides<H> for Filtering {
+    fn on_sample_f64(
+        &mut self,
+        inner: &mut H,
+        addr: &Address,
+        dist: &dyn Distribution<f64>,
+    ) -> f64 {
+        let mut value = inner.on_sample_f64(addr, dist);
 
         // Apply clamping if specified
         if let Some((min, max)) = self.f64_clamp_range {
@@ -370,8 +375,13 @@ impl<H: Handler> Handler for FilteringHandler<H> {
         value
     }
 
-    fn on_sample_bool(&mut self, addr: &Address, dist: &dyn Distribution<bool>) -> bool {
-        let mut value = self.inner.on_sample_bool(addr, dist);
+    fn on_sample_bool(
+        &mut self,
+        inner: &mut H,
+        addr: &Address,
+        dist: &dyn Distribution<bool>,
+    ) -> bool {
+        let mut value = inner.on_sample_bool(addr, dist);
 
         // Flip boolean with specified probability
         if self.rng.gen::<f64>() < self.bool_flip_probability {
@@ -379,38 +389,6 @@ impl<H: Handler> Handler for FilteringHandler<H> {
         }
 
         value
-    }
-
-    fn on_sample_u64(&mut self, addr: &Address, dist: &dyn Distribution<u64>) -> u64 {
-        self.inner.on_sample_u64(addr, dist)
-    }
-
-    fn on_sample_usize(&mut self, addr: &Address, dist: &dyn Distribution<usize>) -> usize {
-        self.inner.on_sample_usize(addr, dist)
-    }
-
-    fn on_observe_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>, value: f64) {
-        self.inner.on_observe_f64(addr, dist, value);
-    }
-
-    fn on_observe_bool(&mut self, addr: &Address, dist: &dyn Distribution<bool>, value: bool) {
-        self.inner.on_observe_bool(addr, dist, value);
-    }
-
-    fn on_observe_u64(&mut self, addr: &Address, dist: &dyn Distribution<u64>, value: u64) {
-        self.inner.on_observe_u64(addr, dist, value);
-    }
-
-    fn on_observe_usize(&mut self, addr: &Address, dist: &dyn Distribution<usize>, value: usize) {
-        self.inner.on_observe_usize(addr, dist, value);
-    }
-
-    fn on_factor(&mut self, log_weight: f64) {
-        self.inner.on_factor(log_weight);
-    }
-
-    fn finish(self) -> Trace {
-        self.inner.finish()
     }
 }
 // ANCHOR_END: filtering_handler
@@ -742,10 +720,12 @@ fn main() {
         rng: &mut rng,
         trace: Trace::default(),
     };
-    let filtering_handler = FilteringHandler::new(
+    let filtering_handler = Delegate::with(
         base_handler,
-        Some((-2.0, 2.0)), // Clamp f64 values to [-2, 2]
-        0.1,               // 10% chance to flip booleans
+        Filtering::new(
+            Some((-2.0, 2.0)), // Clamp f64 values to [-2, 2]
+            0.1,               // 10% chance to flip booleans
+        ),
     );
 
     let filter_test_model = || {
