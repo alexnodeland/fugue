@@ -13,8 +13,8 @@ draws, not a JavaScript imitation of them.
 
 ## What the editor understands
 
-The playground accepts the statement forms of `prob!`, with data arrays
-provided as JSON (an object of named arrays, or a bare array bound to
+The playground accepts the statement forms of `prob!`, with data provided as
+JSON (an object of named arrays and scalars, or a bare array bound to
 `data`):
 
 ```text
@@ -23,6 +23,9 @@ let m = 2.0 * p - 1.0;                          // deterministic let
 observe(addr!("y"), Normal(m, 0.8), 1.4);       // condition on data
 factor(-0.5 * m * m);                           // add a log-weight
 for i in 0..data.len() { ... }                  // plates
+if m > 0.0 { ... } else { ... }                 // branches
+m = m * 2.0;                                    // reassign a variable
+break;                                          // leave a loop early
 pure(p)                                         // the model's return value
 ```
 
@@ -32,15 +35,19 @@ parses the same as `Normal(0.0, 1.0)`. Available distributions: `Normal`,
 `StudentT`, `Cauchy`, `Laplace`, `Weibull`, `ChiSquared`, `Bernoulli`,
 `Binomial`, `Poisson`, `Categorical`, `DiscreteUniform` — the same
 constructors, parameterizations, and support checks as the crate, because
-they *are* the crate. Expressions know `+ - * /`, `exp`, `ln`, `sqrt`,
-`abs`, `pow`, `min`, `max`, `floor`, `sin`, `cos`, `tanh`, array indexing
-`y[i]`, and `.len()`.
+they *are* the crate. Expressions know `+ - * /`, the comparisons
+`== != < <= > >=`, `&& || !`, `exp`, `ln`, `sqrt`, `abs`, `pow`, `min`,
+`max`, `floor`, `sin`, `cos`, `tanh`, array literals `[a, b]`, array
+indexing `y[i]`, and `.len()`. Variables are scoped as in Rust, and sites
+keep their natural types: a `Bernoulli` draw is a `bool`, a `Poisson` draw
+a count.
 
-Two honest limitations: parameter regions that would make a distribution
-invalid (say, a negative scale reached through your arithmetic) score as
-impossible (`-inf`) rather than erroring, exactly how the samplers treat
-leaving a support; and the interpreter covers the statement subset above,
-not arbitrary Rust — for that, there is `cargo add fugue-ppl`.
+Two honest limitations: runtime errors — a parameter region that would make
+a distribution invalid (say, a negative scale reached through your
+arithmetic), an index past the end of an array — score as impossible
+(`-inf`) and show a warning rather than stopping the run, exactly how the
+samplers treat leaving a support; and the interpreter covers the statement
+subset above, not arbitrary Rust — for that, there is `cargo add fugue-ppl`.
 
 ## Things to try
 
@@ -67,7 +74,9 @@ not arbitrary Rust — for that, there is `cargo add fugue-ppl`.
 `crates/fugue-wasm` (in the fugue repository) exposes wasm-bindgen entry
 points over the crate: compile a model source + data payload, then drive
 `step(n)` per animation frame and read draws and diagnostics back as typed
-arrays. Sampler state lives in Rust — traces, adaptation state, tuned step
+arrays. The model language itself is `fugue::program` (the crate's
+`program` feature), so the same programs — as text or as JSON — build the
+same models in any Rust host. Sampler state lives in Rust — traces, adaptation state, tuned step
 sizes — and every run is seeded, so a seed is a replayable recording here
 too. The interactive figures in the explorables chapters use the same
 package for their samplers; only their canvas rendering is JavaScript.

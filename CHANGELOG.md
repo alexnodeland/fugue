@@ -111,6 +111,35 @@ For the initial 0.1.0 release notes, see `.github/CHANGELOG.md`.
   `ScoreGivenTrace`. It covers where such a score belongs (prior or likelihood),
   surprise per step, when to use `observe` instead, and the pitfalls.
 
+- **`fugue::program`: a serializable program format, behind the new
+  `program` feature ([#65](https://github.com/alexnodeland/fugue/issues/65))**.
+  The playground's interpreter (`crates/fugue-wasm/src/dsl.rs`) moves into
+  the published crate and generalizes: a `prob!`-subset language with a serde
+  AST (`Program`, whose `fugue_program` version is checked before anything
+  else is decoded), a text front end (`Program::parse`; `Display` prints the
+  canonical text) and a JSON one (`from_json`/`to_json`), compiled against a
+  `Registry` and `Data` into a `CompiledProgram` that builds real
+  `Model<Value>`s at load time (`build_f64` keeps the playground's
+  `Model<f64>`). The language gains comparison and boolean operators,
+  `if`/`else`, `break`, reassignment with Rust's lexical scoping, array
+  literals, and typed values: sites bind their natural types. A host
+  registers its own distributions (any boxed `Distribution<T>`, including a
+  wrapper carrying site metadata) and pure functions; names and arities are
+  checked at compile time. `Categorical` takes an array of any length, and
+  data binds scalars as well as arrays. Addresses stay byte-identical to
+  `addr!`, and runtime soft errors still become `factor(-inf)` plus a
+  warning, now for every runtime error (an out-of-bounds index used to
+  yield `NaN`) and with failed sites keeping their declared type. The
+  default build is unchanged and does not pull in serde.
+
+  fugue-wasm enables the feature; `dsl.rs` is now a shim with its API
+  unchanged. Pinned by the playground's presets and explorable models, read
+  from their JavaScript, round-tripping through text and JSON into models
+  whose traces and MH chains are bit-identical to the round-tripped
+  program's and to hand-written Rust; by the ported `dsl.rs` tests; by a
+  pinned JSON encoding; and by round-trip property tests over random
+  programs.
+
 ## [0.2.3] - 2026-09-05
 
 ### Fixed

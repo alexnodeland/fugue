@@ -32,6 +32,7 @@
 - **Comprehensive Diagnostics**: R-hat convergence, effective sample size, validation
 - **Numerically Stable**: Log-space computations throughout for robust probability arithmetic
 - **Ergonomic Macros**: Do-notation (`prob!`), vectorization (`plate!`), addressing (`addr!`)
+- **Programs as Data** (optional `program` feature): a `prob!`-subset language with text and JSON front ends, interpreted into real `Model`s at load time, extensible with a host's own distributions and functions
 
 ## 🤔 Why Fugue?
 
