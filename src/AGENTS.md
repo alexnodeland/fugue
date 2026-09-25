@@ -15,6 +15,7 @@ src/
 │   ├── model.rs        # Monadic model composition
 │   └── numerical.rs    # Numerical stability utilities
 ├── runtime/            # Execution engine
+│   ├── async_handler.rs # AsyncHandler trait and run_async (effects resolved by I/O)
 │   ├── handler.rs      # Handler trait and execution framework
 │   ├── interpreters.rs # Built-in model interpreters
 │   └── trace.rs        # Execution history management
@@ -109,6 +110,13 @@ make bench
 - `run()` function executes models with given handler
 - Type-safe dispatch to handler methods
 - Integration point for custom execution strategies
+
+**`async_handler.rs`** - Async Interpretation
+
+- `AsyncHandler` mirrors `Handler` with `async fn` methods, for sites resolved over the network
+- `run_async()` is the same trampoline as `run()`, awaiting each effect in program order
+- `FromSync` adapts any `Handler`; `run_async(FromSync(h), m)` yields exactly what `run(h, m)` does
+- No async runtime dependency; `tokio` is a dev-dependency for tests only
 
 **`interpreters.rs`** - Built-in Handlers
 
