@@ -25,6 +25,7 @@
   - [Optimizing Performance](./how-to/optimizing-performance.md)
   - [Debugging Models](./how-to/debugging-models.md)
   - [Custom Handlers](./how-to/custom-handlers.md)
+  - [Sample-or-Observe Sites](./how-to/sample-or-observe-sites.md)
   - [Production Deployment](./how-to/production-deployment.md)
 - [Tutorials](./tutorials/README.md)
   - [Foundation Tutorials](./tutorials/foundation/README.md)

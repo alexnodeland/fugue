@@ -104,6 +104,13 @@ For the initial 0.1.0 release notes, see `.github/CHANGELOG.md`.
   stability down to subnormal `α`, and MH over the Gamma sites recovering the
   conjugate posterior.
 
+- **How-to: sample-or-observe sites (#67).** `docs/src/how-to/sample-or-observe-sites.md`
+  and `examples/sample_or_observe.rs`: one tool-use program simulated with
+  `PriorHandler`, executed against a stub world by a `Delegate` that takes each
+  outcome from the world and scores it as likelihood, and audited with
+  `ScoreGivenTrace`. It covers where such a score belongs (prior or likelihood),
+  surprise per step, when to use `observe` instead, and the pitfalls.
+
 ## [0.2.3] - 2026-09-05
 
 ### Fixed

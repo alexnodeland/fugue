@@ -238,6 +238,8 @@ graph TD
 
 ## Advanced Handler Patterns
 
+A handler can also take a sample site's value from the world instead of drawing it, and score it like an observation: an agent's tool calls, executed for real. [Sample-or-Observe Sites](./sample-or-observe-sites.md) shows the pattern with one program simulated, executed and audited, and where each score belongs.
+
 ### Caching Handler
 
 ```rust,ignore

@@ -93,6 +93,21 @@ These guides are designed to be **example-first** and **immediately actionable**
 
 ---
 
+### 🔁 [Sample-or-Observe Sites](./sample-or-observe-sites.md)
+
+**When to use**: Your program describes a process that also runs for real, such as an agent calling tools, and you want to simulate it, execute it against the world, and audit recorded runs with one program.
+
+**What you'll learn**:
+
+- One program, three interpreters: `PriorHandler`, an executing handler, `ScoreGivenTrace`
+- Where a value from the world is scored: prior or likelihood, and why it matters
+- Surprise per step, and when to use `observe` instead
+- Pitfalls: values outside the support, addresses, state between sites
+
+**Key patterns**: Sample-or-observe sites, `Delegate` overrides, site metadata
+
+---
+
 ### 🚀 [Production Deployment](./production-deployment.md)
 
 **When to use**: You're deploying probabilistic models to production environments and need reliability, monitoring, and operational excellence.
@@ -182,6 +197,7 @@ All code examples in these guides are:
 | Optimize performance     | [Optimizing Performance](./optimizing-performance.md)         | Numerical stability, batch processing |
 | Debug model issues       | [Debugging Models](./debugging-models.md)                     | Trace analysis, diagnostics  |
 | Extend functionality     | [Custom Handlers](./custom-handlers.md)                       | Handler patterns, decorators |
+| Simulate, execute and audit one program | [Sample-or-Observe Sites](./sample-or-observe-sites.md) | Values from the world, surprise |
 | Deploy to production     | [Production Deployment](./production-deployment.md)           | Fault tolerance, monitoring  |
 
 ## Integration with Other Documentation
