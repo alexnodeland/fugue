@@ -20,13 +20,14 @@
 //!
 //! | Code | Category | Constructed in |
 //! |------|----------|-----------------|
-//! | `InvalidMean`/`InvalidVariance`/`InvalidProbability`/`InvalidRange`/`InvalidShape`/`InvalidRate`/`InvalidCount` | Distribution validation (1xx) | `core::distribution` constructors |
+//! | `InvalidMean`/`InvalidVariance`/`InvalidProbability`/`InvalidRange`/`InvalidShape`/`InvalidRate`/`InvalidCount` | Distribution validation (1xx) | `core::distribution` constructors; `core::conjugate` constructors and helpers |
 //! | `AddressConflict` | Model execution (3xx) | `runtime::interpreters` (duplicate sample address) |
 //! | `UnexpectedModelStructure` | Model execution (3xx) | `runtime::interpreters` (replay/score structure mismatch) |
 //! | `TraceAddressNotFound` | Trace manipulation (5xx) | `runtime::trace` typed accessors |
 //! | `TypeMismatch` | Type system (6xx) | `runtime::trace` typed accessors |
 
 use crate::core::address::Address;
+use crate::core::conjugate::{Dirichlet, Multinomial};
 use crate::core::distribution::*;
 use std::fmt;
 
@@ -863,6 +864,22 @@ impl Validate for DiscreteUniform {
     }
 }
 
+// #66: the vector-valued `Dirichlet` and `Multinomial` (`core::conjugate`)
+// validate through the same functions their `new()` constructors call, so these
+// impls cannot drift from the constructors.
+
+impl Validate for Dirichlet {
+    fn validate(&self) -> FugueResult<()> {
+        crate::core::conjugate::validate_concentrations("Dirichlet", self.alpha()).map(|_| ())
+    }
+}
+
+impl Validate for Multinomial {
+    fn validate(&self) -> FugueResult<()> {
+        crate::core::conjugate::validate_probabilities("Multinomial", self.probs())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -958,9 +975,10 @@ mod tests {
 
     #[test]
     fn validate_trait_on_valid_distributions() {
-        // FG-55: `Validate` is implemented for all 17 exported distributions;
-        // exercise a valid instance of each here. `tests/f_validate_coverage.rs`
-        // is the public-API drift guard.
+        // FG-55: `Validate` is implemented for every exported distribution (the
+        // 17 scalar ones and, since #66, `Dirichlet` and `Multinomial`); exercise
+        // a valid instance of each here. `tests/f_validate_coverage.rs` is the
+        // public-API drift guard.
         assert!(Normal::new(0.0, 1.0).unwrap().validate().is_ok());
         assert!(Exponential::new(1.0).unwrap().validate().is_ok());
         assert!(Beta::new(2.0, 3.0).unwrap().validate().is_ok());
@@ -978,6 +996,15 @@ mod tests {
         assert!(ChiSquared::new(4.0).unwrap().validate().is_ok());
         assert!(InverseGamma::new(3.0, 2.0).unwrap().validate().is_ok());
         assert!(DiscreteUniform::new(1, 6).unwrap().validate().is_ok());
+        // #66: the vector-valued pair from `core::conjugate`.
+        assert!(Dirichlet::new(vec![1.0, 2.0, 3.0])
+            .unwrap()
+            .validate()
+            .is_ok());
+        assert!(Multinomial::new(10, vec![0.2, 0.3, 0.5])
+            .unwrap()
+            .validate()
+            .is_ok());
     }
 
     #[test]

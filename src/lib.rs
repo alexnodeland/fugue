@@ -15,6 +15,13 @@ pub mod runtime;
 
 pub use core::address::Address;
 // `addr!` macro is exported at the crate root via #[macro_export]
+pub use core::conjugate::{
+    beta_bernoulli_log_marginal, beta_binomial_log_marginal, beta_posterior,
+    dirichlet_categorical_log_marginal, dirichlet_log_pdf, dirichlet_log_predictive,
+    dirichlet_multinomial_log_marginal, dirichlet_posterior, dirichlet_predictive,
+    ln_multinomial_coefficient, ln_multivariate_beta, multinomial_log_pmf, sample_dirichlet,
+    Dirichlet, Multinomial,
+};
 pub use core::distribution::{
     Bernoulli, Beta, Binomial, Categorical, Cauchy, ChiSquared, DiscreteUniform, Distribution,
     Exponential, Gamma, InverseGamma, Laplace, LogNormal, Normal, Poisson, StudentT, Support,

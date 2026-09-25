@@ -106,6 +106,27 @@ let log_probs = vec![-1.0, -2.0, -0.5];
 let normalized = normalize_log_probs(&log_probs);
 ```
 
+### `conjugate.rs` - Dirichlet, Multinomial and Conjugate Helpers
+
+Sites are scalar, so a Dirichlet over category probabilities is handled without a new site type:
+
+- **Conjugate helpers** (log space): `dirichlet_log_pdf`, `multinomial_log_pmf`, the Dirichlet–multinomial and Beta–binomial marginal likelihoods (for a count vector and for one sequence), `dirichlet_posterior` / `beta_posterior`, and the posterior predictive
+- `Dirichlet` / `Multinomial`: standalone `Distribution<Vec<f64>>` / `Distribution<Vec<u64>>` (not usable at `sample`/`observe` sites)
+- `sample_dirichlet`: a Dirichlet draw inside a model, from `K` scalar Gamma sites
+
+**Example:**
+
+```rust
+# use fugue::*;
+let alpha = [1.0, 1.0, 1.0];
+let counts = [4, 1, 0];
+let posterior = dirichlet_posterior(&alpha, &counts).unwrap(); // [5.0, 2.0, 1.0]
+let next = dirichlet_predictive(&alpha, &counts).unwrap(); // its mean
+// The data's marginal likelihood, entered into a model as a factor:
+let evidence = dirichlet_categorical_log_marginal(&alpha, &counts).unwrap();
+let model = factor(evidence);
+```
+
 ## Common Patterns
 
 ### Sequential Model Building

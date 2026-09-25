@@ -8,7 +8,7 @@
 //! impl.
 //!
 //! How the drift guard works: every exported distribution is enumerated below
-//! and has `.validate()` called on a valid instance. Adding an 18th exported
+//! and has `.validate()` called on a valid instance. Exporting another
 //! distribution requires bumping `EXPORTED_DISTRIBUTION_COUNT` and appending it
 //! to `validate_all_exported_distributions`; if the new type lacks a `Validate`
 //! impl, this file fails to compile (the `.validate()` call has no method),
@@ -17,9 +17,11 @@
 use fugue::*;
 
 /// The number of concrete distribution types re-exported from the crate root
-/// (`src/lib.rs`), excluding the `Distribution` trait itself. Keep in lockstep
-/// with the enumeration in `validate_all_exported_distributions`.
-const EXPORTED_DISTRIBUTION_COUNT: usize = 17;
+/// (`src/lib.rs`), excluding the `Distribution` trait itself: the 17 scalar
+/// distributions of `core::distribution` plus `Dirichlet` and `Multinomial`
+/// from `core::conjugate` (#66). Keep in lockstep with the enumeration in
+/// `validate_all_exported_distributions`.
+const EXPORTED_DISTRIBUTION_COUNT: usize = 19;
 
 #[test]
 fn validate_all_exported_distributions() {
@@ -48,6 +50,15 @@ fn validate_all_exported_distributions() {
         ChiSquared::new(4.0).unwrap().validate().is_ok(),
         InverseGamma::new(3.0, 2.0).unwrap().validate().is_ok(),
         DiscreteUniform::new(1, 6).unwrap().validate().is_ok(),
+        // --- the vector-valued pair added by #66 (core::conjugate) ---
+        Dirichlet::new(vec![1.0, 2.0, 3.0])
+            .unwrap()
+            .validate()
+            .is_ok(),
+        Multinomial::new(10, vec![0.2, 0.3, 0.5])
+            .unwrap()
+            .validate()
+            .is_ok(),
     ];
 
     assert_eq!(

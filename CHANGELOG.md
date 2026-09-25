@@ -70,6 +70,40 @@ For the initial 0.1.0 release notes, see `.github/CHANGELOG.md`.
   i64 default messages, and a timer-awaiting handler spawned on tokio's
   multi-threaded runtime (`tests/f_async_handler.rs`).
 
+- **Dirichlet/multinomial conjugate helpers and a Dirichlet draw from Gamma
+  sites ([#66](https://github.com/alexnodeland/fugue/issues/66))**. New module
+  `core::conjugate`, re-exported at the root: `ln_multivariate_beta`,
+  `ln_multinomial_coefficient`, `dirichlet_log_pdf`, `multinomial_log_pmf`,
+  `dirichlet_multinomial_log_marginal` (probability of a count vector) and
+  `dirichlet_categorical_log_marginal` (of one sequence with those counts, the
+  Pólya-urn product; the two differ by the multinomial coefficient),
+  `beta_binomial_log_marginal` / `beta_bernoulli_log_marginal`,
+  `dirichlet_posterior` / `beta_posterior`, and `dirichlet_predictive` /
+  `dirichlet_log_predictive`. Everything is in log space, and no `lnΓ`
+  difference is taken between two large values (a Stirling-series difference
+  instead), so tiny concentrations and huge counts stay accurate:
+  `beta_binomial_log_marginal(1, 1, k, 10¹²)` is `-ln(10¹² + 1)` to full
+  precision, where the plain `lnΓ` formula is off by about 2e-3. Invalid
+  parameters are `Err(InvalidParameters)`; values outside the support are
+  `-inf`. Standalone `Dirichlet` (`Distribution<Vec<f64>>`, sampled from
+  log-Gammas so tiny concentrations never give `NaN` or an all-zero vector) and
+  `Multinomial` (`Distribution<Vec<u64>>`) come with `Validate` impls; they are
+  not site types. `sample_dirichlet(name, α)` draws `Gamma(αᵢ, 1)` sites at
+  `addr!(name, i)` and normalizes them: the trace holds the Gamma draws and
+  their joint density, so inference over them is exact (documented, including
+  underflow for concentrations below about 0.05).
+
+  Vector-valued sites, the issue's fuller route, were not added: new `Model`
+  variants and `Handler` methods would break every `Handler` implementor, and
+  the helpers cover the Dirichlet–categorical world model without them.
+
+  Pinned by known densities (`Dirichlet(1, 1, 1)` is `ln 2` on the simplex;
+  `K = 2` equals `Beta::log_prob`), the Pólya urn, brute-force enumeration
+  (count vectors and sequences sum to 1), Beta–binomial quadrature, 80-digit
+  references at `α = 1e-8` and counts up to `1e12`, sampler moments and
+  stability down to subnormal `α`, and MH over the Gamma sites recovering the
+  conjugate posterior.
+
 ## [0.2.3] - 2026-09-05
 
 ### Fixed

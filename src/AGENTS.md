@@ -11,6 +11,7 @@ src/
 ├── lib.rs              # Public API exports and crate root
 ├── core/               # Fundamental PPL abstractions
 │   ├── address.rs      # Site addressing and naming
+│   ├── conjugate.rs    # Dirichlet/Multinomial and conjugate helpers
 │   ├── distribution.rs # Type-safe probability distributions  
 │   ├── model.rs        # Monadic model composition
 │   └── numerical.rs    # Numerical stability utilities
@@ -80,6 +81,12 @@ make bench
 - Hierarchical naming: `"simple"`, `"indexed#5"`, `"scope::name"`
 - Critical for reproducibility and inference targeting
 - Address collisions are programming errors, not runtime failures
+
+**`conjugate.rs`** - Dirichlet, Multinomial and Conjugate Helpers
+
+- Log-space Dirichlet/multinomial densities, Dirichlet–multinomial and Beta–binomial marginals (count-vector and sequence versions), posterior updates and predictives
+- `lnΓ` differences go through a Stirling-series difference (`ln_gamma_ratio`), never two large `lnΓ` values subtracted
+- `Dirichlet`/`Multinomial` are standalone `Distribution<Vec<_>>` types, not site types; `sample_dirichlet` builds a Dirichlet draw from K scalar Gamma sites
 
 **`distribution.rs`** - Probability Distributions
 
