@@ -198,6 +198,10 @@ impl<H: Handler> Handler for LoggingHandler<H> {
 
 A decorator that changes only some kinds of site need not forward the others by hand: [`Delegate`](crate::runtime::delegate::Delegate) wraps a handler and forwards every site its [`Overrides`](crate::runtime::delegate::Overrides) do not take over.
 
+### Reading More Than the Distribution
+
+A handler method receives only the site's address and distribution. To recognise a distribution it knows, a handler downcasts it: `dist.downcast_ref::<Categorical>()` returns the categorical itself, because every built-in distribution returns `Some(self)` from [`Distribution::as_any`](crate::Distribution::as_any). A model can attach metadata to a site with [`WithMeta`](crate::WithMeta), which a handler reads with `dist.downcast_ref::<WithMeta<Categorical, M>>()`. When a downcast returns `None`, the handler does whatever it does for any other site. Metadata that is known outside the model can instead live in a `HashMap<Address, M>` that the handler holds.
+
 ## Design & Evolution
 
 ### Status

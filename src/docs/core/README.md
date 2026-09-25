@@ -44,6 +44,7 @@ let a3 = scoped_addr!("layer1", "weight"); // Address("layer1::weight")
   - `Normal`, `Beta`, etc. → `f64` (continuous values)
 - Built-in distributions: Normal, Uniform, LogNormal, Exponential, Beta, Gamma, Bernoulli, Categorical, Binomial, Poisson
 - All distributions support sampling and log-density evaluation
+- `WithMeta<D, M>`: attaches metadata to a site's distribution; a handler reads it with `dist.downcast_ref::<WithMeta<D, M>>()`
 
 ```rust
 # use fugue::*;

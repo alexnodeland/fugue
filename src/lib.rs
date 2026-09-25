@@ -18,7 +18,7 @@ pub use core::address::Address;
 pub use core::distribution::{
     Bernoulli, Beta, Binomial, Categorical, Cauchy, ChiSquared, DiscreteUniform, Distribution,
     Exponential, Gamma, InverseGamma, Laplace, LogNormal, Normal, Poisson, StudentT, Support,
-    Uniform, Weibull,
+    Uniform, Weibull, WithMeta,
 };
 pub use core::model::{
     factor, guard, observe, pure, sample, sample_bool, sample_f64, sample_i64, sample_u64,

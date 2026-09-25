@@ -5,37 +5,13 @@ use rand_distr::{
     Distribution as RandDistr, Exp as RDExp, Gamma as RDGamma, LogNormal as RDLogNormal,
     Normal as RDNormal, Poisson as RDPoisson, StudentT as RDStudentT, Weibull as RDWeibull,
 };
+use std::any::Any;
 /// Type alias for log-probabilities.
 ///
 /// Log-probabilities are represented as `f64` values. Negative infinity represents
 /// zero probability, while finite values represent the natural logarithm of probabilities.
 pub type LogF64 = f64;
 
-/// Generic interface for type-safe probability distributions.
-/// All distributions implement `Distribution<T>` where `T` is the natural return type.
-/// Example:
-///
-/// ```rust
-/// # use fugue::*;
-/// # use rand::thread_rng;
-///
-/// let mut rng = thread_rng();
-///
-/// // Type-safe sampling
-/// let coin = Bernoulli::new(0.5).unwrap();
-/// let flip: bool = coin.sample(&mut rng);  // Natural boolean
-/// let prob = coin.log_prob(&flip);
-///
-/// // Safe indexing
-/// let choice = Categorical::uniform(3).unwrap();
-/// let idx: usize = choice.sample(&mut rng);  // Safe for arrays
-/// let choice_prob = choice.log_prob(&idx);
-///
-/// // Natural counting
-/// let events = Poisson::new(3.0).unwrap();
-/// let count: u64 = events.sample(&mut rng);  // Natural count type
-/// let count_prob = events.log_prob(&count);
-/// ```
 /// The support of a continuous (`f64`-valued) distribution, as far as an
 /// inference kernel needs to know it (FG-N1).
 ///
@@ -72,6 +48,36 @@ pub enum Support {
     },
 }
 
+/// Generic interface for type-safe probability distributions.
+/// All distributions implement `Distribution<T>` where `T` is the natural return type.
+/// Example:
+///
+/// ```rust
+/// # use fugue::*;
+/// # use rand::thread_rng;
+///
+/// let mut rng = thread_rng();
+///
+/// // Type-safe sampling
+/// let coin = Bernoulli::new(0.5).unwrap();
+/// let flip: bool = coin.sample(&mut rng);  // Natural boolean
+/// let prob = coin.log_prob(&flip);
+///
+/// // Safe indexing
+/// let choice = Categorical::uniform(3).unwrap();
+/// let idx: usize = choice.sample(&mut rng);  // Safe for arrays
+/// let choice_prob = choice.log_prob(&idx);
+///
+/// // Natural counting
+/// let events = Poisson::new(3.0).unwrap();
+/// let count: u64 = events.sample(&mut rng);  // Natural count type
+/// let count_prob = events.log_prob(&count);
+/// ```
+///
+/// A handler receives a site's distribution as a `&dyn Distribution<T>`. It can
+/// recognise a type it knows with [`downcast_ref`](Distribution#method.downcast_ref)
+/// (see [`as_any`](Distribution::as_any)), including a [`WithMeta`] that
+/// carries metadata the model attached to the site.
 pub trait Distribution<T>: Send + Sync {
     /// Generate a random sample (with its natural type), `T`, from the distribution, using the provided random number generator, `rng`.
     ///
@@ -149,6 +155,79 @@ pub trait Distribution<T>: Send + Sync {
     /// ```
     fn support(&self) -> Support {
         Support::Real
+    }
+
+    /// The distribution as [`Any`], so that a handler can downcast the
+    /// distribution at a site to a type it knows (#63).
+    ///
+    /// A handler sees only `(addr, dist)` at a site. When `as_any` returns
+    /// `Some(self)`, the handler can recognise the concrete type, usually with
+    /// [`downcast_ref`](Distribution#method.downcast_ref), and read it directly: a
+    /// [`Categorical`]'s [`probs`](Categorical::probs) rather than probing
+    /// `log_prob` over the support, or the metadata that a [`WithMeta`]
+    /// carries. Every distribution in this crate, and `WithMeta`, returns
+    /// `Some(self)`.
+    ///
+    /// The default, `None`, is for types that opt out. It asks nothing of the
+    /// implementing type (in particular no `'static` bound), so
+    /// implementations written before this method existed compile unchanged;
+    /// handlers just never recognise them.
+    ///
+    /// ```rust
+    /// # use fugue::*;
+    /// # use rand::RngCore;
+    /// # use std::any::Any;
+    /// let dist: Box<dyn Distribution<bool>> = Box::new(Bernoulli::new(0.3).unwrap());
+    /// let coin = dist.as_any().and_then(|a| a.downcast_ref::<Bernoulli>());
+    /// assert_eq!(coin.map(|c| c.p()), Some(0.3));
+    ///
+    /// // A distribution defined elsewhere opts in by returning `Some(self)`.
+    /// #[derive(Clone)]
+    /// struct FairCoin;
+    /// impl Distribution<bool> for FairCoin {
+    ///     fn sample(&self, rng: &mut dyn RngCore) -> bool {
+    ///         rng.next_u32() % 2 == 0
+    ///     }
+    ///     fn log_prob(&self, _x: &bool) -> f64 {
+    ///         0.5f64.ln()
+    ///     }
+    ///     fn clone_box(&self) -> Box<dyn Distribution<bool>> {
+    ///         Box::new(self.clone())
+    ///     }
+    ///     fn as_any(&self) -> Option<&dyn Any> {
+    ///         Some(self)
+    ///     }
+    /// }
+    /// assert!(FairCoin.as_any().is_some());
+    /// ```
+    fn as_any(&self) -> Option<&dyn Any> {
+        None
+    }
+}
+
+impl<'a, T> dyn Distribution<T> + 'a {
+    /// The distribution as a `&D`, if it is a `D` (#63).
+    ///
+    /// This is how a handler recognises a distribution it knows at a site. It
+    /// returns `Some` when [`as_any`](Distribution::as_any) exposes the
+    /// distribution and its type is exactly `D`. It returns `None` for any other
+    /// type, and for a type that keeps the default `as_any`; a handler then
+    /// falls back to whatever it does with a distribution it doesn't know.
+    ///
+    /// ```rust
+    /// # use fugue::*;
+    /// let dist: Box<dyn Distribution<usize>> =
+    ///     Box::new(Categorical::new(vec![0.25, 0.75]).unwrap());
+    ///
+    /// // The probabilities, read directly rather than probed through `log_prob`.
+    /// let probs = dist.downcast_ref::<Categorical>().map(|c| c.probs().to_vec());
+    /// assert_eq!(probs, Some(vec![0.25, 0.75]));
+    ///
+    /// // The type must match exactly.
+    /// assert!(dist.downcast_ref::<WithMeta<Categorical, ()>>().is_none());
+    /// ```
+    pub fn downcast_ref<D: 'static>(&self) -> Option<&D> {
+        self.as_any()?.downcast_ref::<D>()
     }
 }
 
@@ -267,6 +346,9 @@ impl Distribution<f64> for Normal {
     }
     fn clone_box(&self) -> Box<dyn Distribution<f64>> {
         Box::new(*self)
+    }
+    fn as_any(&self) -> Option<&dyn Any> {
+        Some(self)
     }
 }
 
@@ -396,6 +478,9 @@ impl Distribution<f64> for Uniform {
     fn clone_box(&self) -> Box<dyn Distribution<f64>> {
         Box::new(*self)
     }
+    fn as_any(&self) -> Option<&dyn Any> {
+        Some(self)
+    }
 }
 
 /// A continuous distribution where the logarithm follows a normal distribution.
@@ -503,6 +588,9 @@ impl Distribution<f64> for LogNormal {
     fn clone_box(&self) -> Box<dyn Distribution<f64>> {
         Box::new(*self)
     }
+    fn as_any(&self) -> Option<&dyn Any> {
+        Some(self)
+    }
 }
 
 /// A continuous distribution often used to model waiting times between events.
@@ -589,6 +677,9 @@ impl Distribution<f64> for Exponential {
     }
     fn clone_box(&self) -> Box<dyn Distribution<f64>> {
         Box::new(*self)
+    }
+    fn as_any(&self) -> Option<&dyn Any> {
+        Some(self)
     }
 }
 
@@ -690,6 +781,9 @@ impl Distribution<bool> for Bernoulli {
     }
     fn clone_box(&self) -> Box<dyn Distribution<bool>> {
         Box::new(*self)
+    }
+    fn as_any(&self) -> Option<&dyn Any> {
+        Some(self)
     }
 }
 
@@ -863,6 +957,9 @@ impl Distribution<usize> for Categorical {
     fn clone_box(&self) -> Box<dyn Distribution<usize>> {
         Box::new(self.clone())
     }
+    fn as_any(&self) -> Option<&dyn Any> {
+        Some(self)
+    }
 }
 
 /// A continuous distribution on the interval (0, 1), commonly used for modeling probabilities and proportions.
@@ -1034,6 +1131,9 @@ impl Distribution<f64> for Beta {
     fn clone_box(&self) -> Box<dyn Distribution<f64>> {
         Box::new(*self)
     }
+    fn as_any(&self) -> Option<&dyn Any> {
+        Some(self)
+    }
 }
 
 /// A continuous distribution over positive real numbers, parameterized by shape and rate.
@@ -1149,6 +1249,9 @@ impl Distribution<f64> for Gamma {
     fn clone_box(&self) -> Box<dyn Distribution<f64>> {
         Box::new(*self)
     }
+    fn as_any(&self) -> Option<&dyn Any> {
+        Some(self)
+    }
 }
 
 /// A discrete distribution representing the number of successes in n independent trials, with probability of success p.
@@ -1246,6 +1349,9 @@ impl Distribution<u64> for Binomial {
     fn clone_box(&self) -> Box<dyn Distribution<u64>> {
         Box::new(*self)
     }
+    fn as_any(&self) -> Option<&dyn Any> {
+        Some(self)
+    }
 }
 
 /// A discrete distribution for modeling the number of events occurring in a fixed interval.
@@ -1337,6 +1443,9 @@ impl Distribution<u64> for Poisson {
     }
     fn clone_box(&self) -> Box<dyn Distribution<u64>> {
         Box::new(*self)
+    }
+    fn as_any(&self) -> Option<&dyn Any> {
+        Some(self)
     }
 }
 
@@ -1462,6 +1571,9 @@ impl Distribution<f64> for StudentT {
     fn clone_box(&self) -> Box<dyn Distribution<f64>> {
         Box::new(*self)
     }
+    fn as_any(&self) -> Option<&dyn Any> {
+        Some(self)
+    }
 }
 
 /// The Cauchy (Lorentz) distribution `Cauchy(x₀, γ)`.
@@ -1539,6 +1651,9 @@ impl Distribution<f64> for Cauchy {
     }
     fn clone_box(&self) -> Box<dyn Distribution<f64>> {
         Box::new(*self)
+    }
+    fn as_any(&self) -> Option<&dyn Any> {
+        Some(self)
     }
 }
 
@@ -1621,6 +1736,9 @@ impl Distribution<f64> for Laplace {
     }
     fn clone_box(&self) -> Box<dyn Distribution<f64>> {
         Box::new(*self)
+    }
+    fn as_any(&self) -> Option<&dyn Any> {
+        Some(self)
     }
 }
 
@@ -1728,6 +1846,9 @@ impl Distribution<f64> for Weibull {
     fn clone_box(&self) -> Box<dyn Distribution<f64>> {
         Box::new(*self)
     }
+    fn as_any(&self) -> Option<&dyn Any> {
+        Some(self)
+    }
 }
 
 /// The chi-squared distribution `ChiSquared(k)` with `k` degrees of freedom.
@@ -1795,6 +1916,9 @@ impl Distribution<f64> for ChiSquared {
     }
     fn clone_box(&self) -> Box<dyn Distribution<f64>> {
         Box::new(*self)
+    }
+    fn as_any(&self) -> Option<&dyn Any> {
+        Some(self)
     }
 }
 
@@ -1895,6 +2019,9 @@ impl Distribution<f64> for InverseGamma {
     }
     fn clone_box(&self) -> Box<dyn Distribution<f64>> {
         Box::new(*self)
+    }
+    fn as_any(&self) -> Option<&dyn Any> {
+        Some(self)
     }
 }
 
@@ -2021,6 +2148,165 @@ impl Distribution<i64> for DiscreteUniform {
     }
     fn clone_box(&self) -> Box<dyn Distribution<i64>> {
         Box::new(*self)
+    }
+    fn as_any(&self) -> Option<&dyn Any> {
+        Some(self)
+    }
+}
+
+// =============================================================================
+// #63: site metadata for handlers.
+//
+// A handler sees only `(addr, dist)` at a site. `Distribution::as_any` lets it
+// recognise the distribution by type; `WithMeta` carries whatever else the
+// handler needs along with the distribution, without changing how the site
+// samples or scores.
+// =============================================================================
+
+/// A distribution `D` that carries metadata `M` for the handler that runs its
+/// site (#63).
+///
+/// A handler sees only `(addr, dist)` at a site. When it needs more than the
+/// distribution (the question to put to a model, the names of the options, a
+/// slice of state), `WithMeta` carries it along with the distribution. A
+/// handler that knows the type recovers both with
+/// [`downcast_ref`](Distribution#method.downcast_ref), and falls back to its usual
+/// behaviour when the downcast returns `None`.
+///
+/// For sampling and scoring, a `WithMeta<D, M>` is just `D`. `sample`,
+/// `log_prob` and `support` forward to the inner distribution, so the built-in
+/// handlers and inference routines, and any handler that doesn't look for `M`,
+/// record the same values, log-probabilities and weights as with the bare `D`,
+/// draw for draw from the same seed. [`clone_box`](Distribution::clone_box)
+/// keeps the metadata.
+///
+/// # Metadata that belongs to the site, or to the handler
+///
+/// `WithMeta` is for metadata that belongs to the site. It is built with the
+/// distribution, it can depend on values sampled earlier in the same
+/// execution, and it needs no bookkeeping outside the model. Metadata that is
+/// known outside the model, such as configuration keyed by address, can
+/// instead live in a `HashMap<Address, M>` that the handler holds and looks up
+/// by the site's `addr`. That way the model doesn't change at all.
+///
+/// # Naming the type
+///
+/// A downcast matches the exact type, so the handler names both parameters:
+/// `WithMeta<Categorical, Question>`, not `Categorical`. The inner
+/// distribution is reached through [`dist`](WithMeta::dist). Reading `M`
+/// without knowing `D` would need a second hook on [`Distribution`], and there
+/// isn't one; a handler that accepts several inner types tries each of them.
+///
+/// # Example
+///
+/// ```rust
+/// # use fugue::*;
+/// # use rand::rngs::StdRng;
+/// # use rand::SeedableRng;
+/// /// What a decision site asks, and the names of its options.
+/// #[derive(Clone, Debug)]
+/// struct Question {
+///     text: &'static str,
+///     options: Vec<&'static str>,
+/// }
+///
+/// let site = WithMeta::new(
+///     Categorical::new(vec![0.6, 0.3, 0.1]).unwrap(),
+///     Question { text: "Which tool next?", options: vec!["search", "edit", "test"] },
+/// );
+///
+/// // In a model it is the categorical: the same draw from the same seed.
+/// let mut rng = StdRng::seed_from_u64(7);
+/// let handler = PriorHandler { rng: &mut rng, trace: Trace::default() };
+/// let (wrapped, _) = runtime::handler::run(handler, sample(addr!("tool"), site.clone()));
+/// let mut rng = StdRng::seed_from_u64(7);
+/// let handler = PriorHandler { rng: &mut rng, trace: Trace::default() };
+/// let (bare, _) = runtime::handler::run(handler, sample(addr!("tool"), site.dist().clone()));
+/// assert_eq!(wrapped, bare);
+///
+/// // A handler's `on_sample_usize` receives a `&dyn Distribution<usize>`. One
+/// // that knows the type reads the question and the probabilities directly.
+/// let dist: &dyn Distribution<usize> = &site;
+/// let found = dist.downcast_ref::<WithMeta<Categorical, Question>>().unwrap();
+/// assert_eq!(found.meta().text, "Which tool next?");
+/// let edit = found.meta().options.iter().position(|&o| o == "edit").unwrap();
+/// assert_eq!(found.dist().probs()[edit], 0.3);
+/// ```
+#[derive(Clone, Debug)]
+pub struct WithMeta<D, M> {
+    /// The distribution that samples and scores the site.
+    dist: D,
+    /// Metadata for handlers; it takes no part in sampling or scoring.
+    meta: M,
+}
+
+impl<D, M> WithMeta<D, M> {
+    /// Attach `meta` to `dist`.
+    ///
+    /// ```rust
+    /// # use fugue::*;
+    /// let site = WithMeta::new(Bernoulli::new(0.9).unwrap(), "Is the build green?");
+    /// // Sampled exactly as the bare Bernoulli would be.
+    /// let model: Model<bool> = sample(addr!("green"), site);
+    /// ```
+    pub fn new(dist: D, meta: M) -> Self {
+        WithMeta { dist, meta }
+    }
+
+    /// The wrapped distribution.
+    ///
+    /// ```rust
+    /// # use fugue::*;
+    /// let site = WithMeta::new(Normal::new(1.0, 2.0).unwrap(), "offset");
+    /// assert_eq!(site.dist().mu(), 1.0);
+    /// ```
+    pub fn dist(&self) -> &D {
+        &self.dist
+    }
+
+    /// The metadata.
+    ///
+    /// ```rust
+    /// # use fugue::*;
+    /// let site = WithMeta::new(Poisson::new(3.0).unwrap(), vec!["arrivals", "per hour"]);
+    /// assert_eq!(site.meta()[0], "arrivals");
+    /// ```
+    pub fn meta(&self) -> &M {
+        &self.meta
+    }
+
+    /// Split into the distribution and the metadata.
+    ///
+    /// ```rust
+    /// # use fugue::*;
+    /// let (dist, meta) = WithMeta::new(Beta::new(2.0, 5.0).unwrap(), 42u32).into_parts();
+    /// assert_eq!(dist.alpha(), 2.0);
+    /// assert_eq!(meta, 42);
+    /// ```
+    pub fn into_parts(self) -> (D, M) {
+        (self.dist, self.meta)
+    }
+}
+
+impl<T, D, M> Distribution<T> for WithMeta<D, M>
+where
+    D: Distribution<T> + Clone + 'static,
+    M: Clone + Send + Sync + 'static,
+{
+    fn sample(&self, rng: &mut dyn RngCore) -> T {
+        self.dist.sample(rng)
+    }
+    fn log_prob(&self, x: &T) -> LogF64 {
+        self.dist.log_prob(x)
+    }
+    fn clone_box(&self) -> Box<dyn Distribution<T>> {
+        Box::new(self.clone())
+    }
+    fn support(&self) -> Support {
+        self.dist.support()
+    }
+    fn as_any(&self) -> Option<&dyn Any> {
+        Some(self)
     }
 }
 
@@ -2678,5 +2964,108 @@ mod tests {
             };
             assert_eq!(du.log_prob(&excluded), f64::NEG_INFINITY);
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // #63: site metadata for handlers. The handler-facing behaviour (a custom
+    // handler reading `WithMeta`, identical traces under the built-in handlers
+    // and MH, foreign distributions, `clone_box`) is pinned end to end in
+    // `tests/f_site_metadata.rs`.
+    // -------------------------------------------------------------------------
+
+    /// `d`, seen the way a handler sees it (`&dyn Distribution<T>`), exposes
+    /// itself through `as_any` and downcasts to exactly its own type, both
+    /// directly and after `clone_box`.
+    fn assert_downcasts_to_itself<T, D: Distribution<T> + 'static>(d: D) {
+        let name = std::any::type_name::<D>();
+        let dist: &dyn Distribution<T> = &d;
+        assert!(dist.as_any().is_some(), "{name}: as_any is None");
+        assert!(dist.downcast_ref::<D>().is_some(), "{name}: no downcast");
+        assert!(
+            d.clone_box().downcast_ref::<D>().is_some(),
+            "{name}: no downcast after clone_box"
+        );
+    }
+
+    #[test]
+    fn issue63_every_builtin_downcasts_to_itself() {
+        assert_downcasts_to_itself(Normal::new(0.0, 1.0).unwrap());
+        assert_downcasts_to_itself(Uniform::new(-1.0, 1.0).unwrap());
+        assert_downcasts_to_itself(LogNormal::new(0.0, 1.0).unwrap());
+        assert_downcasts_to_itself(Exponential::new(2.0).unwrap());
+        assert_downcasts_to_itself(Bernoulli::new(0.3).unwrap());
+        assert_downcasts_to_itself(Categorical::new(vec![0.2, 0.8]).unwrap());
+        assert_downcasts_to_itself(Beta::new(2.0, 3.0).unwrap());
+        assert_downcasts_to_itself(Gamma::new(2.0, 1.0).unwrap());
+        assert_downcasts_to_itself(Binomial::new(10, 0.4).unwrap());
+        assert_downcasts_to_itself(Poisson::new(3.0).unwrap());
+        assert_downcasts_to_itself(StudentT::new(3.0, 0.0, 1.0).unwrap());
+        assert_downcasts_to_itself(Cauchy::new(0.0, 1.0).unwrap());
+        assert_downcasts_to_itself(Laplace::new(0.0, 1.0).unwrap());
+        assert_downcasts_to_itself(Weibull::new(1.5, 2.0).unwrap());
+        assert_downcasts_to_itself(ChiSquared::new(4.0).unwrap());
+        assert_downcasts_to_itself(InverseGamma::new(3.0, 2.0).unwrap());
+        assert_downcasts_to_itself(DiscreteUniform::new(1, 6).unwrap());
+
+        // The downcast is the distribution itself, parameters included...
+        let dist: &dyn Distribution<usize> = &Categorical::new(vec![0.2, 0.3, 0.5]).unwrap();
+        assert_eq!(
+            dist.downcast_ref::<Categorical>().map(Categorical::probs),
+            Some(&[0.2, 0.3, 0.5][..])
+        );
+        // ...and only the exact type matches.
+        let dist: &dyn Distribution<f64> = &Gamma::new(2.0, 1.0).unwrap();
+        assert!(dist.downcast_ref::<Normal>().is_none());
+        assert!(dist.downcast_ref::<WithMeta<Gamma, ()>>().is_none());
+    }
+
+    #[test]
+    fn issue63_with_meta_forwards_to_the_inner_distribution() {
+        // Same seed, same draws; bit-identical log-probabilities; same support.
+        fn check<T, D>(d: D, xs: &[T])
+        where
+            T: PartialEq + std::fmt::Debug,
+            D: Distribution<T> + Clone + 'static,
+        {
+            let w = WithMeta::new(d.clone(), "metadata");
+            let mut rng_w = StdRng::seed_from_u64(63);
+            let mut rng_d = StdRng::seed_from_u64(63);
+            for _ in 0..50 {
+                assert_eq!(w.sample(&mut rng_w), d.sample(&mut rng_d));
+            }
+            for x in xs {
+                assert_eq!(w.log_prob(x).to_bits(), d.log_prob(x).to_bits());
+            }
+            assert_eq!(w.support(), d.support());
+        }
+        check(Normal::new(0.5, 2.0).unwrap(), &[-1.0, 0.0, 3.5]);
+        check(Uniform::new(-0.5, 0.5).unwrap(), &[-0.6, 0.0, 0.5]);
+        check(Beta::new(2.0, 3.0).unwrap(), &[0.0, 0.25, 1.0, 1.5]);
+        check(Gamma::new(2.0, 1.0).unwrap(), &[-1.0, 0.5, 4.0]);
+        check(Bernoulli::new(0.3).unwrap(), &[true, false]);
+        check(Poisson::new(3.0).unwrap(), &[0, 3, 40]);
+        check(Categorical::new(vec![0.2, 0.8]).unwrap(), &[0, 1, 2]);
+        check(DiscreteUniform::new(1, 6).unwrap(), &[0, 1, 6]);
+    }
+
+    #[test]
+    fn issue63_with_meta_accessors_and_downcast() {
+        let w = WithMeta::new(Categorical::new(vec![0.1, 0.9]).unwrap(), ("ask", 2u8));
+        assert_eq!(w.dist().probs(), &[0.1, 0.9]);
+        assert_eq!(w.meta(), &("ask", 2u8));
+
+        // `as_any` exposes the wrapper, not the inner distribution: a handler
+        // names both types, and reaches the inner one through `dist()`.
+        let dist: &dyn Distribution<usize> = &w;
+        assert!(dist.downcast_ref::<Categorical>().is_none());
+        let found = dist
+            .downcast_ref::<WithMeta<Categorical, (&'static str, u8)>>()
+            .expect("downcast to the wrapper");
+        assert_eq!(found.meta().0, "ask");
+        assert_eq!(found.dist().probs(), &[0.1, 0.9]);
+
+        let (inner, meta) = w.into_parts();
+        assert_eq!(inner.probs(), &[0.1, 0.9]);
+        assert_eq!(meta, ("ask", 2u8));
     }
 }
