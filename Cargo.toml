@@ -41,11 +41,24 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 
+[features]
+# `fugue::program` (issue #65): a serializable program format -- a `prob!`
+# subset with a text and a JSON front end -- interpreted into real `Model`s at
+# load time, with host-registered distributions and functions. Off by default:
+# the default build does not pull in serde.
+program = ["dep:serde", "dep:serde_json"]
+
 [dependencies]
 # Core dependencies
 rand = "0.8"
 rand_distr = "0.4"
 libm = "0.2"
+
+# Optional: the `program` feature's AST (de)serialization. Same majors as
+# crates/fugue-wasm. `float_roundtrip` makes JSON number parsing exact, so a
+# program's literals survive a text -> JSON -> program round trip bit for bit.
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", features = ["float_roundtrip"], optional = true }
 
 [dev-dependencies]
 # Benchmarking dependencies

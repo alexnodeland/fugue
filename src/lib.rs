@@ -11,6 +11,8 @@ pub mod core;
 pub mod error;
 pub mod inference;
 pub mod macros;
+#[cfg(feature = "program")]
+pub mod program;
 pub mod runtime;
 
 pub use core::address::Address;

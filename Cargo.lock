@@ -199,6 +199,8 @@ dependencies = [
  "libm",
  "rand",
  "rand_distr",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 
