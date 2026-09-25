@@ -60,6 +60,15 @@ criterion = { version = "0.5", features = ["html_reports"] }
 # (`cargo install mdbook ...`). `clap` and `proptest` were declared but not
 # referenced by any target and went at the same time.
 
+# Async runtime for tests and doc examples only (#62). The library depends on
+# no runtime -- `run_async` is executor-agnostic -- but its tests have to
+# drive it under a real one: a handler that awaits a timer between sites
+# (`time`), and runs spawned on a multi-threaded runtime (`rt`,
+# `rt-multi-thread`), which only compiles if the future is `Send`. Default
+# features off, so no `macros` and no I/O driver: two lock packages, tokio
+# and pin-project-lite.
+tokio = { version = "1", default-features = false, features = ["rt", "rt-multi-thread", "time"] }
+
 [[bench]]
 name = "mcmc_benchmarks"
 harness = false

@@ -51,6 +51,25 @@ For the initial 0.1.0 release notes, see `.github/CHANGELOG.md`.
   adaptive-MH traces for wrapped and bare sites of every value type; a foreign
   distribution that keeps the default; and `clone_box` keeping the metadata.
 
+- **Async interpretation: `AsyncHandler` and `run_async`
+  ([#62](https://github.com/alexnodeland/fugue/issues/62))**. A handler that
+  resolves sites over the network (a tool call, a remote model, an LLM) no
+  longer has to block a thread per site. `AsyncHandler` mirrors `Handler`
+  method for method, each an `async fn`; the i64 methods keep `Handler`'s
+  panicking defaults and messages. `run_async(handler, model).await` is a
+  second trampoline over the same `Model`: it dispatches each effect as `run`
+  does, awaits it in program order, and keeps `run`'s constant stack (FG-19).
+  `FromSync(h)` makes any `Handler` an `AsyncHandler`, and
+  `run_async(FromSync(h), m)` yields exactly what `run(h, m)` does. No async
+  runtime dependency and no feature gate. The trait's futures carry no `Send`
+  bound, but auto traits leak for a concrete handler, so a run over a handler
+  whose futures are `Send` can be spawned on a multi-threaded executor.
+  `tokio` is added as a dev-dependency only. Pinned by bit-for-bit equivalence
+  with `run` for `PriorHandler`, `ReplayHandler` and `ScoreGivenTrace` on a
+  model with every effect type, a 100 000-site run on a 512 KiB thread, the
+  i64 default messages, and a timer-awaiting handler spawned on tokio's
+  multi-threaded runtime (`tests/f_async_handler.rs`).
+
 ## [0.2.3] - 2026-09-05
 
 ### Fixed

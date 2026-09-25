@@ -18,6 +18,8 @@ This flexibility is achieved through a **clean effect handler architecture** wit
 - **[Built-in Interpreters](interpreters.md)**: Five foundational handlers (`PriorHandler`, `ReplayHandler`, `ScoreGivenTrace`, etc.)
 - **[Trace System](trace.md)**: The foundational data structures (`Trace`, `Choice`, `ChoiceValue`) that record execution history
 
+A handler whose effects are resolved by I/O (a tool call, a remote model, an LLM) can use **[async interpretation](crate::runtime::async_handler)** instead: `AsyncHandler` and `run_async` interpret the same models, awaiting each effect.
+
 The key architectural insight is the **separation of model description from execution strategy**: models describe *what* should happen, handlers define *how* it happens, and traces record *what actually happened*.
 
 ## Usage Examples
@@ -119,6 +121,16 @@ The data structures that make probabilistic programming possible by recording ex
 - Enables replay, scoring, and conditioning operations
 - Type-safe value access with both Option and Result APIs
 - Three-component log-weight decomposition for algorithmic flexibility
+
+### [Async Interpretation](crate::runtime::async_handler) - Effects Resolved by I/O
+
+The same models, interpreted by a handler that awaits its effects instead of blocking a thread on each.
+
+**Core Types:**
+
+- `AsyncHandler` trait: `Handler`'s methods, each an `async fn`
+- `run_async` function: the `run` trampoline, awaiting each effect in program order
+- `FromSync` adapter: any `Handler` as an `AsyncHandler`, yielding exactly what `run` does
 
 ## Design & Evolution
 
