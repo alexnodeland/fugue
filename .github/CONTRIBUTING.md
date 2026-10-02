@@ -86,6 +86,7 @@ cargo clippy -- -D warnings
 - Address all clippy warnings (`cargo clippy -- -D warnings`)
 - Add documentation for public APIs
 - Include examples in documentation
+- Never draw a `usize` index with `rng.gen_range(0..n)` or `gen::<usize>()` in library code; use `crate::rng::gen_index(rng, n)`. `rand` draws a `usize` from a `u32` on wasm32 and a `u64` natively, so a seeded run would differ between them
 
 ## Project Structure
 

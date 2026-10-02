@@ -345,6 +345,26 @@ let addr = format!("param_{}", rng.gen::<u64>()); // Random component
 let addr = addr!("param", deterministic_index); // Reproducible
 ```
 
+### Random Indices
+
+A seeded run must make the same draws on wasm32 as on a 64-bit host. `rand`
+0.8 samples a `usize` from `next_u32` on 32-bit targets and from `next_u64` on
+64-bit ones, so a `usize` range picks a different index, and consumes a
+different number of words, depending on the target.
+
+```rust
+// BAD: target-dependent (u32 draw on wasm32, u64 draw natively)
+let i = rng.gen_range(0..sites.len());
+
+// GOOD: crate::rng::gen_index draws a u64 on every target, and on 64-bit
+// it is the same draw the line above makes, so native output is unchanged
+let i = gen_index(rng, sites.len());
+```
+
+Never draw a `usize` with `gen_range` or `gen::<usize>()` in library code. The
+guard is `crates/fugue-wasm/tests/cross_target.rs`, which CI runs natively and
+under `wasm-pack test --node`.
+
 ### Error Propagation
 
 ```rust
