@@ -62,6 +62,7 @@ use crate::core::address::Address;
 use crate::core::distribution::{Distribution, Normal};
 use crate::core::model::Model;
 use crate::core::numerical::log_sum_exp;
+use crate::rng::gen_index;
 use crate::runtime::handler::run;
 use crate::runtime::interpreters::{PriorHandler, ScoreGivenTrace};
 use crate::runtime::trace::{ChoiceValue, Trace};
@@ -816,7 +817,7 @@ fn score_log_prior<A>(model_fn: &impl Fn() -> Model<A>, trace: &Trace) -> f64 {
 fn sample_index<R: Rng>(rng: &mut R, weights: &[f64]) -> usize {
     let total: f64 = weights.iter().sum();
     if total <= 0.0 {
-        return rng.gen_range(0..weights.len());
+        return gen_index(rng, weights.len());
     }
     let u = rng.gen::<f64>() * total;
     let mut cum = 0.0;

@@ -60,6 +60,7 @@ use crate::core::model::Model;
 use crate::core::numerical::log_sum_exp;
 use crate::inference::mcmc_utils::DiminishingAdaptation;
 use crate::inference::mh::{mh_accept, propose_and_score, SiteProposal};
+use crate::rng::gen_index;
 use crate::runtime::handler::run;
 use crate::runtime::interpreters::{PriorHandler, ScoreGivenTrace};
 use crate::runtime::trace::Trace;
@@ -536,8 +537,8 @@ impl<A> PopulationKernel<A> for CrossoverKernel {
             return;
         }
         for _ in 0..self.n_pairs {
-            let i = rng.gen_range(0..n);
-            let mut j = rng.gen_range(0..n - 1);
+            let i = gen_index(rng, n);
+            let mut j = gen_index(rng, n - 1);
             if j >= i {
                 j += 1; // distinct partner
             }
@@ -935,7 +936,7 @@ fn tempered_single_site_mh<A, R: Rng>(
     }
 
     let sites: Vec<Address> = cur_scored.choices.keys().cloned().collect();
-    let target = sites[rng.gen_range(0..sites.len())].clone();
+    let target = sites[gen_index(rng, sites.len())].clone();
     let scale = adaptation.get_scale(&target);
 
     let overrides: HashMap<Address, SiteProposal> = HashMap::new();

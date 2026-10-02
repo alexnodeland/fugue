@@ -140,6 +140,27 @@ For the initial 0.1.0 release notes, see `.github/CHANGELOG.md`.
   pinned JSON encoding; and by round-trip property tests over random
   programs.
 
+### Fixed
+
+- **A seeded inference run now makes the same draws on 32- and 64-bit
+  targets; 64-bit output is unchanged.** Indices were drawn with
+  `rng.gen_range(0..n)` over a `usize`, which `rand` 0.8 samples from a `u32`
+  on 32-bit targets such as wasm32 and from a `u64` on 64-bit ones. The same
+  seed therefore picked different indices, and consumed a different number of
+  words, in the browser than natively, so a run could not be reproduced
+  across them. Auracle, which runs fugue in wasm, found it. Affected: the site
+  pick in single-site MH (every `adaptive_single_site_mh*` and
+  `adaptive_mcmc_chain*` entry point), the site pick in tempered SMC's MH
+  rejuvenation, `CrossoverKernel`'s pair pick, and ABC-SMC's fallback when
+  every weight is zero. All now draw a `u64`, through one crate-internal
+  helper. On 64-bit that is the draw a `usize` range always made, so every
+  native seeded result is bit-identical to before; a unit test pins the
+  helper against the old draw for 64 seeds and `n` up to `usize::MAX`,
+  including the next word consumed. `crates/fugue-wasm/tests/cross_target.rs`
+  pins a seeded MH run's site sequence, accept count and final generator word,
+  and CI runs it both natively and under `wasm-pack test --node`. Before the
+  fix the wasm run picked a different sequence.
+
 ## [0.2.3] - 2026-09-05
 
 ### Fixed

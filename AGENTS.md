@@ -82,7 +82,7 @@ make coverage
 ### Domain-Specific Considerations
 
 - **Numerical Stability**: Use log-space computations, guard against overflow/underflow
-- **Reproducibility**: Ensure deterministic execution given same random seed
+- **Reproducibility**: Ensure deterministic execution given same random seed, on every target. Never draw a `usize` index with `rng.gen_range(0..n)` or `gen::<usize>()`: `rand` reads a `u32` on wasm32 and a `u64` natively. Use `crate::rng::gen_index(rng, n)` (see `src/AGENTS.md`, Random Indices)
 - **Memory Management**: Consider trace pooling for high-throughput applications
 - **Error Propagation**: Preserve error context through the computation stack
 
