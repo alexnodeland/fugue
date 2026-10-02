@@ -119,6 +119,7 @@ use crate::core::distribution::{Distribution, Support};
 use crate::core::model::Model;
 use crate::core::numerical::nan_to_neg_inf;
 use crate::inference::mcmc_utils::DiminishingAdaptation;
+use crate::rng::gen_index;
 use crate::runtime::handler::{run, Handler};
 use crate::runtime::interpreters::{score_given_trace_reconciled, PriorHandler, ScoreGivenTrace};
 use crate::runtime::trace::{Choice, ChoiceValue, Trace};
@@ -752,7 +753,7 @@ where
     if sites.is_empty() {
         return None;
     }
-    let target = sites[rng.gen_range(0..sites.len())].clone();
+    let target = sites[gen_index(rng, sites.len())].clone();
     let scale = adaptation.get_scale(&target);
 
     let (a_prop, prop_trace, prop_lw, lqf, lqr, structure_changed) =

@@ -13,6 +13,7 @@ pub mod inference;
 pub mod macros;
 #[cfg(feature = "program")]
 pub mod program;
+pub(crate) mod rng;
 pub mod runtime;
 
 pub use core::address::Address;
