@@ -4,10 +4,11 @@ name: Release
 # Actions → Release → Run workflow, with the version (e.g. v0.2.4).
 #
 # Publishing to crates.io is publish.yml's job (it publishes when a version
-# bump lands on main); this only records the release on GitHub. The tag is
-# created here, by GitHub, so a release never depends on pushing a tag from
-# a checkout that may not be allowed to push one. A tag created with
-# GITHUB_TOKEN starts no other workflow, so publish.yml does not run again.
+# bump lands on main); this only records the release on GitHub, and refuses
+# a version crates.io does not have yet. The tag is created here, by GitHub,
+# so a release never depends on pushing a tag from a checkout that may not be
+# allowed to push one. A tag created with GITHUB_TOKEN starts no other
+# workflow, so publish.yml does not run again.
 
 on:
   workflow_dispatch:
@@ -66,8 +67,21 @@ jobs:
             echo "::error::$sha is not on main"
             exit 1
           fi
+          # A release records a published version: refuse one crates.io does
+          # not have yet (publish.yml has not run, or failed), since the tag
+          # made here would not start publish.yml to put it right.
+          status=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -A "fugue-release-workflow (github.com/$GITHUB_REPOSITORY)" \
+            "https://crates.io/api/v1/crates/fugue-ppl/$number")
+          if [ "$status" != 200 ]; then
+            echo "::error::fugue-ppl $number is not on crates.io (HTTP $status); publish it first"
+            exit 1
+          fi
+          prerelease=false
+          case "$number" in *-*) prerelease=true ;; esac
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "number=$number" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
 
       - name: Release notes from CHANGELOG.md
         env:
@@ -90,6 +104,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
           SHA: ${{ steps.check.outputs.sha }}
+          PRERELEASE: ${{ steps.check.outputs.prerelease }}
         run: |
+          set -euo pipefail
+          # A version with a suffix (v0.3.0-rc.1) is a prerelease, never "Latest".
+          flags=()
+          if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi
           gh release create "$VERSION" --repo "$GITHUB_REPOSITORY" \
-            --target "$SHA" --title "$VERSION" --notes-file notes.md
+            --target "$SHA" --title "$VERSION" --notes-file notes.md "${flags[@]}"
