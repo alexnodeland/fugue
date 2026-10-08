@@ -10,6 +10,23 @@ For the initial 0.1.0 release notes, see `.github/CHANGELOG.md`.
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-10-08
+
+### Performance
+
+- **Single-site MH skips the death loop on fixed-structure steps.**
+  `propose_and_score` looked up every site of the current trace in the proposed
+  one after each proposal, to find dimensions that had died. In a
+  fixed-structure model (the common case) nothing ever dies, so that was one
+  map lookup per site per step, about 5-10% of a step on a 226-site model. The
+  proposal handler now counts the sites it did not take from the current trace
+  with the same value type; when that count is zero and both traces have the
+  same number of choices, the address sets are provably equal and the loop is
+  skipped. Any birth, type change or size difference runs the loop as before.
+  Draws, traces and RNG consumption are bit-identical, pinned by seeded chains
+  on fixed-structure, structure-varying and type-changing models and by a swap
+  (one death, one birth) that still reports a structure change.
+
 ## [0.2.3] - 2026-10-06
 
 ### Added
