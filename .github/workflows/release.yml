@@ -1,0 +1,95 @@
+name: Release
+
+# Tags a published version and creates its GitHub release, run by hand:
+# Actions → Release → Run workflow, with the version (e.g. v0.2.4).
+#
+# Publishing to crates.io is publish.yml's job (it publishes when a version
+# bump lands on main); this only records the release on GitHub. The tag is
+# created here, by GitHub, so a release never depends on pushing a tag from
+# a checkout that may not be allowed to push one. A tag created with
+# GITHUB_TOKEN starts no other workflow, so publish.yml does not run again.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, as a tag (e.g. v0.2.4)"
+        required: true
+        type: string
+      ref:
+        description: "Commit or branch to tag (default: main)"
+        required: false
+        default: main
+        type: string
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Tag and release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      - name: Validate the version against Cargo.toml, the tags and main
+        id: check
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$VERSION" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+            echo "::error::'$VERSION' is not a tag like v0.2.4"
+            exit 1
+          fi
+          number="${VERSION#v}"
+          cargo_version=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          if [ "$cargo_version" != "$number" ]; then
+            echo "::error::Cargo.toml at ${{ inputs.ref }} says $cargo_version, not $number"
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$VERSION" >/dev/null; then
+            echo "::error::$VERSION already exists"
+            exit 1
+          fi
+          sha=$(git rev-parse HEAD)
+          git fetch -q origin main
+          if ! git merge-base --is-ancestor "$sha" origin/main; then
+            echo "::error::$sha is not on main"
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+
+      - name: Release notes from CHANGELOG.md
+        env:
+          NUMBER: ${{ steps.check.outputs.number }}
+        run: |
+          set -euo pipefail
+          # The version's own section: from its heading to the next one.
+          awk -v v="$NUMBER" '
+            /^## \[/ { if (on) exit; if (index($0, "## [" v "]") == 1) { on = 1; next } }
+            on { print }
+          ' CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "::error::CHANGELOG.md has no section for $NUMBER"
+            exit 1
+          fi
+          printf '\n[fugue-ppl %s on crates.io](https://crates.io/crates/fugue-ppl/%s)\n' "$NUMBER" "$NUMBER" >> notes.md
+
+      - name: Create the tag and the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          SHA: ${{ steps.check.outputs.sha }}
+        run: |
+          gh release create "$VERSION" --repo "$GITHUB_REPOSITORY" \
+            --target "$SHA" --title "$VERSION" --notes-file notes.md
