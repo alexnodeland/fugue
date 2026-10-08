@@ -1,16 +1,27 @@
 name: Release
 
-# Tags a published version and creates its GitHub release, run by hand:
-# Actions → Release → Run workflow, with the version (e.g. v0.2.4).
+# Tags a published version and creates its GitHub release.
 #
 # Publishing to crates.io is publish.yml's job (it publishes when a version
-# bump lands on main); this only records the release on GitHub, and refuses
-# a version crates.io does not have yet. The tag is created here, by GitHub,
-# so a release never depends on pushing a tag from a checkout that may not be
-# allowed to push one. A tag created with GITHUB_TOKEN starts no other
-# workflow, so publish.yml does not run again.
+# bump lands on main); this records the release on GitHub. The tag is created
+# here, by GitHub, so a release never depends on pushing a tag from a checkout
+# that may not be allowed to push one. A tag created with GITHUB_TOKEN starts
+# no other workflow, so publish.yml does not run again.
+#
+# It runs two ways:
+#   - by itself, after every successful Publish run on main: it reads the
+#     version from Cargo.toml, and tags the commit that set that version once
+#     crates.io has it. Nothing to do (the tag exists, or crates.io does not
+#     have the version) is a quiet success, so a release needs no one to start
+#     it, and the many Publish runs that publish nothing cost nothing;
+#   - by hand (Actions → Release → Run workflow), with a version and a ref,
+#     where nothing to do is an error that says why.
 
 on:
+  workflow_run:
+    workflows: [Publish]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       version:
@@ -33,66 +44,84 @@ permissions:
 jobs:
   release:
     name: Tag and release
+    # After Publish only when it succeeded on a push to main.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.event.workflow_run.head_sha }}
           fetch-depth: 0
 
-      - name: Validate the version against Cargo.toml, the tags and main
+      - name: Decide the version and the commit to tag
         id: check
         env:
-          VERSION: ${{ inputs.version }}
+          BY_HAND: ${{ github.event_name == 'workflow_dispatch' }}
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          if ! printf '%s' "$VERSION" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
-            echo "::error::'$VERSION' is not a tag like v0.2.4"
-            exit 1
-          fi
-          number="${VERSION#v}"
+          # By hand a refusal is an error; after Publish it is a quiet skip.
+          stop() {
+            if [ "$BY_HAND" = true ]; then echo "::error::$1"; exit 1; fi
+            echo "::notice::Nothing to release: $1"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
           cargo_version=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
-          if [ "$cargo_version" != "$number" ]; then
-            echo "::error::Cargo.toml at ${{ inputs.ref }} says $cargo_version, not $number"
-            exit 1
+          if [ "$BY_HAND" = true ]; then
+            VERSION="$INPUT_VERSION"
+            if ! printf '%s' "$VERSION" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+              stop "'$VERSION' is not a tag like v0.2.4"
+            fi
+            number="${VERSION#v}"
+            [ "$cargo_version" = "$number" ] || stop "Cargo.toml at the ref says $cargo_version, not $number"
+            sha=$(git rev-parse HEAD)
+          else
+            number="$cargo_version"
+            VERSION="v$number"
+            # The commit that set this version, not whatever came after it.
+            sha=$(git log --format=%H -1 -G"^version = \"$number\"" -- Cargo.toml)
+            [ -n "$sha" ] || stop "no commit sets version $number in Cargo.toml"
           fi
           if git ls-remote --exit-code --tags origin "refs/tags/$VERSION" >/dev/null; then
-            echo "::error::$VERSION already exists"
-            exit 1
+            stop "$VERSION already exists"
           fi
-          sha=$(git rev-parse HEAD)
           git fetch -q origin main
-          if ! git merge-base --is-ancestor "$sha" origin/main; then
-            echo "::error::$sha is not on main"
-            exit 1
-          fi
+          git merge-base --is-ancestor "$sha" origin/main || stop "$sha is not on main"
           # A release records a published version: refuse one crates.io does
           # not have yet (publish.yml has not run, or failed), since the tag
           # made here would not start publish.yml to put it right.
           status=$(curl -sS -o /dev/null -w '%{http_code}' \
             -A "fugue-release-workflow (github.com/$GITHUB_REPOSITORY)" \
             "https://crates.io/api/v1/crates/fugue-ppl/$number")
-          if [ "$status" != 200 ]; then
-            echo "::error::fugue-ppl $number is not on crates.io (HTTP $status); publish it first"
-            exit 1
-          fi
+          [ "$status" = 200 ] || stop "fugue-ppl $number is not on crates.io (HTTP $status); publish it first"
           prerelease=false
           case "$number" in *-*) prerelease=true ;; esac
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "number=$number" >> "$GITHUB_OUTPUT"
-          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          {
+            echo "skip=false"
+            echo "version=$VERSION"
+            echo "number=$number"
+            echo "sha=$sha"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Release notes from CHANGELOG.md
+        if: steps.check.outputs.skip == 'false'
         env:
           NUMBER: ${{ steps.check.outputs.number }}
+          SHA: ${{ steps.check.outputs.sha }}
         run: |
           set -euo pipefail
-          # The version's own section: from its heading to the next one.
-          awk -v v="$NUMBER" '
+          # The version's own section, as the tagged commit has it: from its
+          # heading to the next one.
+          git show "$SHA:CHANGELOG.md" | awk -v v="$NUMBER" '
             /^## \[/ { if (on) exit; if (index($0, "## [" v "]") == 1) { on = 1; next } }
             on { print }
-          ' CHANGELOG.md > notes.md
+          ' > notes.md
           if ! grep -q '[^[:space:]]' notes.md; then
             echo "::error::CHANGELOG.md has no section for $NUMBER"
             exit 1
@@ -100,9 +129,10 @@ jobs:
           printf '\n[fugue-ppl %s on crates.io](https://crates.io/crates/fugue-ppl/%s)\n' "$NUMBER" "$NUMBER" >> notes.md
 
       - name: Create the tag and the GitHub release
+        if: steps.check.outputs.skip == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ steps.check.outputs.version }}
           SHA: ${{ steps.check.outputs.sha }}
           PRERELEASE: ${{ steps.check.outputs.prerelease }}
         run: |
