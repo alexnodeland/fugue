@@ -95,10 +95,22 @@ jobs:
           # A release records a published version: refuse one crates.io does
           # not have yet (publish.yml has not run, or failed), since the tag
           # made here would not start publish.yml to put it right.
-          status=$(curl -sS -o /dev/null -w '%{http_code}' \
-            -A "fugue-release-workflow (github.com/$GITHUB_REPOSITORY)" \
-            "https://crates.io/api/v1/crates/fugue-ppl/$number")
-          [ "$status" = 200 ] || stop "fugue-ppl $number is not on crates.io (HTTP $status); publish it first"
+          # Only a 404 means "not published": anything else (a 429, a 5xx, no
+          # answer) is retried, then fails the run, so a crates.io hiccup never
+          # passes as a quiet skip that leaves a published version untagged.
+          status=000
+          for wait in 0 5 15 30 60; do
+            sleep "$wait"
+            status=$(curl -sS -o /dev/null -w '%{http_code}' \
+              -A "fugue-release-workflow (github.com/$GITHUB_REPOSITORY)" \
+              "https://crates.io/api/v1/crates/fugue-ppl/$number" || echo 000)
+            case "$status" in 200|404) break ;; esac
+          done
+          case "$status" in
+            200) ;;
+            404) stop "fugue-ppl $number is not on crates.io; publish it first" ;;
+            *) echo "::error::crates.io answered HTTP $status for fugue-ppl $number"; exit 1 ;;
+          esac
           prerelease=false
           case "$number" in *-*) prerelease=true ;; esac
           {
