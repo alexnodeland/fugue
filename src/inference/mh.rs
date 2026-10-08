@@ -374,6 +374,8 @@ struct SingleSiteProposalHandler<'a, R: RngCore> {
     log_q_forward: &'a mut f64,
     log_q_reverse: &'a mut f64,
     trace: Trace,
+    /// Sites visited that were not taken from `base` with the same type.
+    births: &'a mut usize,
 }
 
 impl<'a, R: RngCore> SingleSiteProposalHandler<'a, R> {
@@ -393,10 +395,15 @@ impl<'a, R: RngCore> SingleSiteProposalHandler<'a, R> {
 impl<'a, R: RngCore> Handler for SingleSiteProposalHandler<'a, R> {
     fn on_sample_f64(&mut self, addr: &Address, dist: &dyn Distribution<f64>) -> f64 {
         if addr == self.target {
-            let current = self
-                .base
-                .get_f64(addr)
-                .unwrap_or_else(|| dist.sample(self.rng));
+            let current = match self.base.get_f64(addr) {
+                Some(v) => v,
+                None => {
+                    // Not taken from `base` (absent or of another type): a birth
+                    // as far as the death-loop skip is concerned.
+                    *self.births += 1;
+                    dist.sample(self.rng)
+                }
+            };
             let kind = self.f64_kind(addr, dist);
             let (proposed, lqf, lqr) = match kind {
                 SiteProposal::Gaussian => {
@@ -457,6 +464,7 @@ impl<'a, R: RngCore> Handler for SingleSiteProposalHandler<'a, R> {
             };
             let lp = dist.log_prob(&x);
             if born {
+                *self.births += 1;
                 // RJMCMC birth from the prior: cancel this fresh site's log_prior.
                 *self.log_q_forward += lp;
             }
@@ -476,10 +484,15 @@ impl<'a, R: RngCore> Handler for SingleSiteProposalHandler<'a, R> {
     fn on_sample_bool(&mut self, addr: &Address, dist: &dyn Distribution<bool>) -> bool {
         let mut born = false;
         let x = if addr == self.target {
-            let current = self
-                .base
-                .get_bool(addr)
-                .unwrap_or_else(|| dist.sample(self.rng));
+            let current = match self.base.get_bool(addr) {
+                Some(v) => v,
+                None => {
+                    // Not taken from `base` (absent or of another type): a birth
+                    // as far as the death-loop skip is concerned.
+                    *self.births += 1;
+                    dist.sample(self.rng)
+                }
+            };
             // Symmetric deterministic flip: contributes 0 to both q terms (leave
             // any born/died structural corrections already accumulated intact).
             FlipProposal.propose(current, self.scale, self.rng)
@@ -488,6 +501,7 @@ impl<'a, R: RngCore> Handler for SingleSiteProposalHandler<'a, R> {
                 Some(v) => v,
                 None => {
                     born = true;
+                    *self.births += 1;
                     dist.sample(self.rng)
                 }
             }
@@ -512,10 +526,15 @@ impl<'a, R: RngCore> Handler for SingleSiteProposalHandler<'a, R> {
     fn on_sample_u64(&mut self, addr: &Address, dist: &dyn Distribution<u64>) -> u64 {
         let mut born = false;
         let x = if addr == self.target {
-            let current = self
-                .base
-                .get_u64(addr)
-                .unwrap_or_else(|| dist.sample(self.rng));
+            let current = match self.base.get_u64(addr) {
+                Some(v) => v,
+                None => {
+                    // Not taken from `base` (absent or of another type): a birth
+                    // as far as the death-loop skip is concerned.
+                    *self.births += 1;
+                    dist.sample(self.rng)
+                }
+            };
             // Symmetric reflected discrete walk (FG-41): contributes 0 to both q
             // terms (leave any born/died structural corrections intact).
             DiscreteWalkProposal.propose(current, self.scale, self.rng)
@@ -524,6 +543,7 @@ impl<'a, R: RngCore> Handler for SingleSiteProposalHandler<'a, R> {
                 Some(v) => v,
                 None => {
                     born = true;
+                    *self.births += 1;
                     dist.sample(self.rng)
                 }
             }
@@ -548,10 +568,15 @@ impl<'a, R: RngCore> Handler for SingleSiteProposalHandler<'a, R> {
     fn on_sample_usize(&mut self, addr: &Address, dist: &dyn Distribution<usize>) -> usize {
         let mut born = false;
         let x = if addr == self.target {
-            let current = self
-                .base
-                .get_usize(addr)
-                .unwrap_or_else(|| dist.sample(self.rng));
+            let current = match self.base.get_usize(addr) {
+                Some(v) => v,
+                None => {
+                    // Not taken from `base` (absent or of another type): a birth
+                    // as far as the death-loop skip is concerned.
+                    *self.births += 1;
+                    dist.sample(self.rng)
+                }
+            };
             // FG-10: resample from the site's prior. With q = prior the Hastings
             // terms cancel the prior in the target, so acceptance reduces to the
             // likelihood ratio and no category can ever be missed.
@@ -565,6 +590,7 @@ impl<'a, R: RngCore> Handler for SingleSiteProposalHandler<'a, R> {
                 Some(v) => v,
                 None => {
                     born = true;
+                    *self.births += 1;
                     dist.sample(self.rng)
                 }
             }
@@ -589,10 +615,15 @@ impl<'a, R: RngCore> Handler for SingleSiteProposalHandler<'a, R> {
     fn on_sample_i64(&mut self, addr: &Address, dist: &dyn Distribution<i64>) -> i64 {
         let mut born = false;
         let x = if addr == self.target {
-            let current = self
-                .base
-                .get_i64(addr)
-                .unwrap_or_else(|| dist.sample(self.rng));
+            let current = match self.base.get_i64(addr) {
+                Some(v) => v,
+                None => {
+                    // Not taken from `base` (absent or of another type): a birth
+                    // as far as the death-loop skip is concerned.
+                    *self.births += 1;
+                    dist.sample(self.rng)
+                }
+            };
             // Symmetric integer random walk (no boundary to reflect at):
             // contributes 0 to both q terms (leave born/died corrections intact).
             let delta = (self.scale * gaussian_z(self.rng)).round() as i64;
@@ -602,6 +633,7 @@ impl<'a, R: RngCore> Handler for SingleSiteProposalHandler<'a, R> {
                 Some(v) => v,
                 None => {
                     born = true;
+                    *self.births += 1;
                     dist.sample(self.rng)
                 }
             }
@@ -648,6 +680,16 @@ impl<'a, R: RngCore> Handler for SingleSiteProposalHandler<'a, R> {
     }
 }
 
+/// Test-only switch that disables the death-loop skip, so a test can compute the
+/// reference (the loop always run) and compare it to the fast path.
+#[cfg(test)]
+pub(crate) mod tests_support {
+    use std::cell::Cell;
+    thread_local! {
+        pub(crate) static FORCE_DEATH_LOOP: Cell<bool> = const { Cell::new(false) };
+    }
+}
+
 /// Propose a new value at `target` and fully score the resulting trace in one
 /// model run. Returns `(model_result, proposed_trace, proposed_log_weight,
 /// log_q_forward, log_q_reverse)`.
@@ -680,6 +722,7 @@ where
 {
     let mut lqf = 0.0;
     let mut lqr = 0.0;
+    let mut births = 0usize;
     let (a, trace) = run(
         SingleSiteProposalHandler {
             rng,
@@ -690,6 +733,7 @@ where
             log_q_forward: &mut lqf,
             log_q_reverse: &mut lqr,
             trace: Trace::default(),
+            births: &mut births,
         },
         model_fn(),
     );
@@ -705,15 +749,30 @@ where
     // its prior density to `log_q_forward`), so the old site's prior density
     // must enter `log_q_reverse` here too, or the type-changing move is
     // corrected on one side only (FG-N9).
+    //
+    // Fast path for fixed-structure models: when the handler took every visited
+    // site from `current` with the same value type (`births == 0`) and the
+    // proposed trace has as many choices as `current`, the proposed addresses
+    // are a subset of `current`'s (each was found there) of equal size, hence
+    // the same set, each with the same type. Then no address of `current` is
+    // missing or retyped, so `died == 0`, nothing is added to `lqr`, and
+    // `structure_changed` is false: the loop below would find nothing, and is
+    // skipped. Any birth (including a type change, which `base.get_*` reports
+    // as absent) or a size difference falls through to the full loop.
     let mut died = 0usize;
-    for (addr, choice) in &current.choices {
-        let survives = trace
-            .choices
-            .get(addr)
-            .is_some_and(|c| c.value.type_name() == choice.value.type_name());
-        if !survives {
-            lqr += choice.logp;
-            died += 1;
+    let skip_death_loop = births == 0 && trace.choices.len() == current.choices.len();
+    #[cfg(test)]
+    let skip_death_loop = skip_death_loop && !tests_support::FORCE_DEATH_LOOP.with(|f| f.get());
+    if !skip_death_loop {
+        for (addr, choice) in &current.choices {
+            let survives = trace
+                .choices
+                .get(addr)
+                .is_some_and(|c| c.value.type_name() == choice.value.type_name());
+            if !survives {
+                lqr += choice.logp;
+                died += 1;
+            }
         }
     }
     // born = |proposed| − |current| + died  (|proposed| = |current| − died + born).
@@ -1345,6 +1404,105 @@ mod tests {
     use crate::runtime::handler::run;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
+
+    /// The fixed-structure fast path (skipping the death loop) is exactly the
+    /// old path: same RNG consumption, same draws, same traces.
+    fn chain_repr<A: Clone + std::fmt::Debug>(
+        force_loop: bool,
+        model_fn: impl Fn() -> Model<A>,
+    ) -> String {
+        tests_support::FORCE_DEATH_LOOP.with(|f| f.set(force_loop));
+        let mut rng = StdRng::seed_from_u64(0xFA57);
+        let out = adaptive_mcmc_chain(&mut rng, model_fn, 400, 100);
+        tests_support::FORCE_DEATH_LOOP.with(|f| f.set(false));
+        // The RNG state afterwards pins consumption too.
+        let next: u64 = rng.gen();
+        format!("{:?}|{}", out, next)
+    }
+
+    #[test]
+    fn death_loop_skip_is_bit_identical_fixed_structure() {
+        let model_fn = || {
+            sample(addr!("mu"), Normal::new(0.0, 1.0).unwrap()).and_then(|mu| {
+                sample(addr!("n"), Poisson::new(3.0).unwrap()).and_then(move |n| {
+                    sample(addr!("f"), Bernoulli::new(0.4).unwrap()).and_then(move |f| {
+                        observe(addr!("y"), Normal::new(mu, 1.0).unwrap(), 0.5)
+                            .map(move |_| (mu, n, f))
+                    })
+                })
+            })
+        };
+        assert_eq!(chain_repr(false, model_fn), chain_repr(true, model_fn));
+    }
+
+    #[test]
+    fn death_loop_skip_is_bit_identical_structure_varying() {
+        let model_fn = || {
+            sample(addr!("b"), Bernoulli::new(0.4).unwrap()).and_then(|b| {
+                if b {
+                    sample(addr!("x"), Normal::new(0.0, 1.0).unwrap()).and_then(move |x| {
+                        observe(addr!("y"), Normal::new(x, 1.0).unwrap(), 1.5).map(move |_| b)
+                    })
+                } else {
+                    observe(addr!("y"), Normal::new(0.0, 2.0).unwrap(), 1.5).map(move |_| b)
+                }
+            })
+        };
+        assert_eq!(chain_repr(false, model_fn), chain_repr(true, model_fn));
+    }
+
+    #[test]
+    fn death_loop_skip_is_bit_identical_type_changing() {
+        // The same address "v" is an f64 on one branch and a u64 on the other.
+        let model_fn = || {
+            sample(addr!("b"), Bernoulli::new(0.5).unwrap()).and_then(|b| {
+                if b {
+                    sample(addr!("v"), Normal::new(0.0, 1.0).unwrap()).map(move |v| (b, v))
+                } else {
+                    sample(addr!("v"), Poisson::new(2.0).unwrap()).map(move |v| (b, v as f64))
+                }
+            })
+        };
+        assert_eq!(chain_repr(false, model_fn), chain_repr(true, model_fn));
+    }
+
+    /// One death plus one birth leaves the site count equal, but is still a
+    /// structure change and still carries the dead site's prior in `lqr`.
+    #[test]
+    fn swap_with_equal_site_count_reports_structure_change() {
+        let model_fn = || {
+            sample(addr!("b"), Bernoulli::new(0.5).unwrap()).and_then(|b| {
+                let name = if b { addr!("x") } else { addr!("z") };
+                sample(name, Normal::new(0.0, 1.0).unwrap()).map(move |_| b)
+            })
+        };
+        let overrides = HashMap::new();
+        let mut current = None;
+        for seed in 0..100u64 {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let (_, t) = run(
+                PriorHandler {
+                    rng: &mut rng,
+                    trace: Trace::default(),
+                },
+                model_fn(),
+            );
+            if t.get_bool(&addr!("b")).unwrap() {
+                current = Some(t);
+                break;
+            }
+        }
+        let current = current.expect("a seed with b = true");
+        let x_logp = current.choices.get(&addr!("x")).unwrap().logp;
+        let mut rng = StdRng::seed_from_u64(9);
+        let (_, prop, _, lqf, lqr, changed) =
+            propose_and_score(&mut rng, &model_fn, &current, &addr!("b"), 1.0, &overrides);
+        assert!(!prop.get_bool(&addr!("b")).unwrap());
+        assert_eq!(prop.choices.len(), current.choices.len());
+        assert!(changed, "a swap is a structure change");
+        assert_eq!(lqr, x_logp, "the dead site's prior enters lqr");
+        assert_eq!(lqf, prop.choices.get(&addr!("z")).unwrap().logp);
+    }
 
     /// **Thinning must not change the chain — only what is kept from it.**
     ///
