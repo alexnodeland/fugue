@@ -84,6 +84,39 @@ for particle in particles {
 }
 ```
 
+- `smc_extend`: Move an existing weighted population to a new target (a new
+  batch of data, or a restructured model) and estimate the log ratio of the
+  two evidences
+
+```rust
+use fugue::*;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
+
+// The model conditioned on however much data has arrived.
+fn model(data: Vec<f64>) -> Model<f64> {
+    sample(addr!("mu"), Normal::new(0.0, 2.0).unwrap()).bind(move |mu| {
+        traverse_vec(data.into_iter().enumerate().collect(), move |(i, y)| {
+            observe(addr!("y", i), Normal::new(mu, 1.0).unwrap(), y)
+        })
+        .map(move |_| mu)
+    })
+}
+
+let mut rng = StdRng::seed_from_u64(42);
+let config = SMCConfig { rejuvenation_steps: 1, ..Default::default() };
+
+// Start from the prior and feed the data in two epochs.
+let mut particles = smc_prior_particles(&mut rng, 200, || model(vec![]));
+let mut log_evidence = 0.0;
+for seen in [vec![0.9, 1.4], vec![0.9, 1.4, 0.2, 1.1]] {
+    let step = smc_extend(&mut rng, particles, || model(seen.clone()), &config).unwrap();
+    log_evidence += step.log_evidence_increment; // ln p(this epoch | earlier ones)
+    particles = step.particles;
+}
+assert!(log_evidence.is_finite());
+```
+
 ### `vi.rs` - Variational Inference
 
 - `estimate_elbo`: Monte Carlo ELBO estimation using prior as proposal

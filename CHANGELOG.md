@@ -85,6 +85,34 @@ For the initial 0.1.0 release notes, see `.github/CHANGELOG.md`.
   every split of the data, and an `adaptive_smc` evidence estimate of the
   uncollapsed model.
 
+- **SMC population extension: `smc_extend` and `SMCExtension`.**
+  `adaptive_smc` tempers the likelihood of one fixed model, so there was no
+  way to carry a posterior population on to a new batch of data or to a
+  revised model. `smc_extend(rng, particles, model_fn, &config)` takes a
+  weighted population and the model that defines the new target (for a new
+  batch: the model on all the data so far), and returns the reweighted
+  population with `log_evidence_increment`, the estimate of
+  `ln(Z_new / Z_old)`: the log predictive of the added data, or the log Bayes
+  factor of a restructured model. It is built from the existing pieces: each
+  trace is re-scored with `score_given_trace_reconciled`, the population is
+  resampled with `resample_particles` when the ESS falls below
+  `ess_threshold · N`, and then moved with `rejuvenate_particles` at `β = 1`.
+  The incremental weight is the ratio of the two unnormalized targets over
+  the sites they share, with the old score read from the trace's accumulators
+  and per-choice `logp`; new sites are drawn from their prior and dropped
+  ones marginalized, both reported (`fresh_addresses`, `vanished_addresses`).
+  A step that changes no density (a renamed population under the renamed
+  model, a new site with nothing observed below it) returns an increment of
+  exactly `0.0`. The result type is `#[non_exhaustive]`, so it can grow.
+
+  Pinned by `tests/smc_extend.rs` on a conjugate Normal model: two-batch
+  evidence equals single-pass evidence to 1e-10 for a pure reweight from the
+  same particles, and within Monte Carlo error with resampling and
+  rejuvenation, and both equal the closed form
+  (`normal_normal_log_marginal`); increments over three epochs sum to the
+  evidence; new observed blocks, dropped sites and changed priors are
+  weighted to their closed forms.
+
 ## [0.2.4] - 2026-10-08
 
 ### Performance

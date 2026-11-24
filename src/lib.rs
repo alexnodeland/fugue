@@ -71,9 +71,9 @@ pub use inference::mh::{
 pub use inference::smc::{
     adaptive_smc, adaptive_smc_with_kernel, decode_particle, decode_particles,
     effective_sample_size, multinomial_resample, normalize_particles, rejuvenate_particles,
-    resample_particles, smc_prior_particles, stratified_resample, systematic_resample,
+    resample_particles, smc_extend, smc_prior_particles, stratified_resample, systematic_resample,
     try_decode_particle, CrossoverKernel, NoKernel, Particle, PopulationKernel, ResamplingMethod,
-    SMCConfig, SMCResult,
+    SMCConfig, SMCExtension, SMCResult,
 };
 pub use inference::validation::{
     ks_test_distribution, test_conjugate_beta_bernoulli_model, test_conjugate_normal_model,
