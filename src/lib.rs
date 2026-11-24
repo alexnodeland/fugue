@@ -31,8 +31,8 @@ pub use core::distribution::{
     Uniform, Weibull, WithMeta,
 };
 pub use core::model::{
-    factor, guard, observe, pure, sample, sample_bool, sample_f64, sample_i64, sample_u64,
-    sample_usize, sequence_vec, traverse_vec, zip, Model, ModelExt, SampleType,
+    factor, factor_at, guard, observe, pure, sample, sample_bool, sample_f64, sample_i64,
+    sample_u64, sample_usize, sequence_vec, traverse_vec, zip, Model, ModelExt, SampleType,
 };
 pub use runtime::async_handler::{run_async, AsyncHandler, FromSync};
 pub use runtime::delegate::{Delegate, Overrides};
@@ -41,6 +41,7 @@ pub use runtime::interpreters::{
     score_given_trace_reconciled, PriorHandler, ReconcileReport, ReplayHandler, SafeReplayHandler,
     SafeScoreGivenTrace, ScoreGivenTrace,
 };
+pub use runtime::record::{run_recorded, RecordSites, SiteWeights};
 pub use runtime::trace::{Choice, ChoiceValue, Trace};
 
 // Re-export key inference methods

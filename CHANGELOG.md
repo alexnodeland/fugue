@@ -27,6 +27,43 @@ For the initial 0.1.0 release notes, see `.github/CHANGELOG.md`.
   changes no value: they are the weights of the renamed trace under the
   renamed model, which a test pins by re-scoring. Nothing existing changes.
 
+- **Addressed factors and per-site weight records: `factor_at`, `RecordSites`,
+  `SiteWeights`, `run_recorded`.** A trace keeps `log_likelihood` and
+  `log_factors` as flat sums, and `factor` has no address, so nothing could
+  say which observation or factor a log-weight came from. Two additions, both
+  opt-in:
+
+  - `factor_at(addr, logw)` is `factor(logw)` with a name. Under every handler
+    that does not ask for the address it gives the same trace bit for bit
+    (`log_factors` grows by `logw`), so all inference routines treat the two
+    alike; seeded `adaptive_smc` and adaptive MH runs are identical. `Handler`,
+    `AsyncHandler` and `Overrides` gain a default method `on_factor_at(addr,
+    logw)` that calls `on_factor(logw)`: existing implementations compile and
+    behave unchanged, and an `on_factor` implementation still sees every
+    factor weight. `()` (so `Delegate::new`) and `FromSync` forward the
+    address. `Model` gets no new variant, which would break exhaustive
+    matches: the node is an `ObserveF64` carrying a
+    `core::model::AddressedFactor`, which `run` and `run_async` route to
+    `on_factor_at`. Code that walks a `Model` itself can test for it with
+    `AddressedFactor::weight_of`; left unrecognised it adds the same weight,
+    under `log_likelihood`.
+  - `runtime::record` holds the record. `RecordSites { inner, sites }` wraps
+    any handler, forwards every site unchanged (the inner trace, return values
+    and RNG draws are bit-identical), and fills a `SiteWeights`: log-weight
+    per observation address, per `factor_at` address, and one sum for
+    anonymous factors, with sums by address prefix (`observations_under`,
+    `factors_under`, `under`). `run_recorded(handler, model)` returns
+    `(value, trace, sites)`. `Trace` is not touched: callers build it with
+    struct literals, so a map could not be added to it compatibly.
+
+  Pinned by `tests/site_records.rs`: equality of `factor_at` and `factor`
+  traces under `PriorHandler`, `ReplayHandler`, `ScoreGivenTrace`,
+  `SafeScoreGivenTrace`, the reconciling scorer and `run_async`; handlers that
+  implement only the required methods; and `SiteWeights::log_likelihood` /
+  `log_factors` against the trace's accumulators over 500 seeded executions
+  (to rounding, since the record sums by address and the trace in program
+  order; exact for a single site, and `-∞` on both sides together).
+
 ## [0.2.4] - 2026-10-08
 
 ### Performance

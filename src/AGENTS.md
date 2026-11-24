@@ -19,6 +19,7 @@ src/
 │   ├── async_handler.rs # AsyncHandler trait and run_async (effects resolved by I/O)
 │   ├── handler.rs      # Handler trait and execution framework
 │   ├── interpreters.rs # Built-in model interpreters
+│   ├── record.rs       # Per-site observation/factor weight records
 │   └── trace.rs        # Execution history management
 ├── inference/          # Inference algorithms
 │   ├── mcmc/           # Markov Chain Monte Carlo
@@ -131,6 +132,12 @@ make bench
 - `ReplayHandler`: Deterministic replay with trace
 - `ScoreGivenTrace`: Compute log probabilities
 - Safe variants with enhanced error checking
+
+**`record.rs`** - Per-Site Weight Records
+
+- `RecordSites` wraps any handler and fills a `SiteWeights` (log-weight per observation address and per `factor_at` address); the inner trace is unchanged
+- `Trace` keeps only flat sums and is built with struct literals by callers, so attribution lives beside it, not in it
+- `factor_at` is stored as an `ObserveF64` node of an `AddressedFactor` (a `Model` variant would break exhaustive matches); `run`/`run_async` route it to `Handler::on_factor_at`, which defaults to `on_factor`
 
 **`trace.rs`** - Execution History
 

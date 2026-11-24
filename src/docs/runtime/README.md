@@ -122,6 +122,16 @@ The data structures that make probabilistic programming possible by recording ex
 - Type-safe value access with both Option and Result APIs
 - Three-component log-weight decomposition for algorithmic flexibility
 
+### [Per-Site Records](crate::runtime::record) - Attributing Weight to Sites
+
+An opt-in side channel for the weights a trace only keeps as flat sums.
+
+**Core Types:**
+
+- `SiteWeights`: log-weight per observation address and per addressed factor (`factor_at`)
+- `RecordSites` handler: wraps any handler, records, and forwards every site unchanged
+- `run_recorded` function: `run` that also returns the record
+
 ### [Async Interpretation](crate::runtime::async_handler) - Effects Resolved by I/O
 
 The same models, interpreted by a handler that awaits its effects instead of blocking a thread on each.
@@ -193,6 +203,7 @@ The runtime provides execution infrastructure for all inference algorithms:
 - **[Handler System](handler.md)** - Type-safe execution engine with algebraic effects pattern
 - **[Built-in Interpreters](interpreters.md)** - Five foundational handlers for all execution modes
 - **[Trace System](trace.md)** - Execution history recording with type-safe value access
+- **[Per-Site Records](crate::runtime::record)** - Per-address observation and factor log-weights
 
 ### Related Modules
 
