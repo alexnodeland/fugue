@@ -117,6 +117,31 @@ for seen in [vec![0.9, 1.4], vec![0.9, 1.4, 0.2, 1.1]] {
 assert!(log_evidence.is_finite());
 ```
 
+- `adaptive_smc_replicated`, `log_evidence_estimate`: A log-evidence estimate
+  with a standard error, from independent replicate runs (pooled into one
+  population)
+
+```rust
+use fugue::*;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
+
+let model_fn = || {
+    sample(addr!("mu"), Normal::new(0.0, 2.0).unwrap())
+        .bind(|mu| observe(addr!("y"), Normal::new(mu, 1.0).unwrap(), 0.8).map(move |_| mu))
+};
+let mut rng = StdRng::seed_from_u64(42);
+let (pooled, evidence) =
+    adaptive_smc_replicated(&mut rng, 100, 5, model_fn, &SMCConfig::default()).unwrap();
+
+println!(
+    "log evidence {:.3} +/- {:.3} from {} particles",
+    evidence.log_evidence,
+    evidence.std_error,
+    pooled.len()
+);
+```
+
 ### `vi.rs` - Variational Inference
 
 - `estimate_elbo`: Monte Carlo ELBO estimation using prior as proposal

@@ -38,6 +38,14 @@
 //! resample and rejuvenation when the weights degenerate) and returns the log
 //! ratio of the two evidences, so log evidence accumulates over epochs.
 //!
+//! ## How uncertain is the evidence?
+//!
+//! [`SMCResult::log_evidence`] is a point estimate. [`adaptive_smc_replicated`]
+//! runs the sampler several times and returns the pooled population with a
+//! [`LogEvidenceEstimate`]: the combined estimate and its standard error.
+//! [`log_evidence_estimate`] does the same arithmetic for replicate estimates
+//! obtained any other way.
+//!
 //! # Examples
 //!
 //! ```rust
@@ -1423,6 +1431,213 @@ pub fn smc_extend<A, R: Rng>(
         fresh_addresses: fresh.into_iter().collect(),
         vanished_addresses: vanished.into_iter().collect(),
     })
+}
+
+/// A log-evidence estimate with a standard error, from independent replicate
+/// estimates. Built by [`log_evidence_estimate`] and
+/// [`adaptive_smc_replicated`].
+///
+/// [`SMCResult`] carries a point estimate only. It is a plain struct with
+/// public fields that callers build with a literal (this crate's own doc
+/// examples do), so a `std_error` field could not be added to it without
+/// breaking them; the standard error therefore lives in this separate,
+/// `#[non_exhaustive]` type.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct LogEvidenceEstimate {
+    /// Log of the mean of the replicate evidence estimates,
+    /// `ln((1/R)·Σᵣ Ẑᵣ)`. Each SMC evidence estimate `Ẑᵣ` is unbiased for the
+    /// evidence, so their mean is too, with `R` times less variance.
+    pub log_evidence: f64,
+    /// Standard error of `log_evidence`: the relative standard error of the
+    /// mean of the `Ẑᵣ` (the delta method). `NaN` when `log_evidence` is
+    /// `-∞`, where it is undefined.
+    pub std_error: f64,
+    /// The replicate log-evidence estimates `ln Ẑᵣ` the summary was built
+    /// from, in the order given (a `NaN` input is stored as `-∞`).
+    pub replicates: Vec<f64>,
+}
+
+/// Combine independent log-evidence estimates into one estimate with a
+/// standard error.
+///
+/// Give it the `log_evidence` of `R ≥ 2` independent runs of the same
+/// estimator on the same model and data ([`adaptive_smc`] runs, or sums of
+/// [`smc_extend`] increments along independent populations). It returns
+///
+/// ```text
+/// log_evidence = ln Z̄,              Z̄ = (1/R)·Σᵣ Ẑᵣ
+/// std_error    = sd(Ẑᵣ) / (Z̄·√R)    (sample standard deviation, R − 1)
+/// ```
+///
+/// computed in log space, so evidences far outside the range of `f64` are
+/// fine. The standard error is that of `ln Z̄` by the delta method, which is
+/// accurate when it is small (a few tenths or less). Two things to keep in
+/// mind when it is not: `ln Z̄` is biased low by about `std_error² / 2`
+/// (Jensen), and evidence estimates are right-skewed, so a handful of
+/// replicates can miss the rare large ones and report an error that is too
+/// small. A large standard error is a reason to use more particles, not to
+/// trust the interval.
+///
+/// # Errors
+///
+/// `FugueError::InvalidParameters` (`InvalidCount`) for fewer than two
+/// replicates: one estimate has no spread to measure.
+///
+/// # Example
+///
+/// ```rust
+/// # use fugue::*;
+/// // Two runs that estimated Z as 1 and as 3: the mean is 2 ...
+/// let estimate = log_evidence_estimate(&[0.0, 3.0f64.ln()]).unwrap();
+/// assert!((estimate.log_evidence - 2.0f64.ln()).abs() < 1e-12);
+/// // ... and sd / (mean·√R) = √2 / (2·√2) = 0.5.
+/// assert!((estimate.std_error - 0.5).abs() < 1e-12);
+///
+/// // Only ratios matter, so tiny evidences are no harder.
+/// let tiny = log_evidence_estimate(&[-5000.0, -5000.0 + 3.0f64.ln()]).unwrap();
+/// assert!((tiny.std_error - 0.5).abs() < 1e-12);
+/// ```
+pub fn log_evidence_estimate(
+    log_evidences: &[f64],
+) -> crate::error::FugueResult<LogEvidenceEstimate> {
+    use crate::core::numerical::nan_to_neg_inf;
+    let r = log_evidences.len();
+    if r < 2 {
+        return Err(crate::error::FugueError::invalid_parameters(
+            "LogEvidenceEstimate",
+            "A standard error needs at least two replicate estimates",
+            crate::error::ErrorCode::InvalidCount,
+        )
+        .with_context("replicates", r.to_string())
+        .with_context("expected", ">= 2"));
+    }
+    let replicates: Vec<f64> = log_evidences.iter().map(|&l| nan_to_neg_inf(l)).collect();
+    let log_evidence = log_sum_exp(&replicates) - (r as f64).ln();
+    let std_error = if log_evidence.is_finite() {
+        // Each replicate relative to the mean: Ẑᵣ / Z̄, at most R.
+        let sum_sq: f64 = replicates
+            .iter()
+            .map(|l| ((l - log_evidence).exp() - 1.0).powi(2))
+            .sum();
+        (sum_sq / (r as f64 - 1.0) / r as f64).sqrt()
+    } else {
+        f64::NAN
+    };
+    Ok(LogEvidenceEstimate {
+        log_evidence,
+        std_error,
+        replicates,
+    })
+}
+
+/// Run [`adaptive_smc`] `replicates` times and return the pooled population
+/// with a log-evidence estimate that has a standard error.
+///
+/// The runs are independent (they draw from `rng` one after another) and each
+/// uses `num_particles` particles, so the cost is `replicates` runs. Nothing
+/// is thrown away:
+///
+/// - the returned [`SMCResult`] holds all `replicates · num_particles`
+///   particles, each run's population weighted by that run's evidence
+///   estimate (the weighting under which independent SMC populations combine
+///   into one consistent posterior approximation), with weights normalized
+///   over the pool, and `log_evidence` equal to the combined estimate;
+/// - the [`LogEvidenceEstimate`] carries that estimate, its standard error
+///   and the per-run values. See [`log_evidence_estimate`] for how they are
+///   formed and how far to trust the error.
+///
+/// This is a replicate ("batch") estimate. A single-run variance estimate
+/// would need the ancestry of the particles through every resampling step,
+/// which neither [`Particle`] nor [`SMCResult`] records.
+///
+/// `config` is borrowed and applied to every run.
+///
+/// # Errors
+///
+/// `FugueError::InvalidParameters` (`InvalidCount`) if `replicates < 2` or
+/// `num_particles == 0`.
+///
+/// # Example
+///
+/// ```rust
+/// use fugue::*;
+/// use rand::rngs::StdRng;
+/// use rand::SeedableRng;
+///
+/// let data = [0.9, 1.4, 0.2, 1.1];
+/// let model_fn = || {
+///     sample(addr!("mu"), Normal::new(0.0, 2.0).unwrap()).bind(move |mu| {
+///         traverse_vec(data.iter().copied().enumerate().collect(), move |(i, y)| {
+///             observe(addr!("y", i), Normal::new(mu, 1.0).unwrap(), y)
+///         })
+///         .map(move |_| mu)
+///     })
+/// };
+///
+/// let mut rng = StdRng::seed_from_u64(11);
+/// let (pooled, evidence) =
+///     adaptive_smc_replicated(&mut rng, 500, 8, model_fn, &SMCConfig::default()).unwrap();
+///
+/// assert_eq!(pooled.len(), 8 * 500);
+/// assert_eq!(evidence.replicates.len(), 8);
+/// // The closed form is within a few standard errors.
+/// let exact = normal_normal_log_marginal(0.0, 2.0, 1.0, &data).unwrap();
+/// assert!((evidence.log_evidence - exact).abs() < 5.0 * evidence.std_error);
+/// assert!(evidence.std_error < 0.1);
+/// ```
+pub fn adaptive_smc_replicated<A, R: Rng>(
+    rng: &mut R,
+    num_particles: usize,
+    replicates: usize,
+    model_fn: impl Fn() -> Model<A>,
+    config: &SMCConfig,
+) -> crate::error::FugueResult<(SMCResult, LogEvidenceEstimate)> {
+    if num_particles == 0 {
+        return Err(crate::error::FugueError::invalid_parameters(
+            "adaptive_smc_replicated",
+            "An evidence estimate needs at least one particle",
+            crate::error::ErrorCode::InvalidCount,
+        )
+        .with_context("num_particles", "0"));
+    }
+    let mut log_evidences = Vec::with_capacity(replicates);
+    let mut runs: Vec<Vec<Particle>> = Vec::with_capacity(replicates);
+    for _ in 0..replicates {
+        let run_config = SMCConfig {
+            resampling_method: config.resampling_method,
+            ess_threshold: config.ess_threshold,
+            rejuvenation_steps: config.rejuvenation_steps,
+        };
+        let result = adaptive_smc(rng, num_particles, &model_fn, run_config);
+        log_evidences.push(result.log_evidence);
+        runs.push(result.particles);
+    }
+    let estimate = log_evidence_estimate(&log_evidences)?;
+
+    // Pool: a particle of run r with normalized weight w gets weight
+    // ∝ Ẑᵣ·w. With every Ẑᵣ zero there is nothing to prefer: uniform.
+    let total = log_sum_exp(&estimate.replicates);
+    let pool_size = (replicates * num_particles) as f64;
+    let mut particles = Vec::with_capacity(replicates * num_particles);
+    for (run, log_z) in runs.into_iter().zip(&estimate.replicates) {
+        for mut p in run {
+            p.log_weight = if total.is_finite() {
+                p.log_weight + log_z - total
+            } else {
+                -pool_size.ln()
+            };
+            p.weight = p.log_weight.exp();
+            particles.push(p);
+        }
+    }
+    Ok((
+        SMCResult {
+            particles,
+            log_evidence: estimate.log_evidence,
+        },
+        estimate,
+    ))
 }
 
 #[cfg(test)]

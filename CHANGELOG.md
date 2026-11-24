@@ -113,6 +113,27 @@ For the initial 0.1.0 release notes, see `.github/CHANGELOG.md`.
   evidence; new observed blocks, dropped sites and changed priors are
   weighted to their closed forms.
 
+- **A standard error for SMC log evidence: `adaptive_smc_replicated`,
+  `log_evidence_estimate`, `LogEvidenceEstimate`.** `SMCResult::log_evidence`
+  is a point estimate with nothing to judge it by. `SMCResult` is a plain
+  struct that callers (and this crate's doc examples) build with a literal,
+  so the error could not be added to it as a field; it comes as a separate,
+  `#[non_exhaustive]` type instead. `log_evidence_estimate(&[ln Ẑ₁, …])`
+  combines `R ≥ 2` independent estimates into the log of their mean, which
+  is still unbiased for the evidence, and its delta-method standard error
+  `sd(Ẑ) / (Z̄·√R)`, in log space. `adaptive_smc_replicated(rng, n, replicates,
+  model_fn, &config)` makes the runs and also returns them pooled into one
+  `SMCResult` of `replicates · n` particles, each run weighted by its
+  evidence estimate, so no particle is wasted. This is a replicate estimate:
+  a single-run one needs particle ancestry through each resampling, which
+  `Particle` does not record. Pinned by `tests/smc_evidence_error.rs`: the
+  arithmetic on hand cases and at evidences of `e^±10⁶`, and calibration on a
+  conjugate model, with and without rejuvenation: over 60 independent
+  estimates the mean reported error is 1.13 to 1.19 times the observed spread
+  (asserted within 0.6 to 1.6), and the standardized errors against the
+  closed form have mean square 0.84 (asserted within 0.5 to 2.5) with at
+  least 95% inside three standard errors.
+
 ## [0.2.4] - 2026-10-08
 
 ### Performance
