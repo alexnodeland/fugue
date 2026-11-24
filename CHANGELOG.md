@@ -10,6 +10,23 @@ For the initial 0.1.0 release notes, see `.github/CHANGELOG.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **Trace address renaming: `Trace::map_addresses` and `Trace::rename_prefix`.**
+  `extract_prefix`, `truncate_prefix` and `graft_prefix` select, drop and
+  replace choices but keep every address fixed, so a trace could not follow a
+  program whose sites had moved. `map_addresses(f)` returns a copy with every
+  choice moved to `f(addr)`; `rename_prefix(from, to)` moves the block under
+  `from` (the `Address::has_prefix` boundary, as for the other prefix methods)
+  under `to`. Both borrow the trace and return a new one, like
+  `extract_prefix`. A map that sends two addresses to one, or a block that
+  would land on an occupied address, is an `AddressConflict` error naming the
+  target and both sources: a choice is never dropped or overwritten silently
+  (truncate the target first to replace a block). Values, per-choice `logp`
+  and the three log accumulators are copied unchanged, since a renaming
+  changes no value: they are the weights of the renamed trace under the
+  renamed model, which a test pins by re-scoring. Nothing existing changes.
+
 ## [0.2.4] - 2026-10-08
 
 ### Performance

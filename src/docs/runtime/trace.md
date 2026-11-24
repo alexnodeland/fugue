@@ -322,6 +322,59 @@ merged_trace.log_factors = custom_trace.log_factors;
 assert_eq!(merged_trace.total_log_weight(), custom_trace.total_log_weight());
 ```
 
+### Renaming Addresses
+
+`extract_prefix`, `truncate_prefix` and `graft_prefix` keep every address
+fixed. To carry a trace to a model whose sites have moved (a refactored
+program, a migrated schema), rename instead: `rename_prefix` moves one block,
+`map_addresses` applies any injective map. Both borrow the trace and return a
+new one, and both refuse a collision with an `AddressConflict` error rather
+than drop a choice.
+
+```rust
+# use fugue::*;
+# use fugue::runtime::interpreters::{PriorHandler, ScoreGivenTrace};
+# use rand::rngs::StdRng;
+# use rand::SeedableRng;
+// The same program at two generations of an address scheme.
+let model = |root: &'static str| {
+    sample(Address::new(format!("{root}/mu")), Normal::new(0.0, 1.0).unwrap()).bind(
+        move |mu| observe(Address::new(format!("{root}/y")), Normal::new(mu, 0.5).unwrap(), 0.7),
+    )
+};
+
+let mut rng = StdRng::seed_from_u64(3);
+let (_, old) = runtime::handler::run(
+    PriorHandler { rng: &mut rng, trace: Trace::default() },
+    model("v1"),
+);
+
+// Move the block. Values, per-choice log-probabilities and the three
+// accumulators come along unchanged.
+let new = old.rename_prefix("v1", "v2").unwrap();
+assert_eq!(new.get_f64(&Address::new("v2/mu")), old.get_f64(&Address::new("v1/mu")));
+assert_eq!(new.total_log_weight(), old.total_log_weight());
+
+// They are exactly the weights of the renamed trace under the renamed model.
+let (_, rescored) = runtime::handler::run(
+    ScoreGivenTrace { base: new.clone(), trace: Trace::default() },
+    model("v2"),
+);
+assert_eq!(rescored.total_log_weight(), new.total_log_weight());
+
+// A rename that would land on an occupied address is an error.
+let mut crowded = old.clone();
+crowded.insert_choice(Address::new("v2/mu"), ChoiceValue::F64(0.0), 0.0);
+assert_eq!(
+    crowded.rename_prefix("v1", "v2").unwrap_err().code(),
+    ErrorCode::AddressConflict
+);
+```
+
+The accumulators are kept because a renaming changes no value: they stay valid
+for the model renamed the same way. If the target model differs in anything
+else, re-score the result, as after any other surgery.
+
 ## Design & Evolution
 
 ### Status
