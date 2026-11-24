@@ -22,8 +22,10 @@ pub use core::conjugate::{
     beta_bernoulli_log_marginal, beta_binomial_log_marginal, beta_posterior,
     dirichlet_categorical_log_marginal, dirichlet_log_pdf, dirichlet_log_predictive,
     dirichlet_multinomial_log_marginal, dirichlet_posterior, dirichlet_predictive,
-    ln_multinomial_coefficient, ln_multivariate_beta, multinomial_log_pmf, sample_dirichlet,
-    Dirichlet, Multinomial,
+    gamma_poisson_log_marginal, gamma_poisson_posterior, ln_multinomial_coefficient,
+    ln_multivariate_beta, multinomial_log_pmf, normal_inverse_gamma_log_marginal,
+    normal_inverse_gamma_posterior, normal_normal_log_marginal, normal_normal_posterior,
+    sample_dirichlet, Dirichlet, Multinomial,
 };
 pub use core::distribution::{
     Bernoulli, Beta, Binomial, Categorical, Cauchy, ChiSquared, DiscreteUniform, Distribution,

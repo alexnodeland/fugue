@@ -86,6 +86,7 @@ make bench
 **`conjugate.rs`** - Dirichlet, Multinomial and Conjugate Helpers
 
 - Log-space Dirichlet/multinomial densities, Dirichlet–multinomial and Beta–binomial marginals (count-vector and sequence versions), posterior updates and predictives
+- Normal–Normal (known variance), Normal-Inverse-Gamma and Gamma–Poisson marginals and posterior updates for real-valued and count data
 - `lnΓ` differences go through a Stirling-series difference (`ln_gamma_ratio`), never two large `lnΓ` values subtracted
 - `Dirichlet`/`Multinomial` are standalone `Distribution<Vec<_>>` types, not site types; `sample_dirichlet` builds a Dirichlet draw from K scalar Gamma sites
 

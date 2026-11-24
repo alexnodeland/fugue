@@ -64,6 +64,27 @@ For the initial 0.1.0 release notes, see `.github/CHANGELOG.md`.
   (to rounding, since the record sums by address and the trace in program
   order; exact for a single site, and `-∞` on both sides together).
 
+- **Conjugate marginals for real-valued and count data.** The conjugate
+  helpers covered the Beta and Dirichlet families only. Added, in
+  `core::conjugate` and at the crate root, each with its posterior update:
+  `normal_normal_log_marginal` / `normal_normal_posterior` (Normal data, known
+  `sigma`, `Normal(mu0, sigma0)` prior on the mean),
+  `normal_inverse_gamma_log_marginal` / `normal_inverse_gamma_posterior`
+  (mean and variance unknown, `(mu0, kappa0, alpha0, beta0)`), and
+  `gamma_poisson_log_marginal` / `gamma_poisson_posterior` (Poisson counts,
+  `Gamma(shape, rate)` rate). Parameters follow `Normal`, `InverseGamma` and
+  `Gamma`; invalid ones are errors, a non-finite datum is a `-∞` density.
+  The Normal marginals work in standardized units with a two-pass sum of
+  squares: under a common offset the error is that of storing the data
+  (about 10⁻¹⁶ times the offset, 2·10⁻⁹ relative at an offset of 10⁹, where
+  `Σx² − n·x̄²` has lost every digit), and a common rescaling adds exactly the
+  Jacobian. Validated against numerical integration (1-D for each family,
+  plus a brute-force 2-D rule and a prior-predictive simulation for the
+  Normal-Inverse-Gamma), the one-observation closed forms (Normal, Student-t,
+  negative binomial), the explicit bivariate normal, the chain rule over
+  every split of the data, and an `adaptive_smc` evidence estimate of the
+  uncollapsed model.
+
 ## [0.2.4] - 2026-10-08
 
 ### Performance
