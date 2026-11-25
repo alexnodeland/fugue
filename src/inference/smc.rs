@@ -1200,7 +1200,7 @@ pub struct SMCExtension {
 
 /// Sum of the stored `logp` of the choices of `trace` that are not in
 /// `excluded`, in address order.
-fn shared_log_prior(trace: &Trace, excluded: &[Address]) -> f64 {
+fn shared_log_prior(trace: &Trace, excluded: &std::collections::BTreeSet<&Address>) -> f64 {
     trace
         .choices
         .iter()
@@ -1370,12 +1370,16 @@ pub fn smc_extend<A, R: Rng>(
             .collect();
         let (_, new, report) = score_given_trace_reconciled(old, rng, model_fn())?;
 
+        // Sets, not the report's vectors: a revision that changes S sites
+        // would otherwise cost O(S) per choice, O(S^2) per particle.
+        let vanished_here: BTreeSet<&Address> = report.vanished_addresses.iter().collect();
+        let fresh_here: BTreeSet<&Address> = report.fresh_addresses.iter().collect();
         let old_shared: f64 = old_choices
             .iter()
-            .filter(|(a, _)| !report.vanished_addresses.contains(a))
+            .filter(|(a, _)| !vanished_here.contains(a))
             .map(|(_, lp)| *lp)
             .sum();
-        let new_shared = shared_log_prior(&new, &report.fresh_addresses);
+        let new_shared = shared_log_prior(&new, &fresh_here);
         let old_score = old_loglik + old_shared;
         let increment = if old_score.is_finite() {
             nan_to_neg_inf((particle_log_likelihood(&new) - old_loglik) + (new_shared - old_shared))

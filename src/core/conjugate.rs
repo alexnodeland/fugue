@@ -933,13 +933,17 @@ pub fn normal_normal_log_marginal(
     if n == 0.0 {
         return Ok(0.0);
     }
-    // In units of σ: r = σ₀/σ, and the data mean sits `mean` σ's from μ₀.
-    let r = sigma0 / sigma;
-    let inflation = n * r * r; // n·σ₀²/σ²
+    // In units of σ: the data mean sits `mean` σ's from μ₀, and the prior
+    // inflates the variance of the sum by n·σ₀²/σ². That ratio is kept on the
+    // log scale so that a very diffuse prior against a very tight likelihood
+    // does not overflow when squared.
+    let ln_1p_inflation = ln_1p_variance_inflation(n, sigma0, sigma);
+    // n·mean² / (1 + inflation), without forming either factor's square first.
+    let shrunk = mean * (-0.5 * ln_1p_inflation).exp();
     let lp = -n * (0.5 * LN_2PI + sigma.ln())
-        - 0.5 * inflation.ln_1p()
+        - 0.5 * ln_1p_inflation
         - 0.5 * ss
-        - 0.5 * n * mean * mean / (1.0 + inflation);
+        - 0.5 * n * shrunk * shrunk;
     Ok(crate::core::numerical::nan_to_neg_inf(lp))
 }
 
@@ -982,14 +986,36 @@ pub fn normal_normal_posterior(
 ) -> FugueResult<(f64, f64)> {
     validate_normal_normal("NormalNormal", mu0, sigma0, sigma)?;
     let (n, mean, _) = finite_stats("NormalNormal", data, mu0, sigma)?;
-    let r = sigma0 / sigma;
-    let inflation = n * r * r;
-    // Shrinkage weight on the data mean: n·σ₀² / (σ² + n·σ₀²).
-    let weight = inflation / (1.0 + inflation);
+    if n == 0.0 {
+        return Ok((mu0, sigma0));
+    }
+    let ln_inflation = ln_variance_inflation(n, sigma0, sigma);
+    let ln_1p_inflation = ln_1p_variance_inflation(n, sigma0, sigma);
+    // Shrinkage weight on the data mean: n·σ₀² / (σ² + n·σ₀²), as a logistic
+    // of the log ratio so that it tends to 1, not NaN, for a diffuse prior.
+    let weight = 1.0 / (1.0 + (-ln_inflation).exp());
     Ok((
         mu0 + sigma * mean * weight,
-        sigma0 / (1.0 + inflation).sqrt(),
+        sigma0 * (-0.5 * ln_1p_inflation).exp(),
     ))
+}
+
+/// `ln(n·σ₀²/σ²)`, formed from logarithms so the squared scale ratio is never
+/// materialized (it overflows once `σ₀/σ` passes about `1e154`).
+fn ln_variance_inflation(n: f64, sigma0: f64, sigma: f64) -> f64 {
+    n.ln() + 2.0 * (sigma0.ln() - sigma.ln())
+}
+
+/// `ln(1 + n·σ₀²/σ²)` without overflow: a softplus of
+/// [`ln_variance_inflation`].
+fn ln_1p_variance_inflation(n: f64, sigma0: f64, sigma: f64) -> f64 {
+    let l = ln_variance_inflation(n, sigma0, sigma);
+    if l > 36.0 {
+        // exp(-l) is below f64 epsilon relative to l: ln(1 + e^l) = l + ln(1 + e^-l).
+        l + (-l).exp()
+    } else {
+        l.exp().ln_1p()
+    }
 }
 
 /// [`standardized_stats`] for the posterior functions, which have no `-∞` to
@@ -3089,6 +3115,26 @@ mod tests {
                 1e-12,
             );
         }
+    }
+
+    #[test]
+    fn normal_normal_survives_extreme_scale_ratios() {
+        // sigma0 / sigma = 1e200: the squared ratio overflows f64.
+        let (mu0, sigma0, sigma) = (0.0, 1e100, 1e-100);
+        let lp = normal_normal_log_marginal(mu0, sigma0, sigma, &[0.0]).unwrap();
+        // One datum at the prior mean: the marginal is N(0; 0, sigma0^2 + sigma^2).
+        let expected = -0.5 * LN_2PI - (1e100f64).ln();
+        assert!(lp.is_finite(), "log marginal was {lp}");
+        close_rel(lp, expected, 1e-12);
+        let (mu_n, sigma_n) = normal_normal_posterior(mu0, sigma0, sigma, &[0.0]).unwrap();
+        assert_eq!(mu_n, 0.0);
+        close_rel(sigma_n, 1e-100, 1e-12);
+        // The opposite extreme: a prior so tight the data cannot move it.
+        let (mu_t, sigma_t) = normal_normal_posterior(1.0, 1e-100, 1e100, &[5.0]).unwrap();
+        assert_eq!(mu_t, 1.0);
+        close_rel(sigma_t, 1e-100, 1e-12);
+        let lp_t = normal_normal_log_marginal(1.0, 1e-100, 1e100, &[5.0]).unwrap();
+        close_rel(lp_t, -0.5 * LN_2PI - (1e100f64).ln(), 1e-12);
     }
 
     #[test]
