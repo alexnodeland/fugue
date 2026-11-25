@@ -435,6 +435,137 @@ pub fn factor(logw: LogF64) -> Model<()> {
     }
 }
 
+/// The site that [`factor_at`] builds: a log-weight carried at an address.
+///
+/// [`Model`] has no factor node with an address, and adding a variant to that
+/// enum would break every exhaustive `match` on it. `factor_at` therefore
+/// stores the factor as an `f64` observation node whose distribution is an
+/// `AddressedFactor`. [`run`](crate::runtime::handler::run) and
+/// [`run_async`](crate::runtime::async_handler::run_async) recognise the type
+/// and hand the site to
+/// [`Handler::on_factor_at`](crate::runtime::handler::Handler::on_factor_at),
+/// so under every handler it is scored as a factor, not as an observation.
+///
+/// Code that walks a [`Model`] itself, instead of calling `run`, can recognise
+/// the node the same way, with [`AddressedFactor::weight_of`]. Read as a plain
+/// distribution it is still consistent: [`log_prob`](Distribution::log_prob)
+/// is the log-weight for every value, so an interpreter that does not know the
+/// type adds the same amount to the total log-weight, only under
+/// `log_likelihood` instead of `log_factors`.
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// # use fugue::core::model::AddressedFactor;
+/// let site = AddressedFactor::new(-1.5);
+/// assert_eq!(site.log_weight(), -1.5);
+/// // The same number for every value: this is a weight, not a density.
+/// assert_eq!(site.log_prob(&0.0), -1.5);
+/// assert_eq!(site.log_prob(&42.0), -1.5);
+///
+/// // Recognising the site behind `&dyn Distribution<f64>`.
+/// let boxed: Box<dyn Distribution<f64>> = Box::new(site);
+/// assert_eq!(AddressedFactor::weight_of(&*boxed), Some(-1.5));
+/// let normal: Box<dyn Distribution<f64>> = Box::new(Normal::new(0.0, 1.0).unwrap());
+/// assert_eq!(AddressedFactor::weight_of(&*normal), None);
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AddressedFactor {
+    logw: LogF64,
+}
+
+impl AddressedFactor {
+    /// A site carrying the log-weight `logw`. A `NaN` weight is stored as `-∞`,
+    /// the rule [`factor`] applies (FG-N2).
+    pub fn new(logw: LogF64) -> Self {
+        Self {
+            logw: crate::core::numerical::nan_to_neg_inf(logw),
+        }
+    }
+
+    /// The log-weight this site adds.
+    pub fn log_weight(&self) -> LogF64 {
+        self.logw
+    }
+
+    /// The log-weight of `dist` if it is an `AddressedFactor`, and `None` for
+    /// any other distribution. This is the test `run` applies at an `f64`
+    /// observation node.
+    pub fn weight_of(dist: &dyn Distribution<f64>) -> Option<LogF64> {
+        dist.downcast_ref::<AddressedFactor>().map(|f| f.logw)
+    }
+}
+
+impl Distribution<f64> for AddressedFactor {
+    /// An addressed factor is never sampled; this returns `0.0`, the
+    /// placeholder value [`factor_at`] stores, and draws nothing from `rng`.
+    fn sample(&self, _rng: &mut dyn rand::RngCore) -> f64 {
+        0.0
+    }
+    fn log_prob(&self, _x: &f64) -> LogF64 {
+        self.logw
+    }
+    fn clone_box(&self) -> Box<dyn Distribution<f64>> {
+        Box::new(*self)
+    }
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+}
+
+/// Add an unnormalized log-weight `logw` to the model **at an address**,
+/// returning a `Model<()>`.
+///
+/// This is [`factor`] with a name. The weight is the same and it lands in the
+/// same accumulator: under every handler in this crate, and under any handler
+/// that does not override
+/// [`Handler::on_factor_at`](crate::runtime::handler::Handler::on_factor_at),
+/// `factor_at(addr, w)` and `factor(w)` produce the same trace bit for bit
+/// (`log_factors` grows by `w`; `log_likelihood` and `choices` are untouched),
+/// so every inference routine treats the two alike. The address is for
+/// handlers that attribute weight to sites: a handler that overrides
+/// `on_factor_at` receives it, and
+/// [`RecordSites`](crate::runtime::record::RecordSites) uses it to keep a
+/// per-address record ([`SiteWeights`](crate::runtime::record::SiteWeights)).
+/// A model that collapses a latent variable into a marginal likelihood can
+/// then say which site the marginal belongs to.
+///
+/// As with observations, the address is not checked for uniqueness: a recorder
+/// sums the weights that share one.
+///
+/// A `NaN` weight is mapped to `-∞`, as [`factor`] does (FG-N2). The node is
+/// an `f64` observation carrying an [`AddressedFactor`]; see that type for
+/// what an interpreter other than `run` / `run_async` sees.
+///
+/// Example:
+/// ```rust
+/// # use fugue::*;
+/// # use fugue::runtime::interpreters::PriorHandler;
+/// # use rand::rngs::StdRng;
+/// # use rand::SeedableRng;
+/// // The Beta-Bernoulli marginal of one cell, attributed to that cell.
+/// let marginal = beta_bernoulli_log_marginal(1.0, 1.0, 7, 3).unwrap();
+/// let model = factor_at(Address::new("cell/0/agreement"), marginal);
+///
+/// let mut rng = StdRng::seed_from_u64(1);
+/// let (_, trace) = runtime::handler::run(
+///     PriorHandler { rng: &mut rng, trace: Trace::default() },
+///     model,
+/// );
+/// // Scored exactly as `factor(marginal)` would be.
+/// assert_eq!(trace.log_factors, marginal);
+/// assert_eq!(trace.log_likelihood, 0.0);
+/// assert!(trace.choices.is_empty());
+/// ```
+pub fn factor_at(addr: Address, logw: LogF64) -> Model<()> {
+    Model::ObserveF64 {
+        addr,
+        dist: Box::new(AddressedFactor::new(logw)),
+        value: 0.0,
+        k: Box::new(pure),
+    }
+}
+
 /// `ModelExt<A>` provides monadic operations for composing `Model<A>` values.
 /// Provides `bind`, `map`, and `and_then` for chaining and transforming probabilistic computations.
 ///

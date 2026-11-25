@@ -16,6 +16,7 @@ Fugue’s `Model<A>` is a tiny, direct-style probabilistic programming interface
 - `sample(addr, dist)` — draw a random choice at `addr`
 - `observe(addr, dist, value)` — condition on observed `value`
 - `factor(logw)` — add log-weight (soft constraint)
+- `factor_at(addr, logw)` — the same, at an address, so a handler can attribute the weight to a site
 - `bind/map/and_then` — compose computations
 
 These map to `Model`’s internal variants and are designed to remain stable across interpreters.
@@ -28,6 +29,7 @@ These map to `Model`’s internal variants and are designed to remain stable acr
 | Draw a latent variable | `sample(addr, dist)` | Use stable, descriptive addresses |
 | Condition on data | `observe(addr, dist, y)` | Leaves no choice in the trace; affects likelihood |
 | Soft constraint / score tweak | `factor(logw)` | Use `guard(pred)` for hard constraints |
+| A collapsed (marginalised) site | `factor_at(addr, logw)` | Scored as `factor`; the address feeds `RecordSites` |
 
 ## Addressing strategy
 
@@ -139,5 +141,5 @@ let branched = sample(addr!("x"), Uniform::new(0.0, 1.0).unwrap())
 
 ## See also
 
-- API: `Model`, `ModelExt::{bind,map,and_then}`, `zip`, `sequence_vec`, `traverse_vec`, `guard`, `factor`
+- API: `Model`, `ModelExt::{bind,map,and_then}`, `zip`, `sequence_vec`, `traverse_vec`, `guard`, `factor`, `factor_at`
 - Runtimes: prior execution, replay, and scoring handlers in `runtime::interpreters`

@@ -174,6 +174,35 @@ pub trait Overrides<H: Handler> {
         inner.on_factor(logw)
     }
 
+    /// Hook for a factor that carries an address
+    /// ([`factor_at`](crate::core::model::factor_at)).
+    ///
+    /// Unlike the other hooks this does not default to the inner method of the
+    /// same name. It defaults to `self.on_factor(inner, logw)`, the rule
+    /// [`Handler::on_factor_at`] follows: an `on_factor` hook sees every
+    /// factor weight, addressed or not, so overrides written before addressed
+    /// factors existed cannot be bypassed by one. The cost is that the default
+    /// drops the address before the inner handler sees it. Overrides that
+    /// leave factors alone and wrap an inner handler that uses the address
+    /// (such as [`RecordSites`](crate::runtime::record::RecordSites)) should
+    /// forward it:
+    ///
+    /// ```rust
+    /// # use fugue::*;
+    /// struct Transparent;
+    /// impl<H: Handler> Overrides<H> for Transparent {
+    ///     fn on_factor_at(&mut self, inner: &mut H, addr: &Address, logw: f64) {
+    ///         inner.on_factor_at(addr, logw)
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// `()` does exactly that, so [`Delegate::new`] stays transparent.
+    fn on_factor_at(&mut self, inner: &mut H, addr: &Address, logw: f64) {
+        let _ = addr;
+        self.on_factor(inner, logw)
+    }
+
     /// Hook for the end of the run: takes the overrides and the inner handler by
     /// value and returns the trace. Defaults to `inner.finish()`.
     fn finish(self, inner: H) -> Trace
@@ -186,7 +215,12 @@ pub trait Overrides<H: Handler> {
 
 /// `()` overrides nothing: `Delegate<H, ()>`, what [`Delegate::new`] builds,
 /// forwards every site to `H`.
-impl<H: Handler> Overrides<H> for () {}
+impl<H: Handler> Overrides<H> for () {
+    /// Forwards the address too: `Delegate::new(inner)` is `inner`.
+    fn on_factor_at(&mut self, inner: &mut H, addr: &Address, logw: f64) {
+        inner.on_factor_at(addr, logw)
+    }
+}
 
 /// A [`Handler`] that forwards every site to an inner handler, through the
 /// hooks of an [`Overrides`] value.
@@ -362,6 +396,10 @@ impl<H: Handler, O: Overrides<H>> Handler for Delegate<H, O> {
 
     fn on_factor(&mut self, logw: f64) {
         self.overrides.on_factor(&mut self.inner, logw)
+    }
+
+    fn on_factor_at(&mut self, addr: &Address, logw: f64) {
+        self.overrides.on_factor_at(&mut self.inner, addr, logw)
     }
 
     fn finish(self) -> Trace {

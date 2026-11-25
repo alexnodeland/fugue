@@ -2,7 +2,7 @@
 
 use crate::core::address::Address;
 use crate::core::distribution::Distribution;
-use crate::core::model::Model;
+use crate::core::model::{AddressedFactor, Model};
 use crate::runtime::trace::Trace;
 
 /// Core trait for interpreting probabilistic model effects.
@@ -90,6 +90,30 @@ pub trait Handler {
     /// * `logw` - Log-weight to add to the model's total weight
     fn on_factor(&mut self, logw: f64);
 
+    /// Handle a factor that carries an address, built by
+    /// [`factor_at`](crate::core::model::factor_at).
+    ///
+    /// This defaults to `self.on_factor(logw)`: a handler that does not
+    /// override it scores an addressed factor exactly as it scores an
+    /// anonymous one, so handlers written before this method existed compile
+    /// and behave unchanged, and no factor weight can bypass `on_factor`.
+    /// Override it to use the address, for example to attribute the weight to
+    /// a site as [`RecordSites`](crate::runtime::record::RecordSites) does. An
+    /// override takes over the site: it must account for `logw` itself (or
+    /// call `self.on_factor(logw)`), and a handler that wraps another should
+    /// forward to the inner handler's `on_factor_at` so the address is kept.
+    ///
+    /// `logw` is never `NaN` when the site was built by `factor_at`.
+    ///
+    /// # Arguments
+    ///
+    /// * `addr` - Address the factor was declared at
+    /// * `logw` - Log-weight to add to the model's total weight
+    fn on_factor_at(&mut self, addr: &Address, logw: f64) {
+        let _ = addr;
+        self.on_factor(logw)
+    }
+
     /// Finalize the handler and return the accumulated trace.
     ///
     /// This method is called after model execution completes to retrieve
@@ -163,7 +187,12 @@ pub fn run<A>(mut h: impl Handler, m: Model<A>) -> (A, Trace) {
                 value,
                 k,
             } => {
-                h.on_observe_f64(&addr, &*dist, value);
+                // `factor_at` stores an addressed factor as an f64 observation
+                // of an `AddressedFactor`; score it as a factor.
+                match AddressedFactor::weight_of(&*dist) {
+                    Some(logw) => h.on_factor_at(&addr, logw),
+                    None => h.on_observe_f64(&addr, &*dist, value),
+                }
                 k(())
             }
             Model::ObserveBool {

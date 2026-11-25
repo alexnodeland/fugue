@@ -22,8 +22,10 @@ pub use core::conjugate::{
     beta_bernoulli_log_marginal, beta_binomial_log_marginal, beta_posterior,
     dirichlet_categorical_log_marginal, dirichlet_log_pdf, dirichlet_log_predictive,
     dirichlet_multinomial_log_marginal, dirichlet_posterior, dirichlet_predictive,
-    ln_multinomial_coefficient, ln_multivariate_beta, multinomial_log_pmf, sample_dirichlet,
-    Dirichlet, Multinomial,
+    gamma_poisson_log_marginal, gamma_poisson_posterior, ln_multinomial_coefficient,
+    ln_multivariate_beta, multinomial_log_pmf, normal_inverse_gamma_log_marginal,
+    normal_inverse_gamma_posterior, normal_normal_log_marginal, normal_normal_posterior,
+    sample_dirichlet, Dirichlet, Multinomial,
 };
 pub use core::distribution::{
     Bernoulli, Beta, Binomial, Categorical, Cauchy, ChiSquared, DiscreteUniform, Distribution,
@@ -31,8 +33,8 @@ pub use core::distribution::{
     Uniform, Weibull, WithMeta,
 };
 pub use core::model::{
-    factor, guard, observe, pure, sample, sample_bool, sample_f64, sample_i64, sample_u64,
-    sample_usize, sequence_vec, traverse_vec, zip, Model, ModelExt, SampleType,
+    factor, factor_at, guard, observe, pure, sample, sample_bool, sample_f64, sample_i64,
+    sample_u64, sample_usize, sequence_vec, traverse_vec, zip, Model, ModelExt, SampleType,
 };
 pub use runtime::async_handler::{run_async, AsyncHandler, FromSync};
 pub use runtime::delegate::{Delegate, Overrides};
@@ -41,6 +43,7 @@ pub use runtime::interpreters::{
     score_given_trace_reconciled, PriorHandler, ReconcileReport, ReplayHandler, SafeReplayHandler,
     SafeScoreGivenTrace, ScoreGivenTrace,
 };
+pub use runtime::record::{run_recorded, RecordSites, SiteWeights};
 pub use runtime::trace::{Choice, ChoiceValue, Trace};
 
 // Re-export key inference methods
@@ -66,11 +69,12 @@ pub use inference::mh::{
     proposal_kind_for_support, SiteProposal,
 };
 pub use inference::smc::{
-    adaptive_smc, adaptive_smc_with_kernel, decode_particle, decode_particles,
-    effective_sample_size, multinomial_resample, normalize_particles, rejuvenate_particles,
-    resample_particles, smc_prior_particles, stratified_resample, systematic_resample,
-    try_decode_particle, CrossoverKernel, NoKernel, Particle, PopulationKernel, ResamplingMethod,
-    SMCConfig, SMCResult,
+    adaptive_smc, adaptive_smc_replicated, adaptive_smc_with_kernel, decode_particle,
+    decode_particles, effective_sample_size, log_evidence_estimate, multinomial_resample,
+    normalize_particles, rejuvenate_particles, resample_particles, smc_extend, smc_prior_particles,
+    stratified_resample, systematic_resample, try_decode_particle, CrossoverKernel,
+    LogEvidenceEstimate, NoKernel, Particle, PopulationKernel, ResamplingMethod, SMCConfig,
+    SMCExtension, SMCResult,
 };
 pub use inference::validation::{
     ks_test_distribution, test_conjugate_beta_bernoulli_model, test_conjugate_normal_model,

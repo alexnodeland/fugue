@@ -3,4 +3,5 @@ pub mod async_handler;
 pub mod delegate;
 pub mod handler;
 pub mod interpreters;
+pub mod record;
 pub mod trace;

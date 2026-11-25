@@ -34,6 +34,9 @@ Dirichlet–categorical model with a sampled concentration.
 | [`beta_bernoulli_log_marginal`] | `ln P(sequence \| a, b)`, the `K = 2` sequence version |
 | [`dirichlet_posterior`], [`beta_posterior`] | `α + n`, `(a + s, b + f)` |
 | [`dirichlet_predictive`], [`dirichlet_log_predictive`] | `(αᵢ + nᵢ) / (A + N)` and its log |
+| [`normal_normal_log_marginal`], [`normal_normal_posterior`] | `ln p(x)` for Normal data, known `σ`, `Normal(μ₀, σ₀)` prior on the mean; `(μₙ, σₙ)` |
+| [`normal_inverse_gamma_log_marginal`], [`normal_inverse_gamma_posterior`] | `ln p(x)` for Normal data, mean and variance unknown; `(μₙ, κₙ, αₙ, βₙ)` |
+| [`gamma_poisson_log_marginal`], [`gamma_poisson_posterior`] | `ln p(x₁…x_n)` for Poisson counts with a `Gamma(a, b)` rate; `(a + Σx, b + n)` |
 | [`Dirichlet`], [`Multinomial`] | standalone `Distribution<Vec<f64>>` / `Distribution<Vec<u64>>` |
 | [`sample_dirichlet`] | a `Dir(α)` draw inside a model, from `K` Gamma sites |
 
@@ -91,6 +94,43 @@ assert_eq!(post, vec![12.5, 3.5, 0.5]);
 let p = dirichlet_predictive(&alpha, &counts).unwrap();
 assert!((p[0] - 12.5 / 16.5).abs() < 1e-12);
 ```
+
+## Real-valued and count data
+
+The same pattern for value-typed data: integrate the likelihood's parameter
+out in closed form, and enter the result with [`factor`](crate::factor) (or
+[`factor_at`](crate::factor_at), to name the collapsed site).
+
+| Model | Prior | Marginal of one observation |
+| ----- | ----- | --------------------------- |
+| `xᵢ ~ Normal(μ, σ)`, `σ` known | `μ ~ Normal(μ₀, σ₀)` | `Normal(μ₀, √(σ₀² + σ²))` |
+| `xᵢ ~ Normal(μ, σ)` | `σ² ~ InverseGamma(α₀, β₀)`, `μ ~ Normal(μ₀, σ/√κ₀)` | Student-t, `2α₀` d.o.f., location `μ₀`, scale `√(β₀(κ₀ + 1)/(α₀κ₀))` |
+| `xᵢ ~ Poisson(λ)` | `λ ~ Gamma(a, b)` | negative binomial, size `a`, probability `b/(b + 1)` |
+
+The scale parameters follow the distribution types: `sigma0` and `sigma` are
+standard deviations as in [`Normal`](crate::Normal), `(alpha0, beta0)` are
+[`InverseGamma::new`](crate::InverseGamma::new)'s arguments and sit on the
+*variance*, and `(shape, rate)` are [`Gamma::new`](crate::Gamma::new)'s.
+
+Each marginal is the joint density of the whole data vector, and each
+posterior is in the prior's family, so evidence adds up over batches:
+
+```rust
+# use fugue::*;
+let (monday, tuesday) = ([3u64, 0, 4], [2u64, 5]);
+let prior = (2.0, 0.5); // Gamma(shape, rate) on the Poisson rate
+
+let after_monday = gamma_poisson_posterior(prior.0, prior.1, &monday).unwrap();
+assert_eq!(after_monday, (9.0, 3.5));
+
+let both = gamma_poisson_log_marginal(prior.0, prior.1, &[3, 0, 4, 2, 5]).unwrap();
+let chained = gamma_poisson_log_marginal(prior.0, prior.1, &monday).unwrap()
+    + gamma_poisson_log_marginal(after_monday.0, after_monday.1, &tuesday).unwrap();
+assert!((both - chained).abs() < 1e-12);
+```
+
+A value that is not finite has zero density (`-∞`) under the two Normal
+marginals; their posterior functions return an error for it instead.
 
 ## Inferring a concentration with `factor`
 
@@ -170,6 +210,12 @@ at concentrations below about 0.05.
   total concentration past about `2.5·10³⁰⁵`, where `lnΓ` overflows
   (`InvalidShape`), and a probability vector that is not one
   (`InvalidProbability`, with [`Categorical`](crate::Categorical)'s rules).
+- **The Normal marginals work in standardized units** (`(x − μ₀)/σ`) and take
+  the sum of squares about the mean in a second pass, never as `Σx² − n·x̄²`,
+  so under a large common offset the only error left is that of storing the
+  data itself (about `10⁻¹⁶` times the offset), and a common rescaling of data
+  and scales only adds the Jacobian. Sums that overflow give `-∞`, never
+  `NaN`.
 - **Values outside the support are `-∞`**, never an error: an `x` off the
   simplex by more than [`SIMPLEX_TOLERANCE`], `k > n`, or a count vector whose
   total is not the `Multinomial`'s `n`.

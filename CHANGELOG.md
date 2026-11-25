@@ -10,6 +10,130 @@ For the initial 0.1.0 release notes, see `.github/CHANGELOG.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **Trace address renaming: `Trace::map_addresses` and `Trace::rename_prefix`.**
+  `extract_prefix`, `truncate_prefix` and `graft_prefix` select, drop and
+  replace choices but keep every address fixed, so a trace could not follow a
+  program whose sites had moved. `map_addresses(f)` returns a copy with every
+  choice moved to `f(addr)`; `rename_prefix(from, to)` moves the block under
+  `from` (the `Address::has_prefix` boundary, as for the other prefix methods)
+  under `to`. Both borrow the trace and return a new one, like
+  `extract_prefix`. A map that sends two addresses to one, or a block that
+  would land on an occupied address, is an `AddressConflict` error naming the
+  target and both sources: a choice is never dropped or overwritten silently
+  (truncate the target first to replace a block). Values, per-choice `logp`
+  and the three log accumulators are copied unchanged, since a renaming
+  changes no value: they are the weights of the renamed trace under the
+  renamed model, which a test pins by re-scoring. Nothing existing changes.
+
+- **Addressed factors and per-site weight records: `factor_at`, `RecordSites`,
+  `SiteWeights`, `run_recorded`.** A trace keeps `log_likelihood` and
+  `log_factors` as flat sums, and `factor` has no address, so nothing could
+  say which observation or factor a log-weight came from. Two additions, both
+  opt-in:
+
+  - `factor_at(addr, logw)` is `factor(logw)` with a name. Under every handler
+    that does not ask for the address it gives the same trace bit for bit
+    (`log_factors` grows by `logw`), so all inference routines treat the two
+    alike; seeded `adaptive_smc` and adaptive MH runs are identical. `Handler`,
+    `AsyncHandler` and `Overrides` gain a default method `on_factor_at(addr,
+    logw)` that calls `on_factor(logw)`: existing implementations compile and
+    behave unchanged, and an `on_factor` implementation still sees every
+    factor weight. `()` (so `Delegate::new`) and `FromSync` forward the
+    address. `Model` gets no new variant, which would break exhaustive
+    matches: the node is an `ObserveF64` carrying a
+    `core::model::AddressedFactor`, which `run` and `run_async` route to
+    `on_factor_at`. Code that walks a `Model` itself can test for it with
+    `AddressedFactor::weight_of`; left unrecognised it adds the same weight,
+    under `log_likelihood`.
+  - `runtime::record` holds the record. `RecordSites { inner, sites }` wraps
+    any handler, forwards every site unchanged (the inner trace, return values
+    and RNG draws are bit-identical), and fills a `SiteWeights`: log-weight
+    per observation address, per `factor_at` address, and one sum for
+    anonymous factors, with sums by address prefix (`observations_under`,
+    `factors_under`, `under`). `run_recorded(handler, model)` returns
+    `(value, trace, sites)`. `Trace` is not touched: callers build it with
+    struct literals, so a map could not be added to it compatibly.
+
+  Pinned by `tests/site_records.rs`: equality of `factor_at` and `factor`
+  traces under `PriorHandler`, `ReplayHandler`, `ScoreGivenTrace`,
+  `SafeScoreGivenTrace`, the reconciling scorer and `run_async`; handlers that
+  implement only the required methods; and `SiteWeights::log_likelihood` /
+  `log_factors` against the trace's accumulators over 500 seeded executions
+  (to rounding, since the record sums by address and the trace in program
+  order; exact for a single site, and `-∞` on both sides together).
+
+- **Conjugate marginals for real-valued and count data.** The conjugate
+  helpers covered the Beta and Dirichlet families only. Added, in
+  `core::conjugate` and at the crate root, each with its posterior update:
+  `normal_normal_log_marginal` / `normal_normal_posterior` (Normal data, known
+  `sigma`, `Normal(mu0, sigma0)` prior on the mean),
+  `normal_inverse_gamma_log_marginal` / `normal_inverse_gamma_posterior`
+  (mean and variance unknown, `(mu0, kappa0, alpha0, beta0)`), and
+  `gamma_poisson_log_marginal` / `gamma_poisson_posterior` (Poisson counts,
+  `Gamma(shape, rate)` rate). Parameters follow `Normal`, `InverseGamma` and
+  `Gamma`; invalid ones are errors, a non-finite datum is a `-∞` density.
+  The Normal marginals work in standardized units with a two-pass sum of
+  squares: under a common offset the error is that of storing the data
+  (about 10⁻¹⁶ times the offset, 2·10⁻⁹ relative at an offset of 10⁹, where
+  `Σx² − n·x̄²` has lost every digit), and a common rescaling adds exactly the
+  Jacobian. Validated against numerical integration (1-D for each family,
+  plus a brute-force 2-D rule and a prior-predictive simulation for the
+  Normal-Inverse-Gamma), the one-observation closed forms (Normal, Student-t,
+  negative binomial), the explicit bivariate normal, the chain rule over
+  every split of the data, and an `adaptive_smc` evidence estimate of the
+  uncollapsed model.
+
+- **SMC population extension: `smc_extend` and `SMCExtension`.**
+  `adaptive_smc` tempers the likelihood of one fixed model, so there was no
+  way to carry a posterior population on to a new batch of data or to a
+  revised model. `smc_extend(rng, particles, model_fn, &config)` takes a
+  weighted population and the model that defines the new target (for a new
+  batch: the model on all the data so far), and returns the reweighted
+  population with `log_evidence_increment`, the estimate of
+  `ln(Z_new / Z_old)`: the log predictive of the added data, or the log Bayes
+  factor of a restructured model. It is built from the existing pieces: each
+  trace is re-scored with `score_given_trace_reconciled`, the population is
+  resampled with `resample_particles` when the ESS falls below
+  `ess_threshold · N`, and then moved with `rejuvenate_particles` at `β = 1`.
+  The incremental weight is the ratio of the two unnormalized targets over
+  the sites they share, with the old score read from the trace's accumulators
+  and per-choice `logp`; new sites are drawn from their prior and dropped
+  ones marginalized, both reported (`fresh_addresses`, `vanished_addresses`).
+  A step that changes no density (a renamed population under the renamed
+  model, a new site with nothing observed below it) returns an increment of
+  exactly `0.0`. The result type is `#[non_exhaustive]`, so it can grow.
+
+  Pinned by `tests/smc_extend.rs` on a conjugate Normal model: two-batch
+  evidence equals single-pass evidence to 1e-10 for a pure reweight from the
+  same particles, and within Monte Carlo error with resampling and
+  rejuvenation, and both equal the closed form
+  (`normal_normal_log_marginal`); increments over three epochs sum to the
+  evidence; new observed blocks, dropped sites and changed priors are
+  weighted to their closed forms.
+
+- **A standard error for SMC log evidence: `adaptive_smc_replicated`,
+  `log_evidence_estimate`, `LogEvidenceEstimate`.** `SMCResult::log_evidence`
+  is a point estimate with nothing to judge it by. `SMCResult` is a plain
+  struct that callers (and this crate's doc examples) build with a literal,
+  so the error could not be added to it as a field; it comes as a separate,
+  `#[non_exhaustive]` type instead. `log_evidence_estimate(&[ln Ẑ₁, …])`
+  combines `R ≥ 2` independent estimates into the log of their mean, which
+  is still unbiased for the evidence, and its delta-method standard error
+  `sd(Ẑ) / (Z̄·√R)`, in log space. `adaptive_smc_replicated(rng, n, replicates,
+  model_fn, &config)` makes the runs and also returns them pooled into one
+  `SMCResult` of `replicates · n` particles, each run weighted by its
+  evidence estimate, so no particle is wasted. This is a replicate estimate:
+  a single-run one needs particle ancestry through each resampling, which
+  `Particle` does not record. Pinned by `tests/smc_evidence_error.rs`: the
+  arithmetic on hand cases and at evidences of `e^±10⁶`, and calibration on a
+  conjugate model, with and without rejuvenation: over 60 independent
+  estimates the mean reported error is 1.13 to 1.19 times the observed spread
+  (asserted within 0.6 to 1.6), and the standardized errors against the
+  closed form have mean square 0.84 (asserted within 0.5 to 2.5) with at
+  least 95% inside three standard errors.
+
 ## [0.2.4] - 2026-10-08
 
 ### Performance

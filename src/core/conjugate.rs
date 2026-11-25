@@ -812,6 +812,424 @@ pub fn dirichlet_log_predictive(alpha: &[f64], counts: &[u64]) -> FugueResult<Ve
 }
 
 // =============================================================================
+// Conjugate families for real-valued and count data
+//
+// Normal data with a Normal prior on the mean (known variance), Normal data
+// with a Normal-Inverse-Gamma prior on mean and variance, and Poisson counts
+// with a Gamma prior on the rate. Same conventions as above: parameters are
+// validated (errors), data outside the support is a `-∞` log-density, and
+// every `lnΓ` difference goes through `ln_gamma_ratio`.
+// =============================================================================
+
+fn check_finite_location(who: &str, name: &str, value: f64) -> FugueResult<()> {
+    if value.is_finite() {
+        return Ok(());
+    }
+    Err(FugueError::invalid_parameters(
+        who,
+        format!("Parameter {} must be finite", name),
+        ErrorCode::InvalidMean,
+    )
+    .with_context(name, value.to_string())
+    .with_context("expected", "finite"))
+}
+
+fn check_positive_scale(who: &str, name: &str, value: f64, code: ErrorCode) -> FugueResult<()> {
+    if value > 0.0 && value.is_finite() {
+        return Ok(());
+    }
+    Err(FugueError::invalid_parameters(
+        who,
+        format!("Parameter {} must be positive and finite", name),
+        code,
+    )
+    .with_context(name, value.to_string())
+    .with_context("expected", "> 0.0 and finite"))
+}
+
+/// Sufficient statistics of real-valued data, in units of `scale` and centred
+/// on `origin`: `(n, (x̄ − origin) / scale, Σᵢ ((xᵢ − x̄) / scale)²)`.
+///
+/// Working in standardized units keeps every later term the size of the
+/// result. The sum of squares is taken about the mean in a second pass (never
+/// as `Σx² − n·x̄²`, which cancels), with the usual first-order correction for
+/// the rounding of the mean. `None` if any value is not finite: such data has
+/// zero density.
+fn standardized_stats(data: &[f64], origin: f64, scale: f64) -> Option<(f64, f64, f64)> {
+    if data.iter().any(|x| !x.is_finite()) {
+        return None;
+    }
+    let n = data.len() as f64;
+    if data.is_empty() {
+        return Some((0.0, 0.0, 0.0));
+    }
+    // Mean of the standardized values, refined once so that large offsets
+    // (|x| ≫ spread) do not leak into the sum of squares.
+    let z = |x: f64| (x - origin) / scale;
+    let rough: f64 = data.iter().map(|&x| z(x)).sum::<f64>() / n;
+    let residual: f64 = data.iter().map(|&x| z(x) - rough).sum::<f64>();
+    let mean = rough + residual / n;
+    let (mut ss, mut comp) = (0.0, 0.0);
+    for &x in data {
+        let d = z(x) - mean;
+        ss += d * d;
+        comp += d;
+    }
+    Some((n, mean, (ss - comp * comp / n).max(0.0)))
+}
+
+fn validate_normal_normal(who: &str, mu0: f64, sigma0: f64, sigma: f64) -> FugueResult<()> {
+    check_finite_location(who, "mu0", mu0)?;
+    check_positive_scale(who, "sigma0", sigma0, ErrorCode::InvalidVariance)?;
+    check_positive_scale(who, "sigma", sigma, ErrorCode::InvalidVariance)
+}
+
+/// Log marginal likelihood of real-valued data under a Normal likelihood with
+/// **known** standard deviation `sigma` and a `Normal(mu0, sigma0)` prior on
+/// its mean (the Normal–Normal model, mean integrated out):
+///
+/// ```text
+/// μ ~ Normal(μ₀, σ₀),   xᵢ | μ ~ Normal(μ, σ)   (i = 1..n, independent given μ)
+///
+/// ln p(x) = −(n/2)·ln(2πσ²) − ½·ln(1 + n·σ₀²/σ²)
+///           − Σᵢ (xᵢ − x̄)² / (2σ²) − n·(x̄ − μ₀)² / (2·(σ² + n·σ₀²))
+/// ```
+///
+/// Like every parameter of [`Normal`](crate::Normal), `sigma0` and `sigma` are
+/// standard deviations, not variances. The result is the joint density of the
+/// whole data vector, which is exchangeable but not independent once `μ` is
+/// integrated out. Empty data gives `0.0`.
+///
+/// # Errors
+///
+/// `FugueError::InvalidParameters`: `InvalidMean` if `mu0` is not finite,
+/// `InvalidVariance` if `sigma0` or `sigma` is not positive and finite. A
+/// datum that is not finite is outside the support and gives `-∞`, not an
+/// error.
+///
+/// # Example
+///
+/// ```rust
+/// # use fugue::*;
+/// // One observation: the prior predictive is Normal(μ₀, √(σ₀² + σ²)).
+/// let lp = normal_normal_log_marginal(1.0, 3.0, 4.0, &[2.5]).unwrap();
+/// let predictive = Normal::new(1.0, 5.0).unwrap();
+/// assert!((lp - predictive.log_prob(&2.5)).abs() < 1e-12);
+///
+/// // As a collapsed site in a model: the mean never becomes a sample site.
+/// let model = factor(normal_normal_log_marginal(0.0, 10.0, 1.0, &[0.3, -0.1, 0.8]).unwrap());
+/// # let _ = model;
+/// ```
+pub fn normal_normal_log_marginal(
+    mu0: f64,
+    sigma0: f64,
+    sigma: f64,
+    data: &[f64],
+) -> FugueResult<f64> {
+    validate_normal_normal("NormalNormal", mu0, sigma0, sigma)?;
+    let Some((n, mean, ss)) = standardized_stats(data, mu0, sigma) else {
+        return Ok(f64::NEG_INFINITY);
+    };
+    if n == 0.0 {
+        return Ok(0.0);
+    }
+    // In units of σ: the data mean sits `mean` σ's from μ₀, and the prior
+    // inflates the variance of the sum by n·σ₀²/σ². That ratio is kept on the
+    // log scale so that a very diffuse prior against a very tight likelihood
+    // does not overflow when squared.
+    let ln_1p_inflation = ln_1p_variance_inflation(n, sigma0, sigma);
+    // n·mean² / (1 + inflation), without forming either factor's square first.
+    let shrunk = mean * (-0.5 * ln_1p_inflation).exp();
+    let lp = -n * (0.5 * LN_2PI + sigma.ln())
+        - 0.5 * ln_1p_inflation
+        - 0.5 * ss
+        - 0.5 * n * shrunk * shrunk;
+    Ok(crate::core::numerical::nan_to_neg_inf(lp))
+}
+
+/// Posterior of the mean in the Normal–Normal model of
+/// [`normal_normal_log_marginal`], as `(mu_n, sigma_n)`: the parameters of a
+/// [`Normal`](crate::Normal) (mean and standard deviation).
+///
+/// ```text
+/// 1/σₙ² = 1/σ₀² + n/σ²,     μₙ = σₙ²·(μ₀/σ₀² + n·x̄/σ²)
+/// ```
+///
+/// Marginal likelihoods chain through it: the marginal of two batches is the
+/// marginal of the first plus the marginal of the second under the posterior
+/// after the first. Empty data returns the prior.
+///
+/// # Errors
+///
+/// As for [`normal_normal_log_marginal`], and additionally `InvalidMean` if a
+/// datum is not finite (there is no posterior to return).
+///
+/// # Example
+///
+/// ```rust
+/// # use fugue::*;
+/// let (first, second) = ([0.4, 1.1], [0.9, -0.2, 0.6]);
+/// let (mu1, sigma1) = normal_normal_posterior(0.0, 2.0, 1.0, &first).unwrap();
+/// assert!(sigma1 < 2.0);
+///
+/// // Evidence is additive over batches.
+/// let both = normal_normal_log_marginal(0.0, 2.0, 1.0, &[0.4, 1.1, 0.9, -0.2, 0.6]).unwrap();
+/// let chained = normal_normal_log_marginal(0.0, 2.0, 1.0, &first).unwrap()
+///     + normal_normal_log_marginal(mu1, sigma1, 1.0, &second).unwrap();
+/// assert!((both - chained).abs() < 1e-12);
+/// ```
+pub fn normal_normal_posterior(
+    mu0: f64,
+    sigma0: f64,
+    sigma: f64,
+    data: &[f64],
+) -> FugueResult<(f64, f64)> {
+    validate_normal_normal("NormalNormal", mu0, sigma0, sigma)?;
+    let (n, mean, _) = finite_stats("NormalNormal", data, mu0, sigma)?;
+    if n == 0.0 {
+        return Ok((mu0, sigma0));
+    }
+    let ln_inflation = ln_variance_inflation(n, sigma0, sigma);
+    let ln_1p_inflation = ln_1p_variance_inflation(n, sigma0, sigma);
+    // Shrinkage weight on the data mean: n·σ₀² / (σ² + n·σ₀²), as a logistic
+    // of the log ratio so that it tends to 1, not NaN, for a diffuse prior.
+    let weight = 1.0 / (1.0 + (-ln_inflation).exp());
+    Ok((
+        mu0 + sigma * mean * weight,
+        sigma0 * (-0.5 * ln_1p_inflation).exp(),
+    ))
+}
+
+/// `ln(n·σ₀²/σ²)`, formed from logarithms so the squared scale ratio is never
+/// materialized (it overflows once `σ₀/σ` passes about `1e154`).
+fn ln_variance_inflation(n: f64, sigma0: f64, sigma: f64) -> f64 {
+    n.ln() + 2.0 * (sigma0.ln() - sigma.ln())
+}
+
+/// `ln(1 + n·σ₀²/σ²)` without overflow: a softplus of
+/// [`ln_variance_inflation`].
+fn ln_1p_variance_inflation(n: f64, sigma0: f64, sigma: f64) -> f64 {
+    let l = ln_variance_inflation(n, sigma0, sigma);
+    if l > 36.0 {
+        // exp(-l) is below f64 epsilon relative to l: ln(1 + e^l) = l + ln(1 + e^-l).
+        l + (-l).exp()
+    } else {
+        l.exp().ln_1p()
+    }
+}
+
+/// [`standardized_stats`] for the posterior functions, which have no `-∞` to
+/// return: non-finite data is an `InvalidMean` error.
+fn finite_stats(who: &str, data: &[f64], origin: f64, scale: f64) -> FugueResult<(f64, f64, f64)> {
+    standardized_stats(data, origin, scale).ok_or_else(|| {
+        FugueError::invalid_parameters(who, "Data must be finite", ErrorCode::InvalidMean)
+            .with_context("expected", "every observation finite")
+    })
+}
+
+fn validate_nig(who: &str, mu0: f64, kappa0: f64, alpha0: f64, beta0: f64) -> FugueResult<()> {
+    check_finite_location(who, "mu0", mu0)?;
+    check_positive_scale(who, "kappa0", kappa0, ErrorCode::InvalidShape)?;
+    check_positive_scale(who, "alpha0", alpha0, ErrorCode::InvalidShape)?;
+    check_positive_scale(who, "beta0", beta0, ErrorCode::InvalidRate)
+}
+
+/// Posterior hyperparameters of the Normal-Inverse-Gamma model and the pieces
+/// its marginal needs: `(mu_n, kappa_n, alpha_n, beta_n)`.
+fn nig_update(
+    mu0: f64,
+    kappa0: f64,
+    alpha0: f64,
+    beta0: f64,
+    stats: (f64, f64, f64),
+) -> (f64, f64, f64, f64) {
+    // `stats` is in raw units about μ₀ (scale 1): mean = x̄ − μ₀.
+    let (n, mean, ss) = stats;
+    let kappa_n = kappa0 + n;
+    (
+        mu0 + mean * (n / kappa_n),
+        kappa_n,
+        alpha0 + 0.5 * n,
+        beta0 + 0.5 * ss + 0.5 * mean * mean * (kappa0 * n / kappa_n),
+    )
+}
+
+/// Log marginal likelihood of real-valued data under a Normal likelihood with
+/// **unknown mean and variance** and a Normal-Inverse-Gamma prior on the pair
+/// (both integrated out):
+///
+/// ```text
+/// σ² ~ InverseGamma(α₀, β₀),   μ | σ² ~ Normal(μ₀, σ/√κ₀),   xᵢ | μ, σ² ~ Normal(μ, σ)
+///
+/// ln p(x) = lnΓ(αₙ) − lnΓ(α₀) + α₀·ln β₀ − αₙ·ln βₙ + ½·ln(κ₀/κₙ) − (n/2)·ln 2π
+///
+/// κₙ = κ₀ + n,   αₙ = α₀ + n/2,
+/// βₙ = β₀ + ½·Σᵢ (xᵢ − x̄)² + κ₀·n·(x̄ − μ₀)² / (2·κₙ)
+/// ```
+///
+/// `alpha0` and `beta0` are the two parameters of
+/// [`InverseGamma::new`](crate::InverseGamma::new), in that order, placed on
+/// the **variance** `σ²`; `kappa0` is the prior's weight in pseudo-observations
+/// (the prior on `μ` has variance `σ²/κ₀`). The marginal of one observation is
+/// a Student-t with `2α₀` degrees of freedom, location `μ₀` and scale
+/// `√(β₀·(κ₀ + 1)/(α₀·κ₀))`. Empty data gives `0.0`.
+///
+/// # Errors
+///
+/// `FugueError::InvalidParameters`: `InvalidMean` if `mu0` is not finite,
+/// `InvalidShape` if `kappa0` or `alpha0` is not positive and finite,
+/// `InvalidRate` if `beta0` is not. A datum that is not finite gives `-∞`.
+///
+/// # Example
+///
+/// ```rust
+/// # use fugue::*;
+/// // One observation is Student-t distributed.
+/// let (mu0, kappa0, alpha0, beta0) = (0.5, 2.0, 3.0, 4.0);
+/// let lp = normal_inverse_gamma_log_marginal(mu0, kappa0, alpha0, beta0, &[1.7]).unwrap();
+/// let scale = (beta0 * (kappa0 + 1.0) / (alpha0 * kappa0)).sqrt();
+/// let t = StudentT::new(2.0 * alpha0, mu0, scale).unwrap();
+/// assert!((lp - t.log_prob(&1.7)).abs() < 1e-12);
+/// ```
+pub fn normal_inverse_gamma_log_marginal(
+    mu0: f64,
+    kappa0: f64,
+    alpha0: f64,
+    beta0: f64,
+    data: &[f64],
+) -> FugueResult<f64> {
+    validate_nig("NormalInverseGamma", mu0, kappa0, alpha0, beta0)?;
+    let Some(stats) = standardized_stats(data, mu0, 1.0) else {
+        return Ok(f64::NEG_INFINITY);
+    };
+    let n = stats.0;
+    if n == 0.0 {
+        return Ok(0.0);
+    }
+    let (_, _, _, beta_n) = nig_update(mu0, kappa0, alpha0, beta0, stats);
+    // α₀·ln β₀ − αₙ·ln βₙ = −α₀·ln(βₙ/β₀) − (n/2)·ln βₙ, and βₙ/β₀ = 1 + growth.
+    let growth = (beta_n - beta0) / beta0;
+    let lp = ln_gamma_ratio(alpha0, 0.5 * n, 0.0)
+        - alpha0 * growth.ln_1p()
+        - 0.5 * n * beta_n.ln()
+        - 0.5 * (n / kappa0).ln_1p()
+        - 0.5 * n * LN_2PI;
+    Ok(crate::core::numerical::nan_to_neg_inf(lp))
+}
+
+/// Posterior hyperparameters of the Normal-Inverse-Gamma model of
+/// [`normal_inverse_gamma_log_marginal`], as `(mu_n, kappa_n, alpha_n, beta_n)`:
+///
+/// ```text
+/// μₙ = (κ₀·μ₀ + n·x̄) / κₙ,   κₙ = κ₀ + n,   αₙ = α₀ + n/2,
+/// βₙ = β₀ + ½·Σᵢ (xᵢ − x̄)² + κ₀·n·(x̄ − μ₀)² / (2·κₙ)
+/// ```
+///
+/// The posterior is again Normal-Inverse-Gamma, so marginals chain over
+/// batches as for [`normal_normal_posterior`]. Empty data returns the prior.
+///
+/// # Errors
+///
+/// As for [`normal_inverse_gamma_log_marginal`], and additionally
+/// `InvalidMean` if a datum is not finite.
+///
+/// # Example
+///
+/// ```rust
+/// # use fugue::*;
+/// let (mu, kappa, alpha, beta) =
+///     normal_inverse_gamma_posterior(0.0, 1.0, 2.0, 2.0, &[1.0, 3.0]).unwrap();
+/// assert_eq!((kappa, alpha), (3.0, 3.0));
+/// assert!((mu - 4.0 / 3.0).abs() < 1e-12);
+/// // β₀ + ½·2 + 1·2·2²/(2·3)
+/// assert!((beta - (2.0 + 1.0 + 4.0 / 3.0)).abs() < 1e-12);
+/// ```
+pub fn normal_inverse_gamma_posterior(
+    mu0: f64,
+    kappa0: f64,
+    alpha0: f64,
+    beta0: f64,
+    data: &[f64],
+) -> FugueResult<(f64, f64, f64, f64)> {
+    validate_nig("NormalInverseGamma", mu0, kappa0, alpha0, beta0)?;
+    let stats = finite_stats("NormalInverseGamma", data, mu0, 1.0)?;
+    Ok(nig_update(mu0, kappa0, alpha0, beta0, stats))
+}
+
+fn validate_gamma_poisson(who: &str, shape: f64, rate: f64) -> FugueResult<()> {
+    check_positive_scale(who, "shape", shape, ErrorCode::InvalidShape)?;
+    check_positive_scale(who, "rate", rate, ErrorCode::InvalidRate)
+}
+
+/// Log marginal likelihood of a **sequence** of Poisson counts whose rate has
+/// a `Gamma(shape, rate)` prior (the Gamma–Poisson model, rate integrated
+/// out):
+///
+/// ```text
+/// λ ~ Gamma(a, b),   xᵢ | λ ~ Poisson(λ)   (i = 1..n),   S = Σᵢ xᵢ
+///
+/// ln p(x) = lnΓ(a + S) − lnΓ(a) + a·ln(b / (b + n)) − S·ln(b + n) − Σᵢ ln xᵢ!
+/// ```
+///
+/// `shape` and `rate` are the parameters of [`Gamma::new`](crate::Gamma::new).
+/// The marginal of one count is negative binomial with size `a` and success
+/// probability `b/(b + 1)`. Empty data gives `0.0`.
+///
+/// # Errors
+///
+/// `FugueError::InvalidParameters`: `InvalidShape` if `shape` is not positive
+/// and finite, `InvalidRate` if `rate` is not, `InvalidCount` if the total
+/// count overflows `u64`.
+///
+/// # Example
+///
+/// ```rust
+/// # use fugue::*;
+/// // Gamma(1, 1) prior, one count: the geometric distribution 2^-(x + 1).
+/// let lp = gamma_poisson_log_marginal(1.0, 1.0, &[3]).unwrap();
+/// assert!((lp - (1.0f64 / 16.0).ln()).abs() < 1e-12);
+/// ```
+pub fn gamma_poisson_log_marginal(shape: f64, rate: f64, counts: &[u64]) -> FugueResult<f64> {
+    validate_gamma_poisson("GammaPoisson", shape, rate)?;
+    let total = total_count("GammaPoisson", counts)? as f64;
+    let n = counts.len() as f64;
+    if counts.is_empty() {
+        return Ok(0.0);
+    }
+    let ln_factorials: f64 = counts.iter().map(|&x| libm::lgamma(x as f64 + 1.0)).sum();
+    Ok(ln_gamma_ratio(shape, total, 0.0)
+        - shape * (n / rate).ln_1p()
+        - total * (rate + n).ln()
+        - ln_factorials)
+}
+
+/// Posterior of the rate in the Gamma–Poisson model of
+/// [`gamma_poisson_log_marginal`], as `(shape, rate)`:
+/// `Gamma(a + Σᵢ xᵢ, b + n)`.
+///
+/// # Errors
+///
+/// As for [`gamma_poisson_log_marginal`].
+///
+/// # Example
+///
+/// ```rust
+/// # use fugue::*;
+/// let (shape, rate) = gamma_poisson_posterior(2.0, 0.5, &[3, 0, 4]).unwrap();
+/// assert_eq!((shape, rate), (9.0, 3.5));
+/// let posterior = Gamma::new(shape, rate).unwrap();
+/// # let _ = posterior;
+/// ```
+pub fn gamma_poisson_posterior(shape: f64, rate: f64, counts: &[u64]) -> FugueResult<(f64, f64)> {
+    validate_gamma_poisson("GammaPoisson", shape, rate)?;
+    let total = total_count("GammaPoisson", counts)? as f64;
+    Ok((shape + total, rate + counts.len() as f64))
+}
+
+/// `ln 2π`.
+const LN_2PI: f64 = 1.837_877_066_409_345_3;
+
+// =============================================================================
 // Distribution types
 // =============================================================================
 
@@ -2607,5 +3025,556 @@ mod tests {
         let draws = adaptive_mcmc_chain(&mut rng, model, 8_000, 2_000);
         let mh_mean = draws.iter().map(|(la, _)| la).sum::<f64>() / draws.len() as f64;
         close(mh_mean, grid_mean, 0.15);
+    }
+
+    // -------------------------------------------------------------------------
+    // Normal-Normal, Normal-Inverse-Gamma and Gamma-Poisson
+    // -------------------------------------------------------------------------
+
+    /// `ln ∫ exp(log_f(u)) du` over `[lo, hi]` by composite Simpson, with the
+    /// maximum factored out so the integrand never under- or overflows.
+    fn ln_integral(log_f: impl Fn(f64) -> f64, lo: f64, hi: f64, panels: usize) -> f64 {
+        let h = (hi - lo) / panels as f64;
+        let values: Vec<f64> = (0..=panels).map(|i| log_f(lo + i as f64 * h)).collect();
+        let max = values.iter().cloned().fold(NEG_INF, f64::max);
+        let sum: f64 = values
+            .iter()
+            .enumerate()
+            .map(|(i, v)| {
+                let w = if i == 0 || i == panels {
+                    1.0
+                } else if i % 2 == 1 {
+                    4.0
+                } else {
+                    2.0
+                };
+                w * (v - max).exp()
+            })
+            .sum();
+        max + (h / 3.0 * sum).ln()
+    }
+
+    /// Deterministic pseudo-data: `n` values around `centre` with spread `spread`.
+    fn pseudo_data(seed: u64, n: usize, centre: f64, spread: f64) -> Vec<f64> {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let normal = Normal::new(centre, spread).unwrap();
+        (0..n).map(|_| normal.sample(&mut rng)).collect()
+    }
+
+    const NORMAL_NORMAL_CASES: &[(f64, f64, f64, usize)] = &[
+        // (mu0, sigma0, sigma, n)
+        (0.0, 1.0, 1.0, 1),
+        (0.0, 1.0, 1.0, 5),
+        (-2.0, 0.3, 2.5, 8),
+        (4.0, 10.0, 0.5, 12),
+        (1.5, 0.05, 1.0, 30),
+        (0.0, 3.0, 0.1, 3),
+    ];
+
+    #[test]
+    fn normal_normal_matches_numerical_integration() {
+        for (case, &(mu0, sigma0, sigma, n)) in NORMAL_NORMAL_CASES.iter().enumerate() {
+            let data = pseudo_data(case as u64, n, mu0 + 0.7 * sigma0, sigma);
+            let prior = Normal::new(mu0, sigma0).unwrap();
+            // ∫ p(mu)·Π p(xᵢ | mu) dmu over the posterior's effective range.
+            let (mu_n, sigma_n) = normal_normal_posterior(mu0, sigma0, sigma, &data).unwrap();
+            let want = ln_integral(
+                |mu| {
+                    let like = Normal::new(mu, sigma).unwrap();
+                    prior.log_prob(&mu) + data.iter().map(|x| like.log_prob(x)).sum::<f64>()
+                },
+                mu_n - 12.0 * sigma_n,
+                mu_n + 12.0 * sigma_n,
+                4_000,
+            );
+            close_rel(
+                normal_normal_log_marginal(mu0, sigma0, sigma, &data).unwrap(),
+                want,
+                1e-10,
+            );
+        }
+    }
+
+    /// Two observations are bivariate normal with covariance
+    /// `σ²·I + σ₀²·11ᵀ`; written out with the explicit 2×2 inverse.
+    #[test]
+    fn normal_normal_two_points_is_the_bivariate_normal() {
+        for &(mu0, sigma0, sigma, x1, x2) in &[
+            (0.0, 1.0, 1.0, 0.3, -0.8),
+            (2.0, 0.5, 3.0, 4.0, 1.0),
+            (-1.0, 4.0, 0.2, -0.9, -1.3),
+        ] {
+            let (v, v0): (f64, f64) = (sigma * sigma, sigma0 * sigma0);
+            let det = (v + v0) * (v + v0) - v0 * v0;
+            let (d1, d2) = (x1 - mu0, x2 - mu0);
+            let quad = ((v + v0) * (d1 * d1 + d2 * d2) - 2.0 * v0 * d1 * d2) / det;
+            let want = -(2.0 * std::f64::consts::PI).ln() - 0.5 * det.ln() - 0.5 * quad;
+            close(
+                normal_normal_log_marginal(mu0, sigma0, sigma, &[x1, x2]).unwrap(),
+                want,
+                1e-12,
+            );
+        }
+    }
+
+    #[test]
+    fn normal_normal_survives_extreme_scale_ratios() {
+        // sigma0 / sigma = 1e200: the squared ratio overflows f64.
+        let (mu0, sigma0, sigma) = (0.0, 1e100, 1e-100);
+        let lp = normal_normal_log_marginal(mu0, sigma0, sigma, &[0.0]).unwrap();
+        // One datum at the prior mean: the marginal is N(0; 0, sigma0^2 + sigma^2).
+        let expected = -0.5 * LN_2PI - (1e100f64).ln();
+        assert!(lp.is_finite(), "log marginal was {lp}");
+        close_rel(lp, expected, 1e-12);
+        let (mu_n, sigma_n) = normal_normal_posterior(mu0, sigma0, sigma, &[0.0]).unwrap();
+        assert_eq!(mu_n, 0.0);
+        close_rel(sigma_n, 1e-100, 1e-12);
+        // The opposite extreme: a prior so tight the data cannot move it.
+        let (mu_t, sigma_t) = normal_normal_posterior(1.0, 1e-100, 1e100, &[5.0]).unwrap();
+        assert_eq!(mu_t, 1.0);
+        close_rel(sigma_t, 1e-100, 1e-12);
+        let lp_t = normal_normal_log_marginal(1.0, 1e-100, 1e100, &[5.0]).unwrap();
+        close_rel(lp_t, -0.5 * LN_2PI - (1e100f64).ln(), 1e-12);
+    }
+
+    #[test]
+    fn normal_normal_posterior_matches_the_precision_form_and_chains() {
+        for (case, &(mu0, sigma0, sigma, n)) in NORMAL_NORMAL_CASES.iter().enumerate() {
+            let data = pseudo_data(100 + case as u64, n + 3, mu0 - sigma0, sigma);
+            let (mu_n, sigma_n) = normal_normal_posterior(mu0, sigma0, sigma, &data).unwrap();
+            let m = data.len() as f64;
+            let mean = data.iter().sum::<f64>() / m;
+            let precision = 1.0 / (sigma0 * sigma0) + m / (sigma * sigma);
+            close_rel(sigma_n, precision.powf(-0.5), 1e-12);
+            close_rel(
+                mu_n,
+                (mu0 / (sigma0 * sigma0) + m * mean / (sigma * sigma)) / precision,
+                1e-11,
+            );
+
+            // Evidence is additive over any split, and order does not matter.
+            let all = normal_normal_log_marginal(mu0, sigma0, sigma, &data).unwrap();
+            for split in 0..=data.len() {
+                let (first, second) = data.split_at(split);
+                let (mu1, sigma1) = normal_normal_posterior(mu0, sigma0, sigma, first).unwrap();
+                let chained = normal_normal_log_marginal(mu0, sigma0, sigma, first).unwrap()
+                    + normal_normal_log_marginal(mu1, sigma1, sigma, second).unwrap();
+                close_rel(chained, all, 1e-11);
+            }
+            let mut reversed = data.clone();
+            reversed.reverse();
+            close_rel(
+                normal_normal_log_marginal(mu0, sigma0, sigma, &reversed).unwrap(),
+                all,
+                1e-12,
+            );
+        }
+        // No data: marginal 0, posterior is the prior.
+        assert_eq!(normal_normal_log_marginal(1.0, 2.0, 3.0, &[]).unwrap(), 0.0);
+        assert_eq!(
+            normal_normal_posterior(1.0, 2.0, 3.0, &[]).unwrap(),
+            (1.0, 2.0)
+        );
+    }
+
+    /// The marginal depends on the data only through its offset from `mu0`,
+    /// and the sum of squares must not lose the spread to a large offset.
+    #[test]
+    fn normal_marginals_are_stable_under_a_large_offset() {
+        let base = pseudo_data(9, 20, 0.0, 1.0);
+        for &shift in &[1e3, 1e6, 1e9] {
+            let shifted: Vec<f64> = base.iter().map(|x| x + shift).collect();
+            close_rel(
+                normal_normal_log_marginal(shift, 2.0, 1.0, &shifted).unwrap(),
+                normal_normal_log_marginal(0.0, 2.0, 1.0, &base).unwrap(),
+                // The data itself only carries ~16 − log10(shift) digits of spread.
+                1e-15 * shift * 100.0,
+            );
+            close_rel(
+                normal_inverse_gamma_log_marginal(shift, 1.0, 2.0, 2.0, &shifted).unwrap(),
+                normal_inverse_gamma_log_marginal(0.0, 1.0, 2.0, 2.0, &base).unwrap(),
+                1e-15 * shift * 100.0,
+            );
+        }
+        // Rescaling data and scales together only moves the density by the Jacobian.
+        let c = 1e-4_f64;
+        let scaled: Vec<f64> = base.iter().map(|x| x * c).collect();
+        close_rel(
+            normal_normal_log_marginal(0.0, 2.0 * c, c, &scaled).unwrap(),
+            normal_normal_log_marginal(0.0, 2.0, 1.0, &base).unwrap() - 20.0 * c.ln(),
+            1e-12,
+        );
+        close_rel(
+            normal_inverse_gamma_log_marginal(0.0, 1.0, 2.0, 2.0 * c * c, &scaled).unwrap(),
+            normal_inverse_gamma_log_marginal(0.0, 1.0, 2.0, 2.0, &base).unwrap() - 20.0 * c.ln(),
+            1e-12,
+        );
+    }
+
+    const NIG_CASES: &[(f64, f64, f64, f64, usize)] = &[
+        // (mu0, kappa0, alpha0, beta0, n)
+        (0.0, 1.0, 2.0, 2.0, 1),
+        (0.0, 1.0, 2.0, 2.0, 6),
+        (1.5, 0.2, 3.5, 1.0, 10),
+        (-3.0, 5.0, 1.2, 8.0, 4),
+        (0.5, 2.0, 0.7, 0.3, 15),
+    ];
+
+    /// The variance integral done numerically: given σ² the model is
+    /// Normal-Normal with prior scale σ/√κ₀, so
+    /// `p(x) = ∫ InvGamma(σ² | α₀, β₀) · NormalNormal(x | μ₀, σ/√κ₀, σ) dσ²`,
+    /// integrated over `u = ln σ²`.
+    #[test]
+    fn normal_inverse_gamma_matches_numerical_integration() {
+        use crate::core::distribution::InverseGamma;
+        for (case, &(mu0, kappa0, alpha0, beta0, n)) in NIG_CASES.iter().enumerate() {
+            let data = pseudo_data(200 + case as u64, n, mu0 + 0.5, 1.3);
+            let prior = InverseGamma::new(alpha0, beta0).unwrap();
+            let want = ln_integral(
+                |u: f64| {
+                    let var = u.exp();
+                    let sigma = var.sqrt();
+                    prior.log_prob(&var)
+                        + u
+                        + normal_normal_log_marginal(mu0, sigma / kappa0.sqrt(), sigma, &data)
+                            .unwrap()
+                },
+                -25.0,
+                25.0,
+                20_000,
+            );
+            close_rel(
+                normal_inverse_gamma_log_marginal(mu0, kappa0, alpha0, beta0, &data).unwrap(),
+                want,
+                1e-9,
+            );
+        }
+    }
+
+    /// The same marginal by brute force in both parameters (no reuse of the
+    /// Normal-Normal helper): a 2-D Simpson rule over `(μ, ln σ²)`.
+    #[test]
+    fn normal_inverse_gamma_matches_two_dimensional_quadrature() {
+        use crate::core::distribution::InverseGamma;
+        let (mu0, kappa0, alpha0, beta0): (f64, f64, f64, f64) = (0.4, 1.5, 3.0, 2.0);
+        let data = [0.9, -0.3, 1.4, 0.2];
+        let prior = InverseGamma::new(alpha0, beta0).unwrap();
+        let want = ln_integral(
+            |u: f64| {
+                let var = u.exp();
+                let sigma = var.sqrt();
+                let like = |mu: f64| {
+                    let d = Normal::new(mu, sigma).unwrap();
+                    Normal::new(mu0, sigma / kappa0.sqrt())
+                        .unwrap()
+                        .log_prob(&mu)
+                        + data.iter().map(|x| d.log_prob(x)).sum::<f64>()
+                };
+                prior.log_prob(&var) + u + ln_integral(like, -40.0, 40.0, 4_000)
+            },
+            -12.0,
+            12.0,
+            1_200,
+        );
+        close_rel(
+            normal_inverse_gamma_log_marginal(mu0, kappa0, alpha0, beta0, &data).unwrap(),
+            want,
+            1e-8,
+        );
+    }
+
+    #[test]
+    fn normal_inverse_gamma_one_point_is_student_t_and_batches_chain() {
+        use crate::core::distribution::StudentT;
+        for (case, &(mu0, kappa0, alpha0, beta0, n)) in NIG_CASES.iter().enumerate() {
+            let scale = (beta0 * (kappa0 + 1.0) / (alpha0 * kappa0)).sqrt();
+            let t = StudentT::new(2.0 * alpha0, mu0, scale).unwrap();
+            for &x in &[mu0, mu0 + 0.3, mu0 - 4.0, mu0 + 50.0] {
+                close_rel(
+                    normal_inverse_gamma_log_marginal(mu0, kappa0, alpha0, beta0, &[x]).unwrap(),
+                    t.log_prob(&x),
+                    1e-12,
+                );
+            }
+
+            let data = pseudo_data(300 + case as u64, n + 2, mu0, 2.0);
+            let all = normal_inverse_gamma_log_marginal(mu0, kappa0, alpha0, beta0, &data).unwrap();
+            for split in 0..=data.len() {
+                let (first, second) = data.split_at(split);
+                let (m1, k1, a1, b1) =
+                    normal_inverse_gamma_posterior(mu0, kappa0, alpha0, beta0, first).unwrap();
+                let chained = normal_inverse_gamma_log_marginal(mu0, kappa0, alpha0, beta0, first)
+                    .unwrap()
+                    + normal_inverse_gamma_log_marginal(m1, k1, a1, b1, second).unwrap();
+                close_rel(chained, all, 1e-11);
+            }
+            // Sequential one-point updates multiply Student-t predictives.
+            let (mut m, mut k, mut a, mut b) = (mu0, kappa0, alpha0, beta0);
+            let mut sequential = 0.0;
+            for &x in &data {
+                let s = (b * (k + 1.0) / (a * k)).sqrt();
+                sequential += StudentT::new(2.0 * a, m, s).unwrap().log_prob(&x);
+                (m, k, a, b) = normal_inverse_gamma_posterior(m, k, a, b, &[x]).unwrap();
+            }
+            close_rel(sequential, all, 1e-11);
+        }
+        assert_eq!(
+            normal_inverse_gamma_log_marginal(0.0, 1.0, 2.0, 3.0, &[]).unwrap(),
+            0.0
+        );
+        assert_eq!(
+            normal_inverse_gamma_posterior(0.0, 1.0, 2.0, 3.0, &[]).unwrap(),
+            (0.0, 1.0, 2.0, 3.0)
+        );
+    }
+
+    /// Simulation check of the Normal-Inverse-Gamma marginal for one point:
+    /// the fraction of prior-predictive draws below a threshold matches the
+    /// Student-t the marginal says they follow, read through its density by
+    /// quadrature.
+    #[test]
+    fn normal_inverse_gamma_matches_prior_predictive_simulation() {
+        use crate::core::distribution::InverseGamma;
+        let (mu0, kappa0, alpha0, beta0) = (1.0, 2.0, 3.0, 4.0);
+        let mut rng = StdRng::seed_from_u64(2026);
+        let draws = 200_000;
+        let (lo, hi) = (0.0, 2.5);
+        let mut inside = 0usize;
+        for _ in 0..draws {
+            let var: f64 = InverseGamma::new(alpha0, beta0).unwrap().sample(&mut rng);
+            let mu = Normal::new(mu0, (var / kappa0).sqrt())
+                .unwrap()
+                .sample(&mut rng);
+            let x = Normal::new(mu, var.sqrt()).unwrap().sample(&mut rng);
+            if x > lo && x < hi {
+                inside += 1;
+            }
+        }
+        let p_hat = inside as f64 / draws as f64;
+        let p = ln_integral(
+            |x| normal_inverse_gamma_log_marginal(mu0, kappa0, alpha0, beta0, &[x]).unwrap(),
+            lo,
+            hi,
+            2_000,
+        )
+        .exp();
+        let se = (p * (1.0 - p) / draws as f64).sqrt();
+        assert!(
+            (p_hat - p).abs() < 4.0 * se,
+            "simulated {p_hat}, marginal {p}, se {se}"
+        );
+    }
+
+    const GAMMA_POISSON_CASES: &[(f64, f64, &[u64])] = &[
+        (1.0, 1.0, &[3]),
+        (2.5, 0.7, &[0, 4, 2, 7]),
+        (0.3, 2.0, &[0, 0, 1, 0, 0, 2]),
+        (10.0, 0.1, &[95, 104, 88]),
+        (4.0, 3.0, &[]),
+        (0.05, 0.01, &[12, 0, 3]),
+    ];
+
+    #[test]
+    fn gamma_poisson_matches_numerical_integration() {
+        use crate::core::distribution::Poisson;
+        for &(shape, rate, counts) in GAMMA_POISSON_CASES {
+            if counts.is_empty() {
+                assert_eq!(
+                    gamma_poisson_log_marginal(shape, rate, counts).unwrap(),
+                    0.0
+                );
+                continue;
+            }
+            let prior = Gamma::new(shape, rate).unwrap();
+            // Over u = ln λ, so a shape below 1 has no endpoint singularity.
+            let want = ln_integral(
+                |u: f64| {
+                    let lambda = u.exp();
+                    prior.log_prob(&lambda)
+                        + u
+                        + counts
+                            .iter()
+                            .map(|x| Poisson::new(lambda).unwrap().log_prob(x))
+                            .sum::<f64>()
+                },
+                -60.0,
+                12.0,
+                40_000,
+            );
+            close_rel(
+                gamma_poisson_log_marginal(shape, rate, counts).unwrap(),
+                want,
+                1e-9,
+            );
+        }
+    }
+
+    #[test]
+    fn gamma_poisson_one_count_is_negative_binomial_and_sums_to_one() {
+        for &(shape, rate) in &[(1.0, 1.0), (2.5, 0.7), (0.3, 2.0), (7.0, 4.0)] {
+            let p: f64 = rate / (rate + 1.0);
+            let mut terms = Vec::new();
+            for x in 0..400u64 {
+                let lp = gamma_poisson_log_marginal(shape, rate, &[x]).unwrap();
+                let xf = x as f64;
+                let nb = lgamma(shape + xf) - lgamma(shape) - lgamma(xf + 1.0)
+                    + shape * p.ln()
+                    + xf * (1.0 - p).ln();
+                close_rel(lp, nb, 1e-11);
+                terms.push(lp);
+            }
+            close(log_sum_exp(&terms), 0.0, 1e-9);
+        }
+    }
+
+    #[test]
+    fn gamma_poisson_posterior_chains_and_ignores_order() {
+        for &(shape, rate, counts) in GAMMA_POISSON_CASES {
+            let all = gamma_poisson_log_marginal(shape, rate, counts).unwrap();
+            for split in 0..=counts.len() {
+                let (first, second) = counts.split_at(split);
+                let (a1, b1) = gamma_poisson_posterior(shape, rate, first).unwrap();
+                assert_eq!(a1, shape + first.iter().sum::<u64>() as f64);
+                assert_eq!(b1, rate + first.len() as f64);
+                let chained = gamma_poisson_log_marginal(shape, rate, first).unwrap()
+                    + gamma_poisson_log_marginal(a1, b1, second).unwrap();
+                close_rel(chained, all, 1e-11);
+            }
+            let mut reversed = counts.to_vec();
+            reversed.reverse();
+            close_rel(
+                gamma_poisson_log_marginal(shape, rate, &reversed).unwrap(),
+                all,
+                1e-12,
+            );
+        }
+        // Large counts: finite, and equal to the plain lnΓ formula where that
+        // formula is still accurate.
+        let counts = [1_000_000u64, 1_000_250, 999_100];
+        let (a, b, s, n): (f64, f64, f64, f64) = (3.0, 2.0, 2_999_350.0, 3.0);
+        let want = lgamma(a + s) - lgamma(a) + a * (b / (b + n)).ln()
+            - s * (b + n).ln()
+            - counts.iter().map(|&x| lgamma(x as f64 + 1.0)).sum::<f64>();
+        close_rel(
+            gamma_poisson_log_marginal(a, b, &counts).unwrap(),
+            want,
+            1e-9,
+        );
+    }
+
+    /// The helpers used as intended: a collapsed site entered with `factor`
+    /// gives the evidence that sampling the parameter and observing does.
+    #[test]
+    fn collapsed_normal_site_matches_the_explicit_model_evidence() {
+        use crate::inference::smc::{adaptive_smc, SMCConfig};
+        let data = vec![0.8, 1.9, 1.1, 0.4, 1.6];
+        let exact = normal_normal_log_marginal(0.0, 2.0, 1.0, &data).unwrap();
+        let d = data.clone();
+        let explicit = move || {
+            let d = d.clone();
+            sample(addr!("mu"), Normal::new(0.0, 2.0).unwrap()).bind(move |mu| {
+                traverse_vec(d.into_iter().enumerate().collect(), move |(i, y)| {
+                    observe(addr!("y", i), Normal::new(mu, 1.0).unwrap(), y)
+                })
+            })
+        };
+        let mut rng = StdRng::seed_from_u64(31);
+        let result = adaptive_smc(&mut rng, 20_000, explicit, SMCConfig::default());
+        close(result.log_evidence, exact, 0.05);
+    }
+
+    #[test]
+    fn real_and_count_conjugates_reject_invalid_parameters() {
+        let x = [0.5, 1.5];
+        for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert_eq!(
+                err_code(normal_normal_log_marginal(0.0, bad, 1.0, &x)),
+                ErrorCode::InvalidVariance
+            );
+            assert_eq!(
+                err_code(normal_normal_log_marginal(0.0, 1.0, bad, &x)),
+                ErrorCode::InvalidVariance
+            );
+            assert_eq!(
+                err_code(normal_normal_posterior(0.0, bad, 1.0, &x)),
+                ErrorCode::InvalidVariance
+            );
+            assert_eq!(
+                err_code(normal_inverse_gamma_log_marginal(0.0, bad, 1.0, 1.0, &x)),
+                ErrorCode::InvalidShape
+            );
+            assert_eq!(
+                err_code(normal_inverse_gamma_log_marginal(0.0, 1.0, bad, 1.0, &x)),
+                ErrorCode::InvalidShape
+            );
+            assert_eq!(
+                err_code(normal_inverse_gamma_log_marginal(0.0, 1.0, 1.0, bad, &x)),
+                ErrorCode::InvalidRate
+            );
+            assert_eq!(
+                err_code(normal_inverse_gamma_posterior(0.0, 1.0, 1.0, bad, &x)),
+                ErrorCode::InvalidRate
+            );
+            assert_eq!(
+                err_code(gamma_poisson_log_marginal(bad, 1.0, &[1])),
+                ErrorCode::InvalidShape
+            );
+            assert_eq!(
+                err_code(gamma_poisson_log_marginal(1.0, bad, &[1])),
+                ErrorCode::InvalidRate
+            );
+            assert_eq!(
+                err_code(gamma_poisson_posterior(1.0, bad, &[1])),
+                ErrorCode::InvalidRate
+            );
+        }
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(
+                err_code(normal_normal_log_marginal(bad, 1.0, 1.0, &x)),
+                ErrorCode::InvalidMean
+            );
+            assert_eq!(
+                err_code(normal_inverse_gamma_log_marginal(bad, 1.0, 1.0, 1.0, &x)),
+                ErrorCode::InvalidMean
+            );
+            // Data outside the support: zero density for the marginals, an
+            // error for the posteriors.
+            assert_eq!(
+                normal_normal_log_marginal(0.0, 1.0, 1.0, &[0.5, bad]).unwrap(),
+                NEG_INF
+            );
+            assert_eq!(
+                normal_inverse_gamma_log_marginal(0.0, 1.0, 1.0, 1.0, &[bad]).unwrap(),
+                NEG_INF
+            );
+            assert_eq!(
+                err_code(normal_normal_posterior(0.0, 1.0, 1.0, &[bad])),
+                ErrorCode::InvalidMean
+            );
+            assert_eq!(
+                err_code(normal_inverse_gamma_posterior(0.0, 1.0, 1.0, 1.0, &[bad])),
+                ErrorCode::InvalidMean
+            );
+        }
+        assert_eq!(
+            err_code(gamma_poisson_log_marginal(1.0, 1.0, &[u64::MAX, 1])),
+            ErrorCode::InvalidCount
+        );
+        assert_eq!(
+            err_code(gamma_poisson_posterior(1.0, 1.0, &[u64::MAX, 1])),
+            ErrorCode::InvalidCount
+        );
+        // Extreme but valid inputs never produce NaN.
+        for &sigma in &[1e-150, 1e-8, 1.0, 1e8, 1e150] {
+            for &value in &[0.0, 1e-200, 1.0, 1e100, -1e300] {
+                let lp = normal_normal_log_marginal(0.0, sigma, sigma, &[value, -value]).unwrap();
+                assert!(!lp.is_nan(), "sigma {sigma}, value {value}");
+                let lp =
+                    normal_inverse_gamma_log_marginal(0.0, sigma, sigma, sigma, &[value]).unwrap();
+                assert!(!lp.is_nan(), "nig {sigma}, value {value}");
+            }
+            let lp = gamma_poisson_log_marginal(sigma, sigma, &[0, 1, 1 << 40]).unwrap();
+            assert!(!lp.is_nan(), "gamma-poisson {sigma}");
+        }
     }
 }

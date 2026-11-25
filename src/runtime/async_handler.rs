@@ -2,7 +2,7 @@
 
 use crate::core::address::Address;
 use crate::core::distribution::Distribution;
-use crate::core::model::Model;
+use crate::core::model::{AddressedFactor, Model};
 use crate::runtime::handler::Handler;
 use crate::runtime::trace::Trace;
 
@@ -124,6 +124,18 @@ pub trait AsyncHandler {
     /// * `logw` - Log-weight to add to the model's total weight
     async fn on_factor(&mut self, logw: f64);
 
+    /// Handle a factor that carries an address, built by
+    /// [`factor_at`](crate::core::model::factor_at).
+    ///
+    /// Like [`Handler::on_factor_at`], this defaults to
+    /// `self.on_factor(logw).await`, so a handler that does not override it
+    /// scores an addressed factor as an anonymous one. [`FromSync`] forwards
+    /// to the wrapped handler's method, which keeps the address.
+    async fn on_factor_at(&mut self, addr: &Address, logw: f64) {
+        let _ = addr;
+        self.on_factor(logw).await
+    }
+
     /// Finalize the handler and return the accumulated trace.
     ///
     /// [`run_async`] awaits this once, after the model has returned its
@@ -220,6 +232,10 @@ impl<H: Handler> AsyncHandler for FromSync<H> {
         self.0.on_factor(logw)
     }
 
+    async fn on_factor_at(&mut self, addr: &Address, logw: f64) {
+        self.0.on_factor_at(addr, logw)
+    }
+
     async fn finish(self) -> Trace {
         self.0.finish()
     }
@@ -313,7 +329,14 @@ pub async fn run_async<A, H: AsyncHandler>(mut h: H, m: Model<A>) -> (A, Trace) 
                 value,
                 k,
             } => {
-                h.on_observe_f64(&addr, &*dist, value).await;
+                // As in `run`: an `AddressedFactor` observation is a factor.
+                // The weight is read out before the await, so the future
+                // holds an `f64`, not a borrow of the downcast.
+                let addressed = AddressedFactor::weight_of(&*dist);
+                match addressed {
+                    Some(logw) => h.on_factor_at(&addr, logw).await,
+                    None => h.on_observe_f64(&addr, &*dist, value).await,
+                }
                 k(())
             }
             Model::ObserveBool {

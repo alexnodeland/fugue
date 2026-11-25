@@ -19,6 +19,7 @@ src/
 │   ├── async_handler.rs # AsyncHandler trait and run_async (effects resolved by I/O)
 │   ├── handler.rs      # Handler trait and execution framework
 │   ├── interpreters.rs # Built-in model interpreters
+│   ├── record.rs       # Per-site observation/factor weight records
 │   └── trace.rs        # Execution history management
 ├── inference/          # Inference algorithms
 │   ├── mcmc/           # Markov Chain Monte Carlo
@@ -85,6 +86,7 @@ make bench
 **`conjugate.rs`** - Dirichlet, Multinomial and Conjugate Helpers
 
 - Log-space Dirichlet/multinomial densities, Dirichlet–multinomial and Beta–binomial marginals (count-vector and sequence versions), posterior updates and predictives
+- Normal–Normal (known variance), Normal-Inverse-Gamma and Gamma–Poisson marginals and posterior updates for real-valued and count data
 - `lnΓ` differences go through a Stirling-series difference (`ln_gamma_ratio`), never two large `lnΓ` values subtracted
 - `Dirichlet`/`Multinomial` are standalone `Distribution<Vec<_>>` types, not site types; `sample_dirichlet` builds a Dirichlet draw from K scalar Gamma sites
 
@@ -131,6 +133,12 @@ make bench
 - `ReplayHandler`: Deterministic replay with trace
 - `ScoreGivenTrace`: Compute log probabilities
 - Safe variants with enhanced error checking
+
+**`record.rs`** - Per-Site Weight Records
+
+- `RecordSites` wraps any handler and fills a `SiteWeights` (log-weight per observation address and per `factor_at` address); the inner trace is unchanged
+- `Trace` keeps only flat sums and is built with struct literals by callers, so attribution lives beside it, not in it
+- `factor_at` is stored as an `ObserveF64` node of an `AddressedFactor` (a `Model` variant would break exhaustive matches); `run`/`run_async` route it to `Handler::on_factor_at`, which defaults to `on_factor`
 
 **`trace.rs`** - Execution History
 

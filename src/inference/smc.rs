@@ -30,6 +30,22 @@
 //! - Real-time inference where new data arrives continuously
 //! - Situations where you need multiple diverse posterior samples
 //!
+//! ## Extending a population
+//!
+//! [`adaptive_smc`] runs one model from prior to posterior. When data arrives
+//! in batches, or the model itself is revised, [`smc_extend`] carries an
+//! existing weighted population to the new target in one reweight (plus a
+//! resample and rejuvenation when the weights degenerate) and returns the log
+//! ratio of the two evidences, so log evidence accumulates over epochs.
+//!
+//! ## How uncertain is the evidence?
+//!
+//! [`SMCResult::log_evidence`] is a point estimate. [`adaptive_smc_replicated`]
+//! runs the sampler several times and returns the pooled population with a
+//! [`LogEvidenceEstimate`]: the combined estimate and its standard error.
+//! [`log_evidence_estimate`] does the same arithmetic for replicate estimates
+//! obtained any other way.
+//!
 //! # Examples
 //!
 //! ```rust
@@ -1145,6 +1161,487 @@ pub fn decode_particles<A>(
         .iter()
         .map(|p| (decode_particle(p, &model_fn), p.weight))
         .collect()
+}
+
+/// Result of [`smc_extend`]: the population moved to a new target, and what
+/// the move says about the evidence.
+///
+/// The struct is `#[non_exhaustive]`: it cannot be built with a literal or
+/// matched exhaustively outside this crate, so fields can be added later
+/// without a breaking change (which [`SMCResult`], a plain struct, does not
+/// allow).
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct SMCExtension {
+    /// The population, weighted for the new target. Every trace has been
+    /// re-scored under the new model, so the population can be extended again.
+    pub particles: Vec<Particle>,
+    /// Estimate of `ln(Z_new / Z_old)`, the log ratio of the normalizing
+    /// constants of the new and old targets. When the new target conditions on
+    /// more data this is the log predictive probability of the added data,
+    /// `ln p(y_new | y_old)`, and adding it to the old log evidence gives the
+    /// new one. `-∞` if no particle has positive weight under the new target.
+    pub log_evidence_increment: f64,
+    /// Effective sample size after reweighting and before any resampling: the
+    /// measure of how well the old population covers the new target (between
+    /// 1 and the number of particles; `0.0` for an empty population).
+    pub ess: f64,
+    /// Whether the population was resampled (and, with
+    /// `rejuvenation_steps > 0`, rejuvenated). If so the weights are uniform.
+    pub resampled: bool,
+    /// Addresses the new model samples that some particle's trace did not
+    /// hold (or held with another value type), sorted. They were drawn from
+    /// their prior under the new model.
+    pub fresh_addresses: Vec<Address>,
+    /// Addresses some particle's trace held that the new model did not visit
+    /// (or visited with another value type), sorted. They were dropped.
+    pub vanished_addresses: Vec<Address>,
+}
+
+/// Sum of the stored `logp` of the choices of `trace` that are not in
+/// `excluded`, in address order.
+fn shared_log_prior(trace: &Trace, excluded: &std::collections::BTreeSet<&Address>) -> f64 {
+    trace
+        .choices
+        .iter()
+        .filter(|(addr, _)| !excluded.contains(addr))
+        .map(|(_, c)| c.logp)
+        .sum()
+}
+
+/// Move a weighted particle population from the target it was built for to a
+/// new one, and estimate the ratio of their normalizing constants.
+///
+/// [`adaptive_smc`] tempers the likelihood of one fixed model. This is the
+/// step *between* models: given a population that approximates an old
+/// posterior and the model that defines a new one, it reweights each particle
+/// by the ratio of the two unnormalized targets, resamples if the weights have
+/// degenerated, and optionally rejuvenates under the new target. The typical
+/// use is a new batch (an epoch) of data: `model_fn` is then the model
+/// conditioned on **all the data so far, the new batch included**, and the
+/// returned [`log_evidence_increment`](SMCExtension::log_evidence_increment)
+/// is `ln p(new batch | earlier data)`. The same call carries a population to
+/// a restructured model (after [`Trace::rename_prefix`] or
+/// [`Trace::map_addresses`], say), where the increment is the log Bayes
+/// factor of the new model against the old on the same data.
+///
+/// # What the particles must be
+///
+/// Each particle's trace must hold its score under the **old** target: the
+/// three accumulators and the per-choice `logp`, as left by any execution or
+/// re-score of the old model. That is the case for the output of
+/// [`adaptive_smc`], [`adaptive_smc_with_kernel`], [`smc_prior_particles`]
+/// and of `smc_extend` itself, and it survives `rename_prefix` /
+/// `map_addresses`, which keep both. A trace edited in any other way
+/// ([`Trace::insert_choice`], the prefix surgery) must be re-scored under the
+/// old model first. Weights are read from `log_weight` and need not be
+/// normalized.
+///
+/// # The step
+///
+/// 1. **Reweight.** Each trace is re-scored under `model_fn()` with
+///    [`score_given_trace_reconciled`](crate::runtime::interpreters::score_given_trace_reconciled).
+///    With `ℓ = log_likelihood + log_factors` and `π` the summed log-prior of
+///    the sites the old trace and the new model share, the incremental
+///    log-weight is `(ℓ_new + π_new) − (ℓ_old + π_old)`. When the shared
+///    sites keep their priors, `π_new − π_old` is exactly zero and the weight
+///    is the likelihood ratio; when the new model only adds observations, it
+///    is the likelihood of the added data. Sites the new model introduces are
+///    drawn from their prior, which cancels in the weight; sites it no longer
+///    visits are dropped, which is exact on the extended space (their old
+///    conditional prior is the backward kernel). Both sets are reported.
+/// 2. **Evidence.** The log of the weighted mean incremental weight is the
+///    increment. Summed over successive extensions of a population that
+///    started at the prior, the increments estimate the log evidence, as the
+///    ladder of [`adaptive_smc`] does; the product of the ratio estimates is
+///    unbiased for the evidence.
+/// 3. **Resample.** If the effective sample size falls below
+///    `config.ess_threshold · N`, the population is resampled with
+///    `config.resampling_method` and the weights become uniform. A threshold
+///    of `0.0` never resamples; `f64::INFINITY` always does.
+/// 4. **Rejuvenate.** After a resample, each particle takes
+///    `config.rejuvenation_steps` single-site MH moves that leave the new
+///    target invariant ([`rejuvenate_particles`] at `β = 1`). Without a
+///    resample nothing moves, as in `adaptive_smc`.
+///
+/// The reweighting is a single importance step, not a tempered bridge: the
+/// old model is not available to interpolate with. If
+/// [`ess`](SMCExtension::ess) comes back small, the new target is too far
+/// from the old one for the population; extend in smaller batches.
+///
+/// A particle whose old score is not finite has no weight under the old
+/// target and stays at weight zero. If every incremental weight is zero the
+/// increment is `-∞` and the population is returned re-scored with uniform
+/// weights, as [`adaptive_smc`] does at a zero-evidence step. An empty
+/// population returns an increment of `0.0`.
+///
+/// `config` is borrowed, since an extension is usually one of many.
+///
+/// # Errors
+///
+/// `FugueError::ModelError` with `AddressConflict` if `model_fn()` samples one
+/// address twice.
+///
+/// # Example
+///
+/// ```rust
+/// use fugue::*;
+/// use rand::rngs::StdRng;
+/// use rand::SeedableRng;
+///
+/// // A Normal mean with known noise, observed in two batches.
+/// fn model(data: Vec<f64>) -> Model<f64> {
+///     sample(addr!("mu"), Normal::new(0.0, 2.0).unwrap()).bind(move |mu| {
+///         traverse_vec(data.into_iter().enumerate().collect(), move |(i, y)| {
+///             observe(addr!("y", i), Normal::new(mu, 1.0).unwrap(), y)
+///         })
+///         .map(move |_| mu)
+///     })
+/// }
+/// let first = vec![0.9, 1.4, 0.2];
+/// let both = vec![0.9, 1.4, 0.2, 1.1, 0.7];
+///
+/// let mut rng = StdRng::seed_from_u64(7);
+/// let config = SMCConfig { rejuvenation_steps: 2, ..Default::default() };
+///
+/// // Posterior after the first batch ...
+/// let start = adaptive_smc(&mut rng, 2000, || model(first.clone()), SMCConfig::default());
+/// // ... extended with the second: the model now sees all the data.
+/// let step = smc_extend(&mut rng, start.particles, || model(both.clone()), &config).unwrap();
+///
+/// // The increments add up to the evidence of all the data.
+/// let estimate = start.log_evidence + step.log_evidence_increment;
+/// let exact = normal_normal_log_marginal(0.0, 2.0, 1.0, &both).unwrap();
+/// assert!((estimate - exact).abs() < 0.2);
+/// assert!(step.fresh_addresses.is_empty());
+/// ```
+pub fn smc_extend<A, R: Rng>(
+    rng: &mut R,
+    particles: Vec<Particle>,
+    model_fn: impl Fn() -> Model<A>,
+    config: &SMCConfig,
+) -> crate::error::FugueResult<SMCExtension> {
+    use crate::core::numerical::nan_to_neg_inf;
+    use crate::runtime::interpreters::score_given_trace_reconciled;
+    use std::collections::BTreeSet;
+
+    let n = particles.len();
+    if n == 0 {
+        return Ok(SMCExtension {
+            particles,
+            log_evidence_increment: 0.0,
+            ess: 0.0,
+            resampled: false,
+            fresh_addresses: Vec::new(),
+            vanished_addresses: Vec::new(),
+        });
+    }
+    let log_uniform = -(n as f64).ln();
+
+    // Incoming log-weights, as given (uniform if none is positive, the
+    // convention of `normalize_particles`). They are not normalized here: the
+    // increment below is a difference of two log-sums over the same weights,
+    // so a step whose incremental weights are all exactly one returns an
+    // increment of exactly zero.
+    let incoming: Vec<f64> = particles
+        .iter()
+        .map(|p| nan_to_neg_inf(p.log_weight))
+        .collect();
+    let incoming_norm = log_sum_exp(&incoming);
+    let (log_w_old, incoming_norm) = if incoming_norm.is_finite() {
+        (incoming, incoming_norm)
+    } else {
+        (vec![log_uniform; n], 0.0)
+    };
+
+    // Step 1: re-score every trace under the new model and form the
+    // incremental weights γ_new / γ_old.
+    let mut fresh: BTreeSet<Address> = BTreeSet::new();
+    let mut vanished: BTreeSet<Address> = BTreeSet::new();
+    let mut moved: Vec<Particle> = Vec::with_capacity(n);
+    let mut combined: Vec<f64> = Vec::with_capacity(n);
+    for (particle, lw_old) in particles.into_iter().zip(&log_w_old) {
+        let old = particle.trace;
+        let old_loglik = particle_log_likelihood(&old);
+        let old_choices: Vec<(Address, f64)> = old
+            .choices
+            .iter()
+            .map(|(a, c)| (a.clone(), c.logp))
+            .collect();
+        let (_, new, report) = score_given_trace_reconciled(old, rng, model_fn())?;
+
+        // Sets, not the report's vectors: a revision that changes S sites
+        // would otherwise cost O(S) per choice, O(S^2) per particle.
+        let vanished_here: BTreeSet<&Address> = report.vanished_addresses.iter().collect();
+        let fresh_here: BTreeSet<&Address> = report.fresh_addresses.iter().collect();
+        let old_shared: f64 = old_choices
+            .iter()
+            .filter(|(a, _)| !vanished_here.contains(a))
+            .map(|(_, lp)| *lp)
+            .sum();
+        let new_shared = shared_log_prior(&new, &fresh_here);
+        let old_score = old_loglik + old_shared;
+        let increment = if old_score.is_finite() {
+            nan_to_neg_inf((particle_log_likelihood(&new) - old_loglik) + (new_shared - old_shared))
+        } else {
+            // No weight under the old target: nothing to carry over.
+            f64::NEG_INFINITY
+        };
+        combined.push(nan_to_neg_inf(lw_old + increment));
+
+        fresh.extend(report.fresh_addresses);
+        vanished.extend(report.vanished_addresses);
+        moved.push(Particle {
+            trace: new,
+            weight: 0.0,
+            log_weight: 0.0,
+        });
+    }
+
+    // Step 2: the incremental evidence is the weighted mean incremental
+    // weight, Σ wᵢ·uᵢ / Σ wᵢ.
+    let combined_norm = log_sum_exp(&combined);
+    let log_evidence_increment = combined_norm - incoming_norm;
+    let log_w: Vec<f64> = if combined_norm.is_finite() {
+        combined.iter().map(|c| c - combined_norm).collect()
+    } else {
+        vec![log_uniform; n]
+    };
+    for (p, lw) in moved.iter_mut().zip(&log_w) {
+        p.log_weight = *lw;
+        p.weight = lw.exp();
+    }
+    let ess = if combined_norm.is_finite() {
+        let squared: Vec<f64> = log_w.iter().map(|lw| 2.0 * lw).collect();
+        (-log_sum_exp(&squared)).exp()
+    } else {
+        n as f64
+    };
+
+    // Steps 3 and 4: resample when the weights have degenerated, then move.
+    // A population with no surviving particle is returned as it is: there is
+    // nothing to resample towards.
+    let resampled = combined_norm.is_finite() && ess < config.ess_threshold * n as f64;
+    if resampled {
+        moved = resample_particles(rng, &moved, config.resampling_method);
+        rejuvenate_particles(rng, &mut moved, &model_fn, 1.0, config.rejuvenation_steps);
+    }
+
+    Ok(SMCExtension {
+        particles: moved,
+        log_evidence_increment,
+        ess,
+        resampled,
+        fresh_addresses: fresh.into_iter().collect(),
+        vanished_addresses: vanished.into_iter().collect(),
+    })
+}
+
+/// A log-evidence estimate with a standard error, from independent replicate
+/// estimates. Built by [`log_evidence_estimate`] and
+/// [`adaptive_smc_replicated`].
+///
+/// [`SMCResult`] carries a point estimate only. It is a plain struct with
+/// public fields that callers build with a literal (this crate's own doc
+/// examples do), so a `std_error` field could not be added to it without
+/// breaking them; the standard error therefore lives in this separate,
+/// `#[non_exhaustive]` type.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct LogEvidenceEstimate {
+    /// Log of the mean of the replicate evidence estimates,
+    /// `ln((1/R)·Σᵣ Ẑᵣ)`. Each SMC evidence estimate `Ẑᵣ` is unbiased for the
+    /// evidence, so their mean is too, with `R` times less variance.
+    pub log_evidence: f64,
+    /// Standard error of `log_evidence`: the relative standard error of the
+    /// mean of the `Ẑᵣ` (the delta method). `NaN` when `log_evidence` is
+    /// `-∞`, where it is undefined.
+    pub std_error: f64,
+    /// The replicate log-evidence estimates `ln Ẑᵣ` the summary was built
+    /// from, in the order given (a `NaN` input is stored as `-∞`).
+    pub replicates: Vec<f64>,
+}
+
+/// Combine independent log-evidence estimates into one estimate with a
+/// standard error.
+///
+/// Give it the `log_evidence` of `R ≥ 2` independent runs of the same
+/// estimator on the same model and data ([`adaptive_smc`] runs, or sums of
+/// [`smc_extend`] increments along independent populations). It returns
+///
+/// ```text
+/// log_evidence = ln Z̄,              Z̄ = (1/R)·Σᵣ Ẑᵣ
+/// std_error    = sd(Ẑᵣ) / (Z̄·√R)    (sample standard deviation, R − 1)
+/// ```
+///
+/// computed in log space, so evidences far outside the range of `f64` are
+/// fine. The standard error is that of `ln Z̄` by the delta method, which is
+/// accurate when it is small (a few tenths or less). Two things to keep in
+/// mind when it is not: `ln Z̄` is biased low by about `std_error² / 2`
+/// (Jensen), and evidence estimates are right-skewed, so a handful of
+/// replicates can miss the rare large ones and report an error that is too
+/// small. A large standard error is a reason to use more particles, not to
+/// trust the interval.
+///
+/// # Errors
+///
+/// `FugueError::InvalidParameters` (`InvalidCount`) for fewer than two
+/// replicates: one estimate has no spread to measure.
+///
+/// # Example
+///
+/// ```rust
+/// # use fugue::*;
+/// // Two runs that estimated Z as 1 and as 3: the mean is 2 ...
+/// let estimate = log_evidence_estimate(&[0.0, 3.0f64.ln()]).unwrap();
+/// assert!((estimate.log_evidence - 2.0f64.ln()).abs() < 1e-12);
+/// // ... and sd / (mean·√R) = √2 / (2·√2) = 0.5.
+/// assert!((estimate.std_error - 0.5).abs() < 1e-12);
+///
+/// // Only ratios matter, so tiny evidences are no harder.
+/// let tiny = log_evidence_estimate(&[-5000.0, -5000.0 + 3.0f64.ln()]).unwrap();
+/// assert!((tiny.std_error - 0.5).abs() < 1e-12);
+/// ```
+pub fn log_evidence_estimate(
+    log_evidences: &[f64],
+) -> crate::error::FugueResult<LogEvidenceEstimate> {
+    use crate::core::numerical::nan_to_neg_inf;
+    let r = log_evidences.len();
+    if r < 2 {
+        return Err(crate::error::FugueError::invalid_parameters(
+            "LogEvidenceEstimate",
+            "A standard error needs at least two replicate estimates",
+            crate::error::ErrorCode::InvalidCount,
+        )
+        .with_context("replicates", r.to_string())
+        .with_context("expected", ">= 2"));
+    }
+    let replicates: Vec<f64> = log_evidences.iter().map(|&l| nan_to_neg_inf(l)).collect();
+    let log_evidence = log_sum_exp(&replicates) - (r as f64).ln();
+    let std_error = if log_evidence.is_finite() {
+        // Each replicate relative to the mean: Ẑᵣ / Z̄, at most R.
+        let sum_sq: f64 = replicates
+            .iter()
+            .map(|l| ((l - log_evidence).exp() - 1.0).powi(2))
+            .sum();
+        (sum_sq / (r as f64 - 1.0) / r as f64).sqrt()
+    } else {
+        f64::NAN
+    };
+    Ok(LogEvidenceEstimate {
+        log_evidence,
+        std_error,
+        replicates,
+    })
+}
+
+/// Run [`adaptive_smc`] `replicates` times and return the pooled population
+/// with a log-evidence estimate that has a standard error.
+///
+/// The runs are independent (they draw from `rng` one after another) and each
+/// uses `num_particles` particles, so the cost is `replicates` runs. Nothing
+/// is thrown away:
+///
+/// - the returned [`SMCResult`] holds all `replicates · num_particles`
+///   particles, each run's population weighted by that run's evidence
+///   estimate (the weighting under which independent SMC populations combine
+///   into one consistent posterior approximation), with weights normalized
+///   over the pool, and `log_evidence` equal to the combined estimate;
+/// - the [`LogEvidenceEstimate`] carries that estimate, its standard error
+///   and the per-run values. See [`log_evidence_estimate`] for how they are
+///   formed and how far to trust the error.
+///
+/// This is a replicate ("batch") estimate. A single-run variance estimate
+/// would need the ancestry of the particles through every resampling step,
+/// which neither [`Particle`] nor [`SMCResult`] records.
+///
+/// `config` is borrowed and applied to every run.
+///
+/// # Errors
+///
+/// `FugueError::InvalidParameters` (`InvalidCount`) if `replicates < 2` or
+/// `num_particles == 0`.
+///
+/// # Example
+///
+/// ```rust
+/// use fugue::*;
+/// use rand::rngs::StdRng;
+/// use rand::SeedableRng;
+///
+/// let data = [0.9, 1.4, 0.2, 1.1];
+/// let model_fn = || {
+///     sample(addr!("mu"), Normal::new(0.0, 2.0).unwrap()).bind(move |mu| {
+///         traverse_vec(data.iter().copied().enumerate().collect(), move |(i, y)| {
+///             observe(addr!("y", i), Normal::new(mu, 1.0).unwrap(), y)
+///         })
+///         .map(move |_| mu)
+///     })
+/// };
+///
+/// let mut rng = StdRng::seed_from_u64(11);
+/// let (pooled, evidence) =
+///     adaptive_smc_replicated(&mut rng, 500, 8, model_fn, &SMCConfig::default()).unwrap();
+///
+/// assert_eq!(pooled.len(), 8 * 500);
+/// assert_eq!(evidence.replicates.len(), 8);
+/// // The closed form is within a few standard errors.
+/// let exact = normal_normal_log_marginal(0.0, 2.0, 1.0, &data).unwrap();
+/// assert!((evidence.log_evidence - exact).abs() < 5.0 * evidence.std_error);
+/// assert!(evidence.std_error < 0.1);
+/// ```
+pub fn adaptive_smc_replicated<A, R: Rng>(
+    rng: &mut R,
+    num_particles: usize,
+    replicates: usize,
+    model_fn: impl Fn() -> Model<A>,
+    config: &SMCConfig,
+) -> crate::error::FugueResult<(SMCResult, LogEvidenceEstimate)> {
+    if num_particles == 0 {
+        return Err(crate::error::FugueError::invalid_parameters(
+            "adaptive_smc_replicated",
+            "An evidence estimate needs at least one particle",
+            crate::error::ErrorCode::InvalidCount,
+        )
+        .with_context("num_particles", "0"));
+    }
+    let mut log_evidences = Vec::with_capacity(replicates);
+    let mut runs: Vec<Vec<Particle>> = Vec::with_capacity(replicates);
+    for _ in 0..replicates {
+        let run_config = SMCConfig {
+            resampling_method: config.resampling_method,
+            ess_threshold: config.ess_threshold,
+            rejuvenation_steps: config.rejuvenation_steps,
+        };
+        let result = adaptive_smc(rng, num_particles, &model_fn, run_config);
+        log_evidences.push(result.log_evidence);
+        runs.push(result.particles);
+    }
+    let estimate = log_evidence_estimate(&log_evidences)?;
+
+    // Pool: a particle of run r with normalized weight w gets weight
+    // ∝ Ẑᵣ·w. With every Ẑᵣ zero there is nothing to prefer: uniform.
+    let total = log_sum_exp(&estimate.replicates);
+    let pool_size = (replicates * num_particles) as f64;
+    let mut particles = Vec::with_capacity(replicates * num_particles);
+    for (run, log_z) in runs.into_iter().zip(&estimate.replicates) {
+        for mut p in run {
+            p.log_weight = if total.is_finite() {
+                p.log_weight + log_z - total
+            } else {
+                -pool_size.ln()
+            };
+            p.weight = p.log_weight.exp();
+            particles.push(p);
+        }
+    }
+    Ok((
+        SMCResult {
+            particles,
+            log_evidence: estimate.log_evidence,
+        },
+        estimate,
+    ))
 }
 
 #[cfg(test)]
